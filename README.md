@@ -27,12 +27,12 @@ cargo build --release
 cargo run --release -- run-pipeline \
   --db data/node0.duckdb \
   --input-dir jsonraw \
-  --node-secret-file /path/to/node_secret.txt \
-  --hospital-count 3 \
-  --hospital-index 0
+  --node-secret-file /path/to/node_secret.txt
 ```
 
 Alternative (less secure than file): set `REFINERY_NODE_SECRET` env var.
+
+Each Refinery instance is a single isolated hospital node. For multi-hospital runs, launch separate instances with different `--db` and `--input-dir` values (one dataset per hospital), then federate outputs at orchestration time.
 
 Optional subset mode for faster tests:
 
@@ -89,4 +89,4 @@ See sample parameter files in `examples/queries/`.
 ## Current limitations
 
 - Pharmacovigilance uses proxy event definitions via `Condition` (Synthea export has no `AdverseEvent` resources in this dataset).
-- SMPC federation orchestration is planned next; current version is node-local with policy-gated release.
+- SMPC federation orchestration is planned next; current version is node-local with policy-gated release only.

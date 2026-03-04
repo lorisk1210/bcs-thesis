@@ -125,15 +125,6 @@ pub fn pseudonymize_patient_id(secret: &str, raw_id: &str) -> Option<String> {
     Some(hex::encode(bytes))
 }
 
-pub fn hospital_bucket(pseudo_id: &str, hospital_count: u32) -> u32 {
-    if hospital_count <= 1 {
-        return 0;
-    }
-    let prefix = &pseudo_id[..pseudo_id.len().min(16)];
-    let hash_part = u64::from_str_radix(prefix, 16).unwrap_or(0);
-    (hash_part % hospital_count as u64) as u32
-}
-
 pub fn sanitize_code_literal(raw: &str) -> Option<String> {
     if raw.is_empty() {
         return None;

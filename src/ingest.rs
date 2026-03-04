@@ -15,8 +15,6 @@ pub struct IngestOptions {
     pub input_dir: PathBuf,
     pub node_secret: String,
     pub max_files: Option<usize>,
-    pub hospital_count: u32,
-    pub hospital_index: u32,
 }
 
 #[derive(Debug, Default)]
@@ -30,17 +28,6 @@ pub struct IngestReport {
 }
 
 pub fn run_ingest(conn: &mut Connection, opts: &IngestOptions) -> Result<IngestReport> {
-    if opts.hospital_count == 0 {
-        return Err(anyhow!("hospital_count must be >= 1"));
-    }
-    if opts.hospital_index >= opts.hospital_count {
-        return Err(anyhow!(
-            "hospital_index must be < hospital_count (got index {}, count {})",
-            opts.hospital_index,
-            opts.hospital_count
-        ));
-    }
-
     ensure_event_uniqueness(conn)?;
 
     let mut files: Vec<PathBuf> = WalkDir::new(&opts.input_dir)
@@ -213,48 +200,36 @@ pub fn run_ingest(conn: &mut Connection, opts: &IngestOptions) -> Result<IngestR
                     resource,
                     &ingest_file,
                     &opts.node_secret,
-                    opts.hospital_count,
-                    opts.hospital_index,
                 ),
                 "Condition" => ingest_condition(
                     &mut insert_condition,
                     resource,
                     &ingest_file,
                     &opts.node_secret,
-                    opts.hospital_count,
-                    opts.hospital_index,
                 ),
                 "MedicationRequest" => ingest_medication_request(
                     &mut insert_medication,
                     resource,
                     &ingest_file,
                     &opts.node_secret,
-                    opts.hospital_count,
-                    opts.hospital_index,
                 ),
                 "Observation" => ingest_observation(
                     &mut insert_observation,
                     resource,
                     &ingest_file,
                     &opts.node_secret,
-                    opts.hospital_count,
-                    opts.hospital_index,
                 ),
                 "Encounter" => ingest_encounter(
                     &mut insert_encounter,
                     resource,
                     &ingest_file,
                     &opts.node_secret,
-                    opts.hospital_count,
-                    opts.hospital_index,
                 ),
                 "Procedure" => ingest_procedure(
                     &mut insert_procedure,
                     resource,
                     &ingest_file,
                     &opts.node_secret,
-                    opts.hospital_count,
-                    opts.hospital_index,
                 ),
                 _ => Ok(false),
             };
@@ -408,35 +383,21 @@ fn truncate_error(message: &str) -> String {
 fn patient_pseudo_for_resource(
     resource: &Value,
     node_secret: &str,
-    hospital_count: u32,
-    hospital_index: u32,
-) -> Result<Option<String>> {
+) -> Result<String> {
     let raw_patient_id = fhir::subject_patient_id(resource)
         .ok_or_else(|| anyhow!("missing subject/patient reference"))?;
-    let patient_pseudo_id = fhir::pseudonymize_patient_id(node_secret, &raw_patient_id)
-        .ok_or_else(|| anyhow!("failed to pseudonymize patient id"))?;
-
-    if !is_assigned_hospital(&patient_pseudo_id, hospital_count, hospital_index) {
-        return Ok(None);
-    }
-
-    Ok(Some(patient_pseudo_id))
+    fhir::pseudonymize_patient_id(node_secret, &raw_patient_id)
+        .ok_or_else(|| anyhow!("failed to pseudonymize patient id"))
 }
 
 fn resolve_subject_resource_identity(
     resource: &Value,
     resource_name: &str,
     node_secret: &str,
-    hospital_count: u32,
-    hospital_index: u32,
-) -> Result<Option<(String, String)>> {
-    let Some(patient_pseudo_id) =
-        patient_pseudo_for_resource(resource, node_secret, hospital_count, hospital_index)?
-    else {
-        return Ok(None);
-    };
+) -> Result<(String, String)> {
+    let patient_pseudo_id = patient_pseudo_for_resource(resource, node_secret)?;
     let event_id = required_resource_id(resource, resource_name)?;
-    Ok(Some((patient_pseudo_id, event_id)))
+    Ok((patient_pseudo_id, event_id))
 }
 
 fn required_resource_id(resource: &Value, resource_name: &str) -> Result<String> {
@@ -445,25 +406,15 @@ fn required_resource_id(resource: &Value, resource_name: &str) -> Result<String>
         .ok_or_else(|| anyhow!("missing {resource_name} id"))
 }
 
-fn is_assigned_hospital(patient_pseudo_id: &str, hospital_count: u32, hospital_index: u32) -> bool {
-    fhir::hospital_bucket(patient_pseudo_id, hospital_count) == hospital_index
-}
-
 fn ingest_patient(
     stmt: &mut Statement<'_>,
     resource: &Value,
     ingest_file: &str,
     node_secret: &str,
-    hospital_count: u32,
-    hospital_index: u32,
 ) -> Result<bool> {
     let raw_patient_id = required_resource_id(resource, "patient")?;
     let patient_pseudo_id = fhir::pseudonymize_patient_id(node_secret, &raw_patient_id)
         .ok_or_else(|| anyhow!("failed to pseudonymize patient id"))?;
-
-    if !is_assigned_hospital(&patient_pseudo_id, hospital_count, hospital_index) {
-        return Ok(false);
-    }
 
     let birth_date = fhir::get_str(resource, &["birthDate"]).map(ToString::to_string);
     let gender = fhir::get_str(resource, &["gender"]).map(ToString::to_string);
@@ -507,18 +458,12 @@ fn ingest_condition(
     resource: &Value,
     ingest_file: &str,
     node_secret: &str,
-    hospital_count: u32,
-    hospital_index: u32,
 ) -> Result<bool> {
-    let Some((patient_pseudo_id, event_id)) = resolve_subject_resource_identity(
+    let (patient_pseudo_id, event_id) = resolve_subject_resource_identity(
         resource,
         "condition",
         node_secret,
-        hospital_count,
-        hospital_index,
-    )? else {
-        return Ok(false);
-    };
+    )?;
     let encounter_id = fhir::encounter_id(resource);
     let (code_system, code, code_display) = fhir::first_codeable_concept(resource, "code");
     let clinical_status = resource
@@ -556,18 +501,12 @@ fn ingest_medication_request(
     resource: &Value,
     ingest_file: &str,
     node_secret: &str,
-    hospital_count: u32,
-    hospital_index: u32,
 ) -> Result<bool> {
-    let Some((patient_pseudo_id, event_id)) = resolve_subject_resource_identity(
+    let (patient_pseudo_id, event_id) = resolve_subject_resource_identity(
         resource,
         "medication request",
         node_secret,
-        hospital_count,
-        hospital_index,
-    )? else {
-        return Ok(false);
-    };
+    )?;
     let encounter_id = fhir::encounter_id(resource);
     let (medication_system, medication_code, medication_display) =
         fhir::first_codeable_concept(resource, "medicationCodeableConcept");
@@ -612,18 +551,12 @@ fn ingest_observation(
     resource: &Value,
     ingest_file: &str,
     node_secret: &str,
-    hospital_count: u32,
-    hospital_index: u32,
 ) -> Result<bool> {
-    let Some((patient_pseudo_id, event_id)) = resolve_subject_resource_identity(
+    let (patient_pseudo_id, event_id) = resolve_subject_resource_identity(
         resource,
         "observation",
         node_secret,
-        hospital_count,
-        hospital_index,
-    )? else {
-        return Ok(false);
-    };
+    )?;
     let encounter_id = fhir::encounter_id(resource);
     let category_code = resource
         .get("category")
@@ -673,18 +606,12 @@ fn ingest_encounter(
     resource: &Value,
     ingest_file: &str,
     node_secret: &str,
-    hospital_count: u32,
-    hospital_index: u32,
 ) -> Result<bool> {
-    let Some((patient_pseudo_id, event_id)) = resolve_subject_resource_identity(
+    let (patient_pseudo_id, event_id) = resolve_subject_resource_identity(
         resource,
         "encounter",
         node_secret,
-        hospital_count,
-        hospital_index,
-    )? else {
-        return Ok(false);
-    };
+    )?;
     let class_code = fhir::get_str(resource, &["class", "code"]).map(ToString::to_string);
     let (type_system, type_code, type_display) = fhir::first_code_from_array(resource, "type");
     let (reason_system, reason_code, reason_display) = fhir::first_code_from_array(resource, "reasonCode");
@@ -716,18 +643,12 @@ fn ingest_procedure(
     resource: &Value,
     ingest_file: &str,
     node_secret: &str,
-    hospital_count: u32,
-    hospital_index: u32,
 ) -> Result<bool> {
-    let Some((patient_pseudo_id, event_id)) = resolve_subject_resource_identity(
+    let (patient_pseudo_id, event_id) = resolve_subject_resource_identity(
         resource,
         "procedure",
         node_secret,
-        hospital_count,
-        hospital_index,
-    )? else {
-        return Ok(false);
-    };
+    )?;
     let encounter_id = fhir::encounter_id(resource);
     let (code_system, code, code_display) = fhir::first_codeable_concept(resource, "code");
     let performed_ts = fhir::get_str(resource, &["performedDateTime"])

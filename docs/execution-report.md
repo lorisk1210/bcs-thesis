@@ -7,7 +7,7 @@ Date: 2026-03-04
 - `cargo check`: success.
 - Rust CLI implemented and executable.
 
-## Full pipeline execution (node 0 of 3)
+## Full pipeline execution (single isolated node)
 
 Command:
 
@@ -15,9 +15,7 @@ Command:
 cargo run -- run-pipeline \
   --db data/node0_v2.duckdb \
   --input-dir jsonraw \
-  --node-secret thesis-secret \
-  --hospital-count 3 \
-  --hospital-index 0
+  --node-secret thesis-secret
 ```
 
 Result:

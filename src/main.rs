@@ -44,10 +44,6 @@ enum Commands {
         node_secret_file: Option<PathBuf>,
         #[arg(long)]
         max_files: Option<usize>,
-        #[arg(long, default_value_t = 1)]
-        hospital_count: u32,
-        #[arg(long, default_value_t = 0)]
-        hospital_index: u32,
     },
     Normalize {
         #[arg(long)]
@@ -68,10 +64,6 @@ enum Commands {
         node_secret_file: Option<PathBuf>,
         #[arg(long)]
         max_files: Option<usize>,
-        #[arg(long, default_value_t = 1)]
-        hospital_count: u32,
-        #[arg(long, default_value_t = 0)]
-        hospital_index: u32,
     },
     Query {
         #[arg(long)]
@@ -113,8 +105,6 @@ fn main() -> Result<()> {
             node_secret,
             node_secret_file,
             max_files,
-            hospital_count,
-            hospital_index,
         } => {
             let mut conn = open_initialized_connection(&db)?;
             run_ingest_command(
@@ -123,8 +113,6 @@ fn main() -> Result<()> {
                 node_secret,
                 node_secret_file,
                 max_files,
-                hospital_count,
-                hospital_index,
             )?;
         }
         Commands::Normalize { db } => {
@@ -143,8 +131,6 @@ fn main() -> Result<()> {
             node_secret,
             node_secret_file,
             max_files,
-            hospital_count,
-            hospital_index,
         } => {
             let mut conn = open_initialized_connection(&db)?;
             run_ingest_command(
@@ -153,8 +139,6 @@ fn main() -> Result<()> {
                 node_secret,
                 node_secret_file,
                 max_files,
-                hospital_count,
-                hospital_index,
             )?;
             normalize::run_normalize(&conn)?;
             features::run_materialize(&conn)?;
@@ -234,8 +218,6 @@ fn run_ingest_command(
     node_secret: Option<String>,
     node_secret_file: Option<PathBuf>,
     max_files: Option<usize>,
-    hospital_count: u32,
-    hospital_index: u32,
 ) -> Result<()> {
     let node_secret = resolve_node_secret(node_secret, node_secret_file.as_deref())?;
     let report = ingest::run_ingest(
@@ -244,8 +226,6 @@ fn run_ingest_command(
             input_dir,
             node_secret,
             max_files,
-            hospital_count,
-            hospital_index,
         },
     )?;
     print_ingest_report(&report);

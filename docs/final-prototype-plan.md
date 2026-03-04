@@ -49,9 +49,8 @@ Node-local stages:
    - Apply DP noise before release.
 
 Federated simulation:
-- Split patients into N simulated hospitals by hash bucket on pseudonymized id.
-- Run per-node local pipelines and query execution.
-- Aggregate node outputs (SMPC-style additive shares can be added in next increment).
+- Run one pipeline instance per hospital dataset (one isolated node per `input_dir`/DB pair).
+- Aggregate node outputs at orchestration time (SMPC-style additive shares can be added in next increment).
 
 ## 4) Query scope mapped to Section 3
 
