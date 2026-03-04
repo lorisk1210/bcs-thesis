@@ -297,6 +297,10 @@ pub fn run_ingest(conn: &mut Connection, opts: &IngestOptions) -> Result<IngestR
 }
 
 fn ensure_event_uniqueness(conn: &Connection) -> Result<()> {
+    if event_indexes_present(conn)? {
+        return Ok(());
+    }
+
     conn.execute_batch(
         r#"
         CREATE OR REPLACE TABLE bronze_condition AS
@@ -342,6 +346,28 @@ fn ensure_event_uniqueness(conn: &Connection) -> Result<()> {
         "#,
     )?;
     Ok(())
+}
+
+fn event_indexes_present(conn: &Connection) -> Result<bool> {
+    let required_indexes = [
+        "idx_bronze_condition_event_id",
+        "idx_bronze_medication_event_id",
+        "idx_bronze_observation_event_id",
+        "idx_bronze_encounter_event_id",
+        "idx_bronze_procedure_event_id",
+    ];
+
+    for idx in required_indexes {
+        let exists: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM duckdb_indexes() WHERE index_name = ?1",
+            [idx],
+            |row| row.get(0),
+        )?;
+        if exists == 0 {
+            return Ok(false);
+        }
+    }
+    Ok(true)
 }
 
 fn display_path(path: &Path) -> String {

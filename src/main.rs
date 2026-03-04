@@ -7,7 +7,7 @@ mod privacy;
 mod query;
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow};
 use clap::{Parser, Subcommand};
@@ -39,7 +39,9 @@ enum Commands {
         #[arg(long)]
         input_dir: PathBuf,
         #[arg(long)]
-        node_secret: String,
+        node_secret: Option<String>,
+        #[arg(long)]
+        node_secret_file: Option<PathBuf>,
         #[arg(long)]
         max_files: Option<usize>,
         #[arg(long, default_value_t = 1)]
@@ -61,7 +63,9 @@ enum Commands {
         #[arg(long)]
         input_dir: PathBuf,
         #[arg(long)]
-        node_secret: String,
+        node_secret: Option<String>,
+        #[arg(long)]
+        node_secret_file: Option<PathBuf>,
         #[arg(long)]
         max_files: Option<usize>,
         #[arg(long, default_value_t = 1)]
@@ -108,12 +112,14 @@ fn main() -> Result<()> {
             db,
             input_dir,
             node_secret,
+            node_secret_file,
             max_files,
             hospital_count,
             hospital_index,
         } => {
             let mut conn = db::open_connection(&db)?;
             db::init_schema(&conn)?;
+            let node_secret = resolve_node_secret(node_secret, node_secret_file.as_deref())?;
             let report = ingest::run_ingest(
                 &mut conn,
                 &IngestOptions {
@@ -142,12 +148,14 @@ fn main() -> Result<()> {
             db,
             input_dir,
             node_secret,
+            node_secret_file,
             max_files,
             hospital_count,
             hospital_index,
         } => {
             let mut conn = db::open_connection(&db)?;
             db::init_schema(&conn)?;
+            let node_secret = resolve_node_secret(node_secret, node_secret_file.as_deref())?;
             let report = ingest::run_ingest(
                 &mut conn,
                 &IngestOptions {
@@ -225,6 +233,40 @@ fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+fn resolve_node_secret(
+    cli_secret: Option<String>,
+    secret_file: Option<&Path>,
+) -> Result<String> {
+    if let Some(path) = secret_file {
+        let raw = fs::read_to_string(path)
+            .with_context(|| format!("failed to read node secret file {}", path.display()))?;
+        let secret = raw.trim().to_string();
+        if secret.is_empty() {
+            return Err(anyhow!("node secret file is empty"));
+        }
+        return Ok(secret);
+    }
+
+    if let Some(secret) = cli_secret {
+        if !secret.is_empty() {
+            eprintln!(
+                "warning: --node-secret exposes the secret in shell history/process list; prefer --node-secret-file or REFINERY_NODE_SECRET"
+            );
+            return Ok(secret);
+        }
+    }
+
+    if let Ok(secret) = std::env::var("REFINERY_NODE_SECRET") {
+        if !secret.trim().is_empty() {
+            return Ok(secret.trim().to_string());
+        }
+    }
+
+    Err(anyhow!(
+        "node secret missing; provide --node-secret-file, --node-secret, or REFINERY_NODE_SECRET"
+    ))
 }
 
 fn load_params(params_file: &PathBuf) -> Result<Value> {

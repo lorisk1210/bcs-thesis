@@ -27,10 +27,12 @@ cargo build --release
 cargo run --release -- run-pipeline \
   --db data/node0.duckdb \
   --input-dir jsonraw \
-  --node-secret "change-me" \
+  --node-secret-file /path/to/node_secret.txt \
   --hospital-count 3 \
   --hospital-index 0
 ```
+
+Alternative (less secure than file): set `REFINERY_NODE_SECRET` env var.
 
 Optional subset mode for faster tests:
 
@@ -38,7 +40,7 @@ Optional subset mode for faster tests:
 cargo run --release -- run-pipeline \
   --db data/node0_sample.duckdb \
   --input-dir jsonraw \
-  --node-secret "change-me" \
+  --node-secret-file /path/to/node_secret.txt \
   --max-files 40
 ```
 
@@ -81,6 +83,8 @@ See sample parameter files in `examples/queries/`.
 - Output release is blocked if cohort size is below threshold.
 - Budget is enforced across releases in `privacy_releases`.
 - If `min_age` or `max_age` filters are used, patients with unknown birth date are excluded.
+- `time-to-event-proxy` releases noised count + noised mean only (median omitted due to DP sensitivity constraints).
+- AE/DDI templates release noised incidences; risk ratios should be derived client-side from released incidences.
 
 ## Current limitations
 

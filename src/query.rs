@@ -228,14 +228,13 @@ fn execute_time_to_event(conn: &Connection, template: QueryTemplate, params: &Va
         )
         SELECT
             COUNT(*)::BIGINT,
-            AVG(days_to_event),
-            MEDIAN(days_to_event)
+            AVG(days_to_event)
         FROM joined
         "#
     );
 
-    let (n, mean_days, median_days): (i64, Option<f64>, Option<f64>) =
-        conn.query_row(&sql, [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?;
+    let (n, mean_days): (i64, Option<f64>) =
+        conn.query_row(&sql, [], |row| Ok((row.get(0)?, row.get(1)?)))?;
 
     let cohort_size = n.max(0) as usize;
     let sensitivity = max_days as f64 / (cohort_size.max(1) as f64);
@@ -244,8 +243,7 @@ fn execute_time_to_event(conn: &Connection, template: QueryTemplate, params: &Va
         template_name: template.as_str().to_string(),
         raw_result: json!({
             "n": cohort_size,
-            "mean_days_to_event": mean_days,
-            "median_days_to_event": median_days
+            "mean_days_to_event": mean_days
         }),
         cohort_size,
         sensitivity,
@@ -506,11 +504,6 @@ fn execute_ae_signal(conn: &Connection, template: QueryTemplate, params: &Value)
         }
     }
 
-    let risk_ratio = match (inc_exposed, inc_control) {
-        (Some(exp), Some(ctrl)) if ctrl > 0.0 => Some(exp / ctrl),
-        _ => None,
-    };
-
     let cohort_size = n_exposed + n_control;
 
     Ok(QueryResult {
@@ -519,8 +512,7 @@ fn execute_ae_signal(conn: &Connection, template: QueryTemplate, params: &Value)
             "n_exposed": n_exposed,
             "n_control": n_control,
             "incidence_exposed": inc_exposed,
-            "incidence_control": inc_control,
-            "risk_ratio": risk_ratio
+            "incidence_control": inc_control
         }),
         cohort_size,
         sensitivity: 1.0 / cohort_size.max(1) as f64,
@@ -593,11 +585,6 @@ fn execute_ddi_signal(conn: &Connection, template: QueryTemplate, params: &Value
         }
     }
 
-    let risk_ratio = match (inc_combo, inc_a_only) {
-        (Some(combo), Some(a_only)) if a_only > 0.0 => Some(combo / a_only),
-        _ => None,
-    };
-
     let cohort_size = n_combo + n_a_only;
 
     Ok(QueryResult {
@@ -606,8 +593,7 @@ fn execute_ddi_signal(conn: &Connection, template: QueryTemplate, params: &Value
             "n_combo": n_combo,
             "n_a_only": n_a_only,
             "incidence_combo": inc_combo,
-            "incidence_a_only": inc_a_only,
-            "risk_ratio": risk_ratio
+            "incidence_a_only": inc_a_only
         }),
         cohort_size,
         sensitivity: 1.0 / cohort_size.max(1) as f64,

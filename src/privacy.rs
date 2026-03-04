@@ -102,12 +102,15 @@ pub fn enforce_and_release(
     }
 
     let mut noisy_result = query_result.raw_result.clone();
+    let noised_metric_count = count_noised_metrics(&noisy_result, None).max(1);
+    let epsilon_per_metric = config.epsilon / noised_metric_count as f64;
+
     let value_scale = if query_result.sensitivity <= 0.0 {
         0.0
     } else {
-        query_result.sensitivity / config.epsilon
+        query_result.sensitivity / epsilon_per_metric
     };
-    let count_scale = 1.0 / config.epsilon;
+    let count_scale = 1.0 / epsilon_per_metric;
     add_noise_to_json(&mut noisy_result, value_scale, count_scale);
 
     tx.execute(
@@ -237,6 +240,27 @@ fn should_noise_key(key: &str) -> bool {
         || key.starts_with("mean_")
         || key.starts_with("median_")
         || key.starts_with("incidence_")
+}
+
+fn count_noised_metrics(value: &Value, key: Option<&str>) -> usize {
+    match value {
+        Value::Number(_) => {
+            if key.is_some_and(should_noise_key) {
+                1
+            } else {
+                0
+            }
+        }
+        Value::Array(items) => items
+            .iter()
+            .map(|item| count_noised_metrics(item, key))
+            .sum(),
+        Value::Object(map) => map
+            .iter()
+            .map(|(child_key, item)| count_noised_metrics(item, Some(child_key.as_str())))
+            .sum(),
+        _ => 0,
+    }
 }
 
 fn sample_laplace(scale: f64) -> f64 {
