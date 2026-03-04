@@ -214,7 +214,12 @@ fn add_noise_with_key(value: &mut Value, value_scale: f64, count_scale: f64, key
         }
         Value::Array(items) => {
             for item in items {
-                add_noise_with_key(item, value_scale, count_scale, key);
+                let inherited_key = if matches!(item, Value::Number(_)) {
+                    key
+                } else {
+                    None
+                };
+                add_noise_with_key(item, value_scale, count_scale, inherited_key);
             }
         }
         Value::Object(map) => {
@@ -236,9 +241,7 @@ fn is_count_like_key(key: &str) -> bool {
 fn should_noise_key(key: &str) -> bool {
     is_count_like_key(key)
         || key == "delta"
-        || key == "risk_ratio"
         || key.starts_with("mean_")
-        || key.starts_with("median_")
         || key.starts_with("incidence_")
 }
 
@@ -253,7 +256,14 @@ fn count_noised_metrics(value: &Value, key: Option<&str>) -> usize {
         }
         Value::Array(items) => items
             .iter()
-            .map(|item| count_noised_metrics(item, key))
+            .map(|item| {
+                let inherited_key = if matches!(item, Value::Number(_)) {
+                    key
+                } else {
+                    None
+                };
+                count_noised_metrics(item, inherited_key)
+            })
             .sum(),
         Value::Object(map) => map
             .iter()
