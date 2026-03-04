@@ -1,0 +1,7 @@
+{
+  "min_age": 18,
+  "condition_codes": ["44054006"],
+  "exposed_medication_code": "856987",
+  "control_medication_code": "860975",
+  "outcome_observation_code": "8480-6"
+}
