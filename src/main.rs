@@ -1,3 +1,7 @@
+// src/main.rs
+// Defines CLI and orchestrates the pipeline execution.
+
+// Modules
 mod db;
 mod features;
 mod fhir;
@@ -6,32 +10,27 @@ mod normalize;
 mod privacy;
 mod query;
 
+// Standard library imports
 use std::fs;
 use std::path::{Path, PathBuf};
 
+// Third-party library imports
 use anyhow::{Context, Result, anyhow};
 use clap::{Parser, Subcommand};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
+// Local module imports
 use crate::ingest::IngestOptions;
 use crate::privacy::PrivacyConfig;
 use crate::query::{QueryTemplate, execute_template};
 
-#[derive(Debug, Parser)]
-#[command(name = "refinery-node")]
-#[command(version)]
-#[command(about = "Rust-first FHIR-to-analytics pipeline with DP release gating", long_about = None)]
-struct Cli {
-    #[command(subcommand)]
-    command: Commands,
-}
-
+// Defines the available subcommands for the CLI
 #[derive(Debug, Subcommand)]
 enum Commands {
     Init {
         #[arg(long)]
-        db: PathBuf,
+        db: PathBuf, 
     },
     Ingest {
         #[arg(long)]
@@ -89,6 +88,16 @@ enum Commands {
         #[arg(long, default_value_t = 10)]
         top: usize,
     },
+}
+
+// CLI definition
+#[derive(Debug, Parser)]
+#[command(name = "refinery-node")]
+#[command(version)]
+#[command(about = "Rust-first FHIR-to-analytics pipeline with DP release gating", long_about = None)]
+struct Cli {
+    #[command(subcommand)]
+    command: Commands,
 }
 
 fn main() -> Result<()> {
