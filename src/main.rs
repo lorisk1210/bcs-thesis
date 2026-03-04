@@ -104,8 +104,7 @@ fn main() -> Result<()> {
 
     match cli.command {
         Commands::Init { db } => {
-            let conn = db::open_connection(&db)?;
-            db::init_schema(&conn)?;
+            let _conn = open_initialized_connection(&db)?;
             println!("Initialized schema at {}", db.display());
         }
         Commands::Ingest {
@@ -117,30 +116,24 @@ fn main() -> Result<()> {
             hospital_count,
             hospital_index,
         } => {
-            let mut conn = db::open_connection(&db)?;
-            db::init_schema(&conn)?;
-            let node_secret = resolve_node_secret(node_secret, node_secret_file.as_deref())?;
-            let report = ingest::run_ingest(
+            let mut conn = open_initialized_connection(&db)?;
+            run_ingest_command(
                 &mut conn,
-                &IngestOptions {
-                    input_dir,
-                    node_secret,
-                    max_files,
-                    hospital_count,
-                    hospital_index,
-                },
+                input_dir,
+                node_secret,
+                node_secret_file,
+                max_files,
+                hospital_count,
+                hospital_index,
             )?;
-            print_ingest_report(&report);
         }
         Commands::Normalize { db } => {
-            let conn = db::open_connection(&db)?;
-            db::init_schema(&conn)?;
+            let conn = open_initialized_connection(&db)?;
             normalize::run_normalize(&conn)?;
             println!("Normalization complete");
         }
         Commands::Materialize { db } => {
-            let conn = db::open_connection(&db)?;
-            db::init_schema(&conn)?;
+            let conn = open_initialized_connection(&db)?;
             features::run_materialize(&conn)?;
             println!("Feature materialization complete");
         }
@@ -153,20 +146,16 @@ fn main() -> Result<()> {
             hospital_count,
             hospital_index,
         } => {
-            let mut conn = db::open_connection(&db)?;
-            db::init_schema(&conn)?;
-            let node_secret = resolve_node_secret(node_secret, node_secret_file.as_deref())?;
-            let report = ingest::run_ingest(
+            let mut conn = open_initialized_connection(&db)?;
+            run_ingest_command(
                 &mut conn,
-                &IngestOptions {
-                    input_dir,
-                    node_secret,
-                    max_files,
-                    hospital_count,
-                    hospital_index,
-                },
+                input_dir,
+                node_secret,
+                node_secret_file,
+                max_files,
+                hospital_count,
+                hospital_index,
             )?;
-            print_ingest_report(&report);
             normalize::run_normalize(&conn)?;
             features::run_materialize(&conn)?;
             println!("Pipeline run complete");
@@ -181,8 +170,7 @@ fn main() -> Result<()> {
             clip_min,
             clip_max,
         } => {
-            let mut conn = db::open_connection(&db)?;
-            db::init_schema(&conn)?;
+            let mut conn = open_initialized_connection(&db)?;
 
             let params = load_params(&params_file)?;
             let query_result = execute_template(&conn, template, &params, clip_min, clip_max)?;
@@ -223,8 +211,7 @@ fn main() -> Result<()> {
             }
         }
         Commands::Inspect { db, top } => {
-            let conn = db::open_connection(&db)?;
-            db::init_schema(&conn)?;
+            let conn = open_initialized_connection(&db)?;
             ensure_inspect_ready(&conn)?;
             print_top_codes(&conn, "condition_fact", "condition_code", top)?;
             print_top_codes(&conn, "medication_fact", "medication_code", top)?;
@@ -232,6 +219,36 @@ fn main() -> Result<()> {
         }
     }
 
+    Ok(())
+}
+
+fn open_initialized_connection(db_path: &Path) -> Result<duckdb::Connection> {
+    let conn = db::open_connection(db_path)?;
+    db::init_schema(&conn)?;
+    Ok(conn)
+}
+
+fn run_ingest_command(
+    conn: &mut duckdb::Connection,
+    input_dir: PathBuf,
+    node_secret: Option<String>,
+    node_secret_file: Option<PathBuf>,
+    max_files: Option<usize>,
+    hospital_count: u32,
+    hospital_index: u32,
+) -> Result<()> {
+    let node_secret = resolve_node_secret(node_secret, node_secret_file.as_deref())?;
+    let report = ingest::run_ingest(
+        conn,
+        &IngestOptions {
+            input_dir,
+            node_secret,
+            max_files,
+            hospital_count,
+            hospital_index,
+        },
+    )?;
+    print_ingest_report(&report);
     Ok(())
 }
 

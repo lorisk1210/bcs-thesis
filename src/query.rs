@@ -1,7 +1,7 @@
 use anyhow::{Result, anyhow};
 use clap::ValueEnum;
 use duckdb::Connection;
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 
 use crate::fhir;
 
@@ -60,6 +60,86 @@ pub fn execute_template(
     }
 }
 
+#[derive(Debug, Default, Clone)]
+struct ArmMetric {
+    n: usize,
+    metric: Option<f64>,
+}
+
+fn build_query_result(
+    template: QueryTemplate,
+    raw_result: Value,
+    cohort_size: usize,
+    sensitivity: f64,
+) -> QueryResult {
+    QueryResult {
+        template_name: template.as_str().to_string(),
+        raw_result,
+        cohort_size,
+        sensitivity,
+    }
+}
+
+fn clipped_mean_sensitivity(clip_min: f64, clip_max: f64, cohort_size: usize) -> f64 {
+    (clip_max - clip_min).abs() / (cohort_size.max(1) as f64)
+}
+
+fn inverse_count_sensitivity(cohort_size: usize) -> f64 {
+    1.0 / cohort_size.max(1) as f64
+}
+
+fn collect_named_arm_metrics(
+    conn: &Connection,
+    sql: &str,
+    arm_a_name: &str,
+    arm_b_name: &str,
+) -> Result<(ArmMetric, ArmMetric)> {
+    let mut stmt = conn.prepare(sql)?;
+    let mut rows = stmt.query([])?;
+
+    let mut arm_a = ArmMetric::default();
+    let mut arm_b = ArmMetric::default();
+
+    while let Some(row) = rows.next()? {
+        let arm: String = row.get(0)?;
+        let n: i64 = row.get(1)?;
+        let metric: Option<f64> = row.get(2)?;
+        if arm == arm_a_name {
+            arm_a.n = n.max(0) as usize;
+            arm_a.metric = metric;
+        } else if arm == arm_b_name {
+            arm_b.n = n.max(0) as usize;
+            arm_b.metric = metric;
+        }
+    }
+
+    Ok((arm_a, arm_b))
+}
+
+fn collect_grouped_metrics(conn: &Connection, sql: &str, group_key: &str) -> Result<(usize, Vec<Value>)> {
+    let mut stmt = conn.prepare(sql)?;
+    let mut rows = stmt.query([])?;
+
+    let mut total_n = 0usize;
+    let mut groups = Vec::new();
+
+    while let Some(row) = rows.next()? {
+        let group_value: String = row.get(0)?;
+        let n: i64 = row.get(1)?;
+        let mean_outcome: Option<f64> = row.get(2)?;
+        let n_usize = n.max(0) as usize;
+        total_n += n_usize;
+
+        let mut group_json = Map::new();
+        group_json.insert(group_key.to_string(), Value::String(group_value));
+        group_json.insert("n".to_string(), json!(n_usize));
+        group_json.insert("mean_outcome".to_string(), json!(mean_outcome));
+        groups.push(Value::Object(group_json));
+    }
+
+    Ok((total_n, groups))
+}
+
 fn execute_cohort_count(conn: &Connection, template: QueryTemplate, params: &Value) -> Result<QueryResult> {
     let filter = cohort_filter_sql("p", params, true)?;
     let sql = format!(
@@ -73,12 +153,12 @@ fn execute_cohort_count(conn: &Connection, template: QueryTemplate, params: &Val
     let cohort_size: i64 = conn.query_row(&sql, [], |row| row.get(0))?;
     let count = cohort_size.max(0) as usize;
 
-    Ok(QueryResult {
-        template_name: template.as_str().to_string(),
-        raw_result: json!({"count": count}),
-        cohort_size: count,
-        sensitivity: 1.0,
-    })
+    Ok(build_query_result(
+        template,
+        json!({"count": count}),
+        count,
+        1.0,
+    ))
 }
 
 fn execute_comparative_effectiveness(
@@ -142,47 +222,26 @@ fn execute_comparative_effectiveness(
         "#
     );
 
-    let mut stmt = conn.prepare(&sql)?;
-    let mut rows = stmt.query([])?;
+    let (exposed_arm, control_arm) = collect_named_arm_metrics(conn, &sql, "exposed", "control")?;
 
-    let mut n_exposed = 0usize;
-    let mut n_control = 0usize;
-    let mut mean_exposed: Option<f64> = None;
-    let mut mean_control: Option<f64> = None;
-
-    while let Some(row) = rows.next()? {
-        let arm: String = row.get(0)?;
-        let n: i64 = row.get(1)?;
-        let mean: Option<f64> = row.get(2)?;
-        if arm == "exposed" {
-            n_exposed = n.max(0) as usize;
-            mean_exposed = mean;
-        } else if arm == "control" {
-            n_control = n.max(0) as usize;
-            mean_control = mean;
-        }
-    }
-
-    let cohort_size = n_exposed + n_control;
-    let delta = match (mean_exposed, mean_control) {
+    let cohort_size = exposed_arm.n + control_arm.n;
+    let delta = match (exposed_arm.metric, control_arm.metric) {
         (Some(exp), Some(ctrl)) => Some(exp - ctrl),
         _ => None,
     };
 
-    let sensitivity = (clip_max - clip_min).abs() / (cohort_size.max(1) as f64);
-
-    Ok(QueryResult {
-        template_name: template.as_str().to_string(),
-        raw_result: json!({
-            "n_exposed": n_exposed,
-            "n_control": n_control,
-            "mean_outcome_exposed": mean_exposed,
-            "mean_outcome_control": mean_control,
+    Ok(build_query_result(
+        template,
+        json!({
+            "n_exposed": exposed_arm.n,
+            "n_control": control_arm.n,
+            "mean_outcome_exposed": exposed_arm.metric,
+            "mean_outcome_control": control_arm.metric,
             "delta": delta
         }),
         cohort_size,
-        sensitivity,
-    })
+        clipped_mean_sensitivity(clip_min, clip_max, cohort_size),
+    ))
 }
 
 fn execute_time_to_event(conn: &Connection, template: QueryTemplate, params: &Value) -> Result<QueryResult> {
@@ -239,15 +298,15 @@ fn execute_time_to_event(conn: &Connection, template: QueryTemplate, params: &Va
     let cohort_size = n.max(0) as usize;
     let sensitivity = max_days as f64 / (cohort_size.max(1) as f64);
 
-    Ok(QueryResult {
-        template_name: template.as_str().to_string(),
-        raw_result: json!({
+    Ok(build_query_result(
+        template,
+        json!({
             "n": cohort_size,
             "mean_days_to_event": mean_days
         }),
         cohort_size,
         sensitivity,
-    })
+    ))
 }
 
 fn execute_subgroup_effect(
@@ -327,33 +386,14 @@ fn execute_subgroup_effect(
         "#
     );
 
-    let mut stmt = conn.prepare(&sql)?;
-    let mut rows = stmt.query([])?;
+    let (cohort_size, groups) = collect_grouped_metrics(conn, &sql, "subgroup")?;
 
-    let mut total_n = 0usize;
-    let mut groups = Vec::new();
-
-    while let Some(row) = rows.next()? {
-        let subgroup_value: String = row.get(0)?;
-        let n: i64 = row.get(1)?;
-        let mean_outcome: Option<f64> = row.get(2)?;
-        let n_usize = n.max(0) as usize;
-        total_n += n_usize;
-        groups.push(json!({
-            "subgroup": subgroup_value,
-            "n": n_usize,
-            "mean_outcome": mean_outcome
-        }));
-    }
-
-    let sensitivity = (clip_max - clip_min).abs() / (total_n.max(1) as f64);
-
-    Ok(QueryResult {
-        template_name: template.as_str().to_string(),
-        raw_result: json!({"groups": groups}),
-        cohort_size: total_n,
-        sensitivity,
-    })
+    Ok(build_query_result(
+        template,
+        json!({"groups": groups}),
+        cohort_size,
+        clipped_mean_sensitivity(clip_min, clip_max, cohort_size),
+    ))
 }
 
 fn execute_dose_response(
@@ -406,33 +446,14 @@ fn execute_dose_response(
         "#
     );
 
-    let mut stmt = conn.prepare(&sql)?;
-    let mut rows = stmt.query([])?;
+    let (cohort_size, groups) = collect_grouped_metrics(conn, &sql, "dose_bucket")?;
 
-    let mut total_n = 0usize;
-    let mut groups = Vec::new();
-
-    while let Some(row) = rows.next()? {
-        let bucket: String = row.get(0)?;
-        let n: i64 = row.get(1)?;
-        let mean_outcome: Option<f64> = row.get(2)?;
-        let n_usize = n.max(0) as usize;
-        total_n += n_usize;
-        groups.push(json!({
-            "dose_bucket": bucket,
-            "n": n_usize,
-            "mean_outcome": mean_outcome
-        }));
-    }
-
-    let sensitivity = (clip_max - clip_min).abs() / (total_n.max(1) as f64);
-
-    Ok(QueryResult {
-        template_name: template.as_str().to_string(),
-        raw_result: json!({"groups": groups}),
-        cohort_size: total_n,
-        sensitivity,
-    })
+    Ok(build_query_result(
+        template,
+        json!({"groups": groups}),
+        cohort_size,
+        clipped_mean_sensitivity(clip_min, clip_max, cohort_size),
+    ))
 }
 
 fn execute_ae_signal(conn: &Connection, template: QueryTemplate, params: &Value) -> Result<QueryResult> {
@@ -483,40 +504,20 @@ fn execute_ae_signal(conn: &Connection, template: QueryTemplate, params: &Value)
         "#
     );
 
-    let mut stmt = conn.prepare(&sql)?;
-    let mut rows = stmt.query([])?;
+    let (exposed_arm, control_arm) = collect_named_arm_metrics(conn, &sql, "exposed", "control")?;
+    let cohort_size = exposed_arm.n + control_arm.n;
 
-    let mut n_exposed = 0usize;
-    let mut n_control = 0usize;
-    let mut inc_exposed: Option<f64> = None;
-    let mut inc_control: Option<f64> = None;
-
-    while let Some(row) = rows.next()? {
-        let arm: String = row.get(0)?;
-        let n: i64 = row.get(1)?;
-        let incidence: Option<f64> = row.get(2)?;
-        if arm == "exposed" {
-            n_exposed = n.max(0) as usize;
-            inc_exposed = incidence;
-        } else if arm == "control" {
-            n_control = n.max(0) as usize;
-            inc_control = incidence;
-        }
-    }
-
-    let cohort_size = n_exposed + n_control;
-
-    Ok(QueryResult {
-        template_name: template.as_str().to_string(),
-        raw_result: json!({
-            "n_exposed": n_exposed,
-            "n_control": n_control,
-            "incidence_exposed": inc_exposed,
-            "incidence_control": inc_control
+    Ok(build_query_result(
+        template,
+        json!({
+            "n_exposed": exposed_arm.n,
+            "n_control": control_arm.n,
+            "incidence_exposed": exposed_arm.metric,
+            "incidence_control": control_arm.metric
         }),
         cohort_size,
-        sensitivity: 1.0 / cohort_size.max(1) as f64,
-    })
+        inverse_count_sensitivity(cohort_size),
+    ))
 }
 
 fn execute_ddi_signal(conn: &Connection, template: QueryTemplate, params: &Value) -> Result<QueryResult> {
@@ -564,40 +565,20 @@ fn execute_ddi_signal(conn: &Connection, template: QueryTemplate, params: &Value
         "#
     );
 
-    let mut stmt = conn.prepare(&sql)?;
-    let mut rows = stmt.query([])?;
+    let (combo_arm, a_only_arm) = collect_named_arm_metrics(conn, &sql, "combo", "a_only")?;
+    let cohort_size = combo_arm.n + a_only_arm.n;
 
-    let mut n_combo = 0usize;
-    let mut n_a_only = 0usize;
-    let mut inc_combo: Option<f64> = None;
-    let mut inc_a_only: Option<f64> = None;
-
-    while let Some(row) = rows.next()? {
-        let arm: String = row.get(0)?;
-        let n: i64 = row.get(1)?;
-        let incidence: Option<f64> = row.get(2)?;
-        if arm == "combo" {
-            n_combo = n.max(0) as usize;
-            inc_combo = incidence;
-        } else if arm == "a_only" {
-            n_a_only = n.max(0) as usize;
-            inc_a_only = incidence;
-        }
-    }
-
-    let cohort_size = n_combo + n_a_only;
-
-    Ok(QueryResult {
-        template_name: template.as_str().to_string(),
-        raw_result: json!({
-            "n_combo": n_combo,
-            "n_a_only": n_a_only,
-            "incidence_combo": inc_combo,
-            "incidence_a_only": inc_a_only
+    Ok(build_query_result(
+        template,
+        json!({
+            "n_combo": combo_arm.n,
+            "n_a_only": a_only_arm.n,
+            "incidence_combo": combo_arm.metric,
+            "incidence_a_only": a_only_arm.metric
         }),
         cohort_size,
-        sensitivity: 1.0 / cohort_size.max(1) as f64,
-    })
+        inverse_count_sensitivity(cohort_size),
+    ))
 }
 
 fn required_code(params: &Value, key: &str) -> Result<String> {

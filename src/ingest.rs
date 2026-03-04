@@ -416,11 +416,37 @@ fn patient_pseudo_for_resource(
     let patient_pseudo_id = fhir::pseudonymize_patient_id(node_secret, &raw_patient_id)
         .ok_or_else(|| anyhow!("failed to pseudonymize patient id"))?;
 
-    if fhir::hospital_bucket(&patient_pseudo_id, hospital_count) != hospital_index {
+    if !is_assigned_hospital(&patient_pseudo_id, hospital_count, hospital_index) {
         return Ok(None);
     }
 
     Ok(Some(patient_pseudo_id))
+}
+
+fn resolve_subject_resource_identity(
+    resource: &Value,
+    resource_name: &str,
+    node_secret: &str,
+    hospital_count: u32,
+    hospital_index: u32,
+) -> Result<Option<(String, String)>> {
+    let Some(patient_pseudo_id) =
+        patient_pseudo_for_resource(resource, node_secret, hospital_count, hospital_index)?
+    else {
+        return Ok(None);
+    };
+    let event_id = required_resource_id(resource, resource_name)?;
+    Ok(Some((patient_pseudo_id, event_id)))
+}
+
+fn required_resource_id(resource: &Value, resource_name: &str) -> Result<String> {
+    fhir::resource_id(resource)
+        .map(ToString::to_string)
+        .ok_or_else(|| anyhow!("missing {resource_name} id"))
+}
+
+fn is_assigned_hospital(patient_pseudo_id: &str, hospital_count: u32, hospital_index: u32) -> bool {
+    fhir::hospital_bucket(patient_pseudo_id, hospital_count) == hospital_index
 }
 
 fn ingest_patient(
@@ -431,11 +457,11 @@ fn ingest_patient(
     hospital_count: u32,
     hospital_index: u32,
 ) -> Result<bool> {
-    let raw_patient_id = fhir::resource_id(resource).ok_or_else(|| anyhow!("missing patient id"))?;
-    let patient_pseudo_id = fhir::pseudonymize_patient_id(node_secret, raw_patient_id)
+    let raw_patient_id = required_resource_id(resource, "patient")?;
+    let patient_pseudo_id = fhir::pseudonymize_patient_id(node_secret, &raw_patient_id)
         .ok_or_else(|| anyhow!("failed to pseudonymize patient id"))?;
 
-    if fhir::hospital_bucket(&patient_pseudo_id, hospital_count) != hospital_index {
+    if !is_assigned_hospital(&patient_pseudo_id, hospital_count, hospital_index) {
         return Ok(false);
     }
 
@@ -484,13 +510,15 @@ fn ingest_condition(
     hospital_count: u32,
     hospital_index: u32,
 ) -> Result<bool> {
-    let Some(patient_pseudo_id) = patient_pseudo_for_resource(resource, node_secret, hospital_count, hospital_index)? else {
+    let Some((patient_pseudo_id, event_id)) = resolve_subject_resource_identity(
+        resource,
+        "condition",
+        node_secret,
+        hospital_count,
+        hospital_index,
+    )? else {
         return Ok(false);
     };
-
-    let event_id = fhir::resource_id(resource)
-        .map(ToString::to_string)
-        .ok_or_else(|| anyhow!("missing condition id"))?;
     let encounter_id = fhir::encounter_id(resource);
     let (code_system, code, code_display) = fhir::first_codeable_concept(resource, "code");
     let clinical_status = resource
@@ -531,13 +559,15 @@ fn ingest_medication_request(
     hospital_count: u32,
     hospital_index: u32,
 ) -> Result<bool> {
-    let Some(patient_pseudo_id) = patient_pseudo_for_resource(resource, node_secret, hospital_count, hospital_index)? else {
+    let Some((patient_pseudo_id, event_id)) = resolve_subject_resource_identity(
+        resource,
+        "medication request",
+        node_secret,
+        hospital_count,
+        hospital_index,
+    )? else {
         return Ok(false);
     };
-
-    let event_id = fhir::resource_id(resource)
-        .map(ToString::to_string)
-        .ok_or_else(|| anyhow!("missing medication request id"))?;
     let encounter_id = fhir::encounter_id(resource);
     let (medication_system, medication_code, medication_display) =
         fhir::first_codeable_concept(resource, "medicationCodeableConcept");
@@ -585,13 +615,15 @@ fn ingest_observation(
     hospital_count: u32,
     hospital_index: u32,
 ) -> Result<bool> {
-    let Some(patient_pseudo_id) = patient_pseudo_for_resource(resource, node_secret, hospital_count, hospital_index)? else {
+    let Some((patient_pseudo_id, event_id)) = resolve_subject_resource_identity(
+        resource,
+        "observation",
+        node_secret,
+        hospital_count,
+        hospital_index,
+    )? else {
         return Ok(false);
     };
-
-    let event_id = fhir::resource_id(resource)
-        .map(ToString::to_string)
-        .ok_or_else(|| anyhow!("missing observation id"))?;
     let encounter_id = fhir::encounter_id(resource);
     let category_code = resource
         .get("category")
@@ -644,13 +676,15 @@ fn ingest_encounter(
     hospital_count: u32,
     hospital_index: u32,
 ) -> Result<bool> {
-    let Some(patient_pseudo_id) = patient_pseudo_for_resource(resource, node_secret, hospital_count, hospital_index)? else {
+    let Some((patient_pseudo_id, event_id)) = resolve_subject_resource_identity(
+        resource,
+        "encounter",
+        node_secret,
+        hospital_count,
+        hospital_index,
+    )? else {
         return Ok(false);
     };
-
-    let event_id = fhir::resource_id(resource)
-        .map(ToString::to_string)
-        .ok_or_else(|| anyhow!("missing encounter id"))?;
     let class_code = fhir::get_str(resource, &["class", "code"]).map(ToString::to_string);
     let (type_system, type_code, type_display) = fhir::first_code_from_array(resource, "type");
     let (reason_system, reason_code, reason_display) = fhir::first_code_from_array(resource, "reasonCode");
@@ -685,13 +719,15 @@ fn ingest_procedure(
     hospital_count: u32,
     hospital_index: u32,
 ) -> Result<bool> {
-    let Some(patient_pseudo_id) = patient_pseudo_for_resource(resource, node_secret, hospital_count, hospital_index)? else {
+    let Some((patient_pseudo_id, event_id)) = resolve_subject_resource_identity(
+        resource,
+        "procedure",
+        node_secret,
+        hospital_count,
+        hospital_index,
+    )? else {
         return Ok(false);
     };
-
-    let event_id = fhir::resource_id(resource)
-        .map(ToString::to_string)
-        .ok_or_else(|| anyhow!("missing procedure id"))?;
     let encounter_id = fhir::encounter_id(resource);
     let (code_system, code, code_display) = fhir::first_codeable_concept(resource, "code");
     let performed_ts = fhir::get_str(resource, &["performedDateTime"])
