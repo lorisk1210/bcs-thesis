@@ -9,7 +9,7 @@ mod query;
 use std::fs;
 use std::path::PathBuf;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, anyhow};
 use clap::{Parser, Subcommand};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -20,6 +20,7 @@ use crate::query::{QueryTemplate, execute_template};
 
 #[derive(Debug, Parser)]
 #[command(name = "refinery-node")]
+#[command(version)]
 #[command(about = "Rust-first FHIR-to-analytics pipeline with DP release gating", long_about = None)]
 struct Cli {
     #[command(subcommand)]
@@ -172,15 +173,15 @@ fn main() -> Result<()> {
             clip_min,
             clip_max,
         } => {
-            let conn = db::open_connection(&db)?;
+            let mut conn = db::open_connection(&db)?;
             db::init_schema(&conn)?;
 
             let params = load_params(&params_file)?;
             let query_result = execute_template(&conn, template, &params, clip_min, clip_max)?;
 
-            let fingerprint = fingerprint(template.as_str(), &params);
+            let fingerprint = fingerprint(template.as_str(), &params, clip_min, clip_max);
             let release = privacy::enforce_and_release(
-                &conn,
+                &mut conn,
                 &fingerprint,
                 &params,
                 &query_result,
@@ -216,6 +217,7 @@ fn main() -> Result<()> {
         Commands::Inspect { db, top } => {
             let conn = db::open_connection(&db)?;
             db::init_schema(&conn)?;
+            ensure_inspect_ready(&conn)?;
             print_top_codes(&conn, "condition_fact", "condition_code", top)?;
             print_top_codes(&conn, "medication_fact", "medication_code", top)?;
             print_top_codes(&conn, "observation_fact", "observation_code", top)?;
@@ -233,10 +235,11 @@ fn load_params(params_file: &PathBuf) -> Result<Value> {
     Ok(params)
 }
 
-fn fingerprint(template_name: &str, params: &Value) -> String {
+fn fingerprint(template_name: &str, params: &Value, clip_min: f64, clip_max: f64) -> String {
     let mut hasher = Sha256::new();
     hasher.update(template_name.as_bytes());
     hasher.update(params.to_string().as_bytes());
+    hasher.update(format!("|clip_min={clip_min}|clip_max={clip_max}").as_bytes());
     hex::encode(hasher.finalize())
 }
 
@@ -257,6 +260,16 @@ fn print_top_codes(
     code_column: &str,
     top: usize,
 ) -> Result<()> {
+    let allowed = matches!(
+        (table_name, code_column),
+        ("condition_fact", "condition_code")
+            | ("medication_fact", "medication_code")
+            | ("observation_fact", "observation_code")
+    );
+    if !allowed {
+        return Err(anyhow!("unsupported inspect target"));
+    }
+
     let sql = format!(
         "SELECT {code_column}, COUNT(*)::BIGINT AS n FROM {table_name} WHERE {code_column} IS NOT NULL GROUP BY {code_column} ORDER BY n DESC LIMIT {top}",
         code_column = code_column,
@@ -270,6 +283,23 @@ fn print_top_codes(
         let code: String = row.get(0)?;
         let count: i64 = row.get(1)?;
         println!("  {code}: {count}");
+    }
+    Ok(())
+}
+
+fn ensure_inspect_ready(conn: &duckdb::Connection) -> Result<()> {
+    let required = ["condition_fact", "medication_fact", "observation_fact"];
+    for table in required {
+        let exists: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'main' AND table_name = ?1",
+            [table],
+            |row| row.get(0),
+        )?;
+        if exists == 0 {
+            return Err(anyhow!(
+                "inspect requires normalized tables; run `run-pipeline` or `normalize` + `materialize` first"
+            ));
+        }
     }
     Ok(())
 }

@@ -30,7 +30,7 @@ pub fn init_schema(conn: &Connection) -> Result<()> {
         );
 
         CREATE TABLE IF NOT EXISTS bronze_condition (
-            event_id TEXT,
+            event_id TEXT PRIMARY KEY,
             patient_pseudo_id TEXT,
             encounter_id TEXT,
             code_system TEXT,
@@ -44,7 +44,7 @@ pub fn init_schema(conn: &Connection) -> Result<()> {
         );
 
         CREATE TABLE IF NOT EXISTS bronze_medication_request (
-            event_id TEXT,
+            event_id TEXT PRIMARY KEY,
             patient_pseudo_id TEXT,
             encounter_id TEXT,
             medication_system TEXT,
@@ -60,7 +60,7 @@ pub fn init_schema(conn: &Connection) -> Result<()> {
         );
 
         CREATE TABLE IF NOT EXISTS bronze_observation (
-            event_id TEXT,
+            event_id TEXT PRIMARY KEY,
             patient_pseudo_id TEXT,
             encounter_id TEXT,
             category_code TEXT,
@@ -77,7 +77,7 @@ pub fn init_schema(conn: &Connection) -> Result<()> {
         );
 
         CREATE TABLE IF NOT EXISTS bronze_encounter (
-            event_id TEXT,
+            event_id TEXT PRIMARY KEY,
             patient_pseudo_id TEXT,
             class_code TEXT,
             type_system TEXT,
@@ -93,7 +93,7 @@ pub fn init_schema(conn: &Connection) -> Result<()> {
         );
 
         CREATE TABLE IF NOT EXISTS bronze_procedure (
-            event_id TEXT,
+            event_id TEXT PRIMARY KEY,
             patient_pseudo_id TEXT,
             encounter_id TEXT,
             code_system TEXT,

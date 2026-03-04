@@ -1,6 +1,6 @@
 use anyhow::{Result, anyhow};
 use chrono::Utc;
-use duckdb::{Connection, params};
+use duckdb::{Connection, Transaction, params};
 use rand::Rng;
 use serde_json::Value;
 
@@ -24,7 +24,7 @@ pub struct ReleaseResult {
 }
 
 pub fn enforce_and_release(
-    conn: &Connection,
+    conn: &mut Connection,
     query_fingerprint: &str,
     params_json: &Value,
     query_result: &QueryResult,
@@ -37,7 +37,9 @@ pub fn enforce_and_release(
         return Err(anyhow!("total_budget must be > 0"));
     }
 
-    let spent: f64 = conn.query_row(
+    let tx = conn.transaction()?;
+
+    let spent: f64 = tx.query_row(
         "SELECT COALESCE(SUM(epsilon), 0.0) FROM privacy_releases WHERE accepted = TRUE",
         [],
         |row| row.get(0),
@@ -55,7 +57,7 @@ pub fn enforce_and_release(
             query_result.cohort_size, config.min_cohort
         );
         write_rejection(
-            conn,
+            &tx,
             &release_id,
             query_fingerprint,
             &query_result.template_name,
@@ -63,6 +65,7 @@ pub fn enforce_and_release(
             query_result.cohort_size,
             &reason,
         )?;
+        tx.commit()?;
         return Ok(ReleaseResult {
             release_id,
             accepted: false,
@@ -79,7 +82,7 @@ pub fn enforce_and_release(
             spent, config.epsilon, config.total_budget
         );
         write_rejection(
-            conn,
+            &tx,
             &release_id,
             query_fingerprint,
             &query_result.template_name,
@@ -87,6 +90,7 @@ pub fn enforce_and_release(
             query_result.cohort_size,
             &reason,
         )?;
+        tx.commit()?;
         return Ok(ReleaseResult {
             release_id,
             accepted: false,
@@ -106,7 +110,7 @@ pub fn enforce_and_release(
     let count_scale = 1.0 / config.epsilon;
     add_noise_to_json(&mut noisy_result, value_scale, count_scale);
 
-    conn.execute(
+    tx.execute(
         r#"
         INSERT INTO privacy_releases (
             release_id, query_fingerprint, template_name, epsilon, cohort_size, accepted, reason
@@ -121,7 +125,7 @@ pub fn enforce_and_release(
         ],
     )?;
 
-    conn.execute(
+    tx.execute(
         r#"
         INSERT INTO query_audit (
             query_fingerprint, template_name, params_json, raw_result_json, noisy_result_json, cohort_size, epsilon
@@ -138,6 +142,8 @@ pub fn enforce_and_release(
         ],
     )?;
 
+    tx.commit()?;
+
     let new_spent = spent + config.epsilon;
 
     Ok(ReleaseResult {
@@ -151,7 +157,7 @@ pub fn enforce_and_release(
 }
 
 fn write_rejection(
-    conn: &Connection,
+    tx: &Transaction<'_>,
     release_id: &str,
     query_fingerprint: &str,
     template_name: &str,
@@ -159,7 +165,7 @@ fn write_rejection(
     cohort_size: usize,
     reason: &str,
 ) -> Result<()> {
-    conn.execute(
+    tx.execute(
         r#"
         INSERT INTO privacy_releases (
             release_id, query_fingerprint, template_name, epsilon, cohort_size, accepted, reason
@@ -184,14 +190,20 @@ fn add_noise_to_json(value: &mut Value, value_scale: f64, count_scale: f64) {
 fn add_noise_with_key(value: &mut Value, value_scale: f64, count_scale: f64, key: Option<&str>) {
     match value {
         Value::Number(num) => {
+            let Some(metric_key) = key else {
+                return;
+            };
+            if !should_noise_key(metric_key) {
+                return;
+            }
             if let Some(base) = num.as_f64() {
-                let local_scale = if key.is_some_and(is_count_like_key) {
+                let local_scale = if is_count_like_key(metric_key) {
                     count_scale
                 } else {
                     value_scale
                 };
                 let mut noisy = base + sample_laplace(local_scale);
-                if key.is_some_and(is_count_like_key) {
+                if is_count_like_key(metric_key) {
                     noisy = noisy.max(0.0);
                 }
                 *value = Value::from(noisy);
@@ -218,12 +230,22 @@ fn is_count_like_key(key: &str) -> bool {
         || key.ends_with("_count")
 }
 
+fn should_noise_key(key: &str) -> bool {
+    is_count_like_key(key)
+        || key == "delta"
+        || key == "risk_ratio"
+        || key.starts_with("mean_")
+        || key.starts_with("median_")
+        || key.starts_with("incidence_")
+}
+
 fn sample_laplace(scale: f64) -> f64 {
     if scale <= 0.0 {
         return 0.0;
     }
     let mut rng = rand::thread_rng();
-    let u: f64 = rng.gen_range(-0.5f64..0.5f64);
-    let sign = if u >= 0.0 { 1.0 } else { -1.0 };
-    -scale * sign * (1.0 - 2.0 * u.abs()).ln()
+    let uniform_u: f64 = rng.gen_range(f64::EPSILON..(1.0 - f64::EPSILON));
+    let centered = uniform_u - 0.5;
+    let sign = if centered >= 0.0 { 1.0 } else { -1.0 };
+    -scale * sign * (1.0 - 2.0 * centered.abs()).ln()
 }

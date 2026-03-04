@@ -41,6 +41,8 @@ pub fn run_ingest(conn: &mut Connection, opts: &IngestOptions) -> Result<IngestR
         ));
     }
 
+    ensure_event_uniqueness(conn)?;
+
     let mut files: Vec<PathBuf> = WalkDir::new(&opts.input_dir)
         .into_iter()
         .filter_map(Result::ok)
@@ -77,7 +79,7 @@ pub fn run_ingest(conn: &mut Connection, opts: &IngestOptions) -> Result<IngestR
 
     let mut insert_condition = tx.prepare(
         r#"
-        INSERT INTO bronze_condition (
+        INSERT OR REPLACE INTO bronze_condition (
             event_id, patient_pseudo_id, encounter_id, code_system, code, code_display, clinical_status,
             verification_status, onset_ts, recorded_ts, ingest_file
         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
@@ -86,7 +88,7 @@ pub fn run_ingest(conn: &mut Connection, opts: &IngestOptions) -> Result<IngestR
 
     let mut insert_medication = tx.prepare(
         r#"
-        INSERT INTO bronze_medication_request (
+        INSERT OR REPLACE INTO bronze_medication_request (
             event_id, patient_pseudo_id, encounter_id, medication_system, medication_code, medication_display,
             authored_on, start_ts, end_ts, dosage_text, status, intent, ingest_file
         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
@@ -95,7 +97,7 @@ pub fn run_ingest(conn: &mut Connection, opts: &IngestOptions) -> Result<IngestR
 
     let mut insert_observation = tx.prepare(
         r#"
-        INSERT INTO bronze_observation (
+        INSERT OR REPLACE INTO bronze_observation (
             event_id, patient_pseudo_id, encounter_id, category_code, code_system, code, code_display,
             value_num, value_unit, value_text, effective_ts, issued_ts, status, ingest_file
         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
@@ -104,7 +106,7 @@ pub fn run_ingest(conn: &mut Connection, opts: &IngestOptions) -> Result<IngestR
 
     let mut insert_encounter = tx.prepare(
         r#"
-        INSERT INTO bronze_encounter (
+        INSERT OR REPLACE INTO bronze_encounter (
             event_id, patient_pseudo_id, class_code, type_system, type_code, type_display,
             reason_system, reason_code, reason_display, start_ts, end_ts, status, ingest_file
         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
@@ -113,7 +115,7 @@ pub fn run_ingest(conn: &mut Connection, opts: &IngestOptions) -> Result<IngestR
 
     let mut insert_procedure = tx.prepare(
         r#"
-        INSERT INTO bronze_procedure (
+        INSERT OR REPLACE INTO bronze_procedure (
             event_id, patient_pseudo_id, encounter_id, code_system, code, code_display,
             performed_ts, status, ingest_file
         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
@@ -294,6 +296,54 @@ pub fn run_ingest(conn: &mut Connection, opts: &IngestOptions) -> Result<IngestR
     Ok(report)
 }
 
+fn ensure_event_uniqueness(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        r#"
+        CREATE OR REPLACE TABLE bronze_condition AS
+        SELECT * EXCLUDE (__rn) FROM (
+            SELECT *, ROW_NUMBER() OVER (PARTITION BY event_id ORDER BY ingest_file DESC) AS __rn
+            FROM bronze_condition
+        )
+        WHERE __rn = 1;
+
+        CREATE OR REPLACE TABLE bronze_medication_request AS
+        SELECT * EXCLUDE (__rn) FROM (
+            SELECT *, ROW_NUMBER() OVER (PARTITION BY event_id ORDER BY ingest_file DESC) AS __rn
+            FROM bronze_medication_request
+        )
+        WHERE __rn = 1;
+
+        CREATE OR REPLACE TABLE bronze_observation AS
+        SELECT * EXCLUDE (__rn) FROM (
+            SELECT *, ROW_NUMBER() OVER (PARTITION BY event_id ORDER BY ingest_file DESC) AS __rn
+            FROM bronze_observation
+        )
+        WHERE __rn = 1;
+
+        CREATE OR REPLACE TABLE bronze_encounter AS
+        SELECT * EXCLUDE (__rn) FROM (
+            SELECT *, ROW_NUMBER() OVER (PARTITION BY event_id ORDER BY ingest_file DESC) AS __rn
+            FROM bronze_encounter
+        )
+        WHERE __rn = 1;
+
+        CREATE OR REPLACE TABLE bronze_procedure AS
+        SELECT * EXCLUDE (__rn) FROM (
+            SELECT *, ROW_NUMBER() OVER (PARTITION BY event_id ORDER BY ingest_file DESC) AS __rn
+            FROM bronze_procedure
+        )
+        WHERE __rn = 1;
+
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_bronze_condition_event_id ON bronze_condition(event_id);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_bronze_medication_event_id ON bronze_medication_request(event_id);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_bronze_observation_event_id ON bronze_observation(event_id);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_bronze_encounter_event_id ON bronze_encounter(event_id);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_bronze_procedure_event_id ON bronze_procedure(event_id);
+        "#,
+    )?;
+    Ok(())
+}
+
 fn display_path(path: &Path) -> String {
     path.to_string_lossy().into_owned()
 }
@@ -321,7 +371,11 @@ fn truncate_error(message: &str) -> String {
     if message.len() <= MAX_LEN {
         message.to_string()
     } else {
-        message[..MAX_LEN].to_string()
+        let mut end = MAX_LEN;
+        while end > 0 && !message.is_char_boundary(end) {
+            end -= 1;
+        }
+        message[..end].to_string()
     }
 }
 

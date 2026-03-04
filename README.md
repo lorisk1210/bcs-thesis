@@ -80,6 +80,7 @@ See sample parameter files in `examples/queries/`.
 - Direct patient identifiers are never stored in Bronze/Silver tables.
 - Output release is blocked if cohort size is below threshold.
 - Budget is enforced across releases in `privacy_releases`.
+- If `min_age` or `max_age` filters are used, patients with unknown birth date are excluded.
 
 ## Current limitations
 

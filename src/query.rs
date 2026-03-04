@@ -275,14 +275,25 @@ fn execute_subgroup_effect(
             .unwrap_or_else(|| vec![40, 65]);
         cutoffs.sort();
         cutoffs.dedup();
-        if cutoffs.len() < 2 {
+        if cutoffs.is_empty() {
             cutoffs = vec![40, 65];
         }
-        format!(
-            "CASE WHEN p.age_years IS NULL THEN 'unknown' WHEN p.age_years < {a} THEN '<{a}' WHEN p.age_years < {b} THEN '[{a},{b})' ELSE '>={b}' END",
-            a = cutoffs[0],
-            b = cutoffs[1]
-        )
+
+        let mut case_sql = String::from("CASE WHEN p.age_years IS NULL THEN 'unknown'");
+        let first = cutoffs[0];
+        case_sql.push_str(&format!(" WHEN p.age_years < {first} THEN '<{first}'"));
+
+        for window in cutoffs.windows(2) {
+            let lower = window[0];
+            let upper = window[1];
+            case_sql.push_str(&format!(
+                " WHEN p.age_years < {upper} THEN '[{lower},{upper})'"
+            ));
+        }
+
+        let last = *cutoffs.last().unwrap_or(&65);
+        case_sql.push_str(&format!(" ELSE '>={last}' END"));
+        case_sql
     } else {
         "COALESCE(p.gender, 'unknown')".to_string()
     };
@@ -630,8 +641,17 @@ fn optional_code_list(params: &Value, key: &str) -> Result<Vec<String>> {
 
 fn cohort_filter_sql(patient_alias: &str, params: &Value, include_medication_codes: bool) -> Result<String> {
     let mut filters = String::new();
+    let min_age = params.get("min_age").and_then(Value::as_i64);
+    let max_age = params.get("max_age").and_then(Value::as_i64);
 
-    if let Some(min_age) = params.get("min_age").and_then(Value::as_i64) {
+    if min_age.is_some() || max_age.is_some() {
+        filters.push_str(&format!(
+            " AND {patient_alias}.age_years IS NOT NULL",
+            patient_alias = patient_alias
+        ));
+    }
+
+    if let Some(min_age) = min_age {
         filters.push_str(&format!(
             " AND {patient_alias}.age_years >= {min_age}",
             patient_alias = patient_alias,
@@ -639,7 +659,7 @@ fn cohort_filter_sql(patient_alias: &str, params: &Value, include_medication_cod
         ));
     }
 
-    if let Some(max_age) = params.get("max_age").and_then(Value::as_i64) {
+    if let Some(max_age) = max_age {
         filters.push_str(&format!(
             " AND {patient_alias}.age_years <= {max_age}",
             patient_alias = patient_alias,
