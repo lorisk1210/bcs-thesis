@@ -7,6 +7,7 @@ edition = "2024"
 anyhow = "1.0.102"
 chrono = { version = "0.4.44", features = ["clock"] }
 clap = { version = "4.5.60", features = ["derive"] }
+dotenvy = "0.15.7"
 duckdb = { version = "1.4.4", features = ["bundled"] }
 hex = "0.4.3"
 hmac = "0.12.1"

@@ -21,16 +21,24 @@ Rust-first prototype for a zero-raw-data-exposure analytics node over Synthea FH
 cargo build --release
 ```
 
+## Configuration
+
+Configuration is loaded from environment variables. At runtime, the project reads only `.env` from the project root. `.env.example` is just a checked-in reference for GitHub and documentation.
+
+Required variables:
+
+- `REFINERY_NODE_SECRET`
+- `REFINERY_EPSILON`
+- `REFINERY_MIN_COHORT`
+- `REFINERY_TOTAL_BUDGET`
+
 ## Run full local pipeline
 
 ```bash
 cargo run --release -- run-pipeline \
   --db data/node0.duckdb \
-  --input-dir jsonraw \
-  --node-secret-file /path/to/node_secret.txt
+  --input-dir jsonraw
 ```
-
-Alternative (less secure than file): set `REFINERY_NODE_SECRET` env var.
 
 Each Refinery instance is a single isolated hospital node. For multi-hospital runs, launch separate instances with different `--db` and `--input-dir` values (one dataset per hospital), then federate outputs at orchestration time.
 
@@ -40,7 +48,6 @@ Optional subset mode for faster tests:
 cargo run --release -- run-pipeline \
   --db data/node0_sample.duckdb \
   --input-dir jsonraw \
-  --node-secret-file /path/to/node_secret.txt \
   --max-files 40
 ```
 
@@ -52,10 +59,7 @@ Example: cohort feasibility
 cargo run --release -- query \
   --db data/node0.duckdb \
   --template cohort-feasibility-count \
-  --params-file examples/queries/cohort_feasibility.json \
-  --epsilon 0.5 \
-  --min-cohort 25 \
-  --total-budget 10.0
+  --params-file examples/queries/cohort_feasibility.json
 ```
 
 Inspect top available codes for parameter selection:
