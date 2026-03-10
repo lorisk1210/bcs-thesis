@@ -1,4 +1,5 @@
 /target
 .DS_Store
+.env
 /data/*.duckdb
 /data/*.wal

@@ -2,6 +2,7 @@
 // Defines CLI and orchestrates the pipeline execution.
 
 // Modules
+mod config;
 mod db;
 mod fhir;
 mod ingest;
@@ -22,7 +23,6 @@ use sha2::{Digest, Sha256};
 
 // Local module imports
 use crate::ingest::IngestOptions;
-use crate::privacy::PrivacyConfig;
 use crate::query::{QueryTemplate, execute_template};
 
 // Defines the available subcommands and its parameters for the CLI
@@ -37,10 +37,6 @@ enum Commands {
         db: PathBuf,
         #[arg(long)]
         input_dir: PathBuf,
-        #[arg(long)]
-        node_secret: Option<String>,
-        #[arg(long)]
-        node_secret_file: Option<PathBuf>,
         #[arg(long)]
         max_files: Option<usize>,
     },
@@ -58,10 +54,6 @@ enum Commands {
         #[arg(long)]
         input_dir: PathBuf,
         #[arg(long)]
-        node_secret: Option<String>,
-        #[arg(long)]
-        node_secret_file: Option<PathBuf>,
-        #[arg(long)]
         max_files: Option<usize>,
     },
     Query {
@@ -71,12 +63,6 @@ enum Commands {
         template: QueryTemplate,
         #[arg(long)]
         params_file: PathBuf,
-        #[arg(long)]
-        epsilon: f64,
-        #[arg(long, default_value_t = 25)]
-        min_cohort: usize,
-        #[arg(long, default_value_t = 10.0)]
-        total_budget: f64,
         #[arg(long, default_value_t = 0.0)]
         clip_min: f64,
         #[arg(long, default_value_t = 300.0)]
@@ -104,6 +90,7 @@ struct Cli {
 // @param: None - No parameters are required    
 // @return: Result<()> - Returns an error if the command fails
 fn main() -> Result<()> {
+    config::load_dotenv();
     let cli = Cli::parse(); // Parse the CLI command
 
     match cli.command {
@@ -120,18 +107,10 @@ fn main() -> Result<()> {
         Commands::Ingest {
             db,
             input_dir,
-            node_secret,
-            node_secret_file,
             max_files,
         } => {
             let mut conn = open_initialized_connection(&db)?; 
-            run_ingest_command(
-                &mut conn,
-                input_dir,
-                node_secret,
-                node_secret_file,
-                max_files,
-            )?;
+            run_ingest_command(&mut conn, input_dir, max_files)?;
         }
 
         // Normalize subcommand: 
@@ -158,18 +137,10 @@ fn main() -> Result<()> {
         Commands::RunPipeline {
             db,
             input_dir,
-            node_secret,
-            node_secret_file,
             max_files,
         } => {
             let mut conn = open_initialized_connection(&db)?;
-            run_ingest_command(
-                &mut conn,
-                input_dir,
-                node_secret,
-                node_secret_file,
-                max_files,
-            )?;
+            run_ingest_command(&mut conn, input_dir, max_files)?;
             normalize::run_normalize(&conn)?;
             materialize::run_materialize(&conn)?;
             println!("Pipeline run complete");
@@ -182,13 +153,11 @@ fn main() -> Result<()> {
             db,
             template,
             params_file,
-            epsilon,
-            min_cohort,
-            total_budget,
             clip_min,
             clip_max,
         } => {
             let mut conn = open_initialized_connection(&db)?;
+            let privacy_config = config::load_privacy_config()?;
 
             let params = load_params(&params_file)?;
             let query_result = execute_template(&conn, template, &params, clip_min, clip_max)?;
@@ -199,11 +168,7 @@ fn main() -> Result<()> {
                 &fingerprint,
                 &params,
                 &query_result,
-                &PrivacyConfig {
-                    epsilon,
-                    min_cohort,
-                    total_budget,
-                },
+                &privacy_config,
             )?;
 
             if release.accepted {
@@ -256,18 +221,14 @@ fn open_initialized_connection(db_path: &Path) -> Result<duckdb::Connection> {
 // Runs the ingest command
 // @param: conn - Reference to the connection to the database
 // @param: input_dir - Reference to the input directory
-// @param: node_secret - Reference to the node secret
-// @param: node_secret_file - Reference to the node secret file
 // @param: max_files - Reference to the maximum number of files to ingest
 // @return: Result<()> - Returns an error if the command fails
 fn run_ingest_command(
     conn: &mut duckdb::Connection,
     input_dir: PathBuf,
-    node_secret: Option<String>,
-    node_secret_file: Option<PathBuf>,
     max_files: Option<usize>,
 ) -> Result<()> {
-    let node_secret = resolve_node_secret(node_secret, node_secret_file.as_deref())?; 
+    let node_secret = config::load_node_secret()?;
     let report = ingest::run_ingest(
         conn,
         &IngestOptions {
@@ -278,47 +239,6 @@ fn run_ingest_command(
     )?;
     print_ingest_report(&report);
     Ok(())
-}
-
-// Resolves the node secret
-// @param: cli_secret - Reference to the node secret
-// @param: secret_file - Reference to the node secret file
-// @return: Result<String> - Returns the node secret
-fn resolve_node_secret(
-    cli_secret: Option<String>,
-    secret_file: Option<&Path>,
-) -> Result<String> {
-    // If the node secret file is provided, read the secret from the file
-    if let Some(path) = secret_file {
-        let raw = fs::read_to_string(path)
-            .with_context(|| format!("failed to read node secret file {}", path.display()))?;
-        let secret = raw.trim().to_string();
-        if secret.is_empty() {
-            return Err(anyhow!("node secret file is empty"));
-        }
-        return Ok(secret);
-    }
-
-    // If the node secret is provided, return it
-    if let Some(secret) = cli_secret {
-        if !secret.is_empty() {
-            eprintln!(
-                "warning: --node-secret exposes the secret in shell history/process list; prefer --node-secret-file or REFINERY_NODE_SECRET"
-            );
-            return Ok(secret);
-        }
-    }
-
-    // If the node secret is provided in the environment variable, return it
-    if let Ok(secret) = std::env::var("REFINERY_NODE_SECRET") {
-        if !secret.trim().is_empty() {
-            return Ok(secret.trim().to_string());
-        }
-    }
-
-    Err(anyhow!(
-        "node secret missing; provide --node-secret-file, --node-secret, or REFINERY_NODE_SECRET"
-    ))
 }
 
 // Loads the parameters from the specified file

@@ -14,8 +14,7 @@ Command:
 ```bash
 cargo run -- run-pipeline \
   --db data/node0_v2.duckdb \
-  --input-dir jsonraw \
-  --node-secret thesis-secret
+  --input-dir jsonraw
 ```
 
 Result:
@@ -54,8 +53,7 @@ Executed queries:
 cargo run -- query \
   --db data/node0_v2.duckdb \
   --template cohort-feasibility-count \
-  --params-file /tmp/cohort_med_308136.json \
-  --epsilon 0.5 --min-cohort 1 --total-budget 10.0
+  --params-file /tmp/cohort_med_308136.json
 ```
 
 - Status: released
@@ -68,7 +66,6 @@ cargo run -- query \
   --db data/node0_v2.duckdb \
   --template comparative-effectiveness-delta \
   --params-file examples/queries/comparative_effectiveness_realistic.json \
-  --epsilon 0.5 --min-cohort 10 --total-budget 10.0 \
   --clip-min 0 --clip-max 300
 ```
 
@@ -81,8 +78,7 @@ cargo run -- query \
 cargo run -- query \
   --db data/node0_v2.duckdb \
   --template time-to-event-proxy \
-  --params-file examples/queries/time_to_event_realistic.json \
-  --epsilon 0.5 --min-cohort 5 --total-budget 10.0
+  --params-file examples/queries/time_to_event_realistic.json
 ```
 
 - Status: released
