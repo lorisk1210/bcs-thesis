@@ -1,11 +1,17 @@
+// src/privacy.rs
+// Defines the privacy enforcement and release functions
+
+// Third-party library imports
 use anyhow::{Result, anyhow};
 use chrono::Utc;
 use duckdb::{Connection, Transaction, params};
 use rand::Rng;
 use serde_json::Value;
 
+// Local module imports
 use crate::query::QueryResult;
 
+// Struct for the privacy configuration
 #[derive(Debug, Clone)]
 pub struct PrivacyConfig {
     pub epsilon: f64,
@@ -13,6 +19,7 @@ pub struct PrivacyConfig {
     pub total_budget: f64,
 }
 
+// Struct for the release result
 #[derive(Debug, Clone)]
 pub struct ReleaseResult {
     pub release_id: String,
@@ -23,6 +30,13 @@ pub struct ReleaseResult {
     pub budget_remaining: f64,
 }
 
+// Enforces the privacy and releases the query result
+// @param: conn - The connection to the database
+// @param: query_fingerprint - The fingerprint of the query
+// @param: params_json - The parameters for the query
+// @param: query_result - The result of the query
+// @param: config - The privacy configuration
+// @return: Result<ReleaseResult> - Returns the release result
 pub fn enforce_and_release(
     conn: &mut Connection,
     query_fingerprint: &str,
@@ -159,6 +173,15 @@ pub fn enforce_and_release(
     })
 }
 
+// Writes the rejection to the database
+// @param: tx - The transaction
+// @param: release_id - The ID of the release
+// @param: query_fingerprint - The fingerprint of the query
+// @param: template_name - The name of the template
+// @param: epsilon - The epsilon value
+// @param: cohort_size - The size of the cohort
+// @param: reason - The reason for the rejection
+// @return: Result<()> - Returns the result of the write
 fn write_rejection(
     tx: &Transaction<'_>,
     release_id: &str,
@@ -186,10 +209,21 @@ fn write_rejection(
     Ok(())
 }
 
+// Adds noise to the JSON value
+// @param: value - The JSON value
+// @param: value_scale - The scale for the value
+// @param: count_scale - The scale for the count
+// @return: void
 fn add_noise_to_json(value: &mut Value, value_scale: f64, count_scale: f64) {
     add_noise_with_key(value, value_scale, count_scale, None);
 }
 
+// Adds noise to the JSON value with a key
+// @param: value - The JSON value
+// @param: value_scale - The scale for the value
+// @param: count_scale - The scale for the count
+// @param: key - The key for the value
+// @return: void
 fn add_noise_with_key(value: &mut Value, value_scale: f64, count_scale: f64, key: Option<&str>) {
     match value {
         Value::Number(num) => {
@@ -231,6 +265,9 @@ fn add_noise_with_key(value: &mut Value, value_scale: f64, count_scale: f64, key
     }
 }
 
+// Checks if the key is a count like key
+// @param: key - The key to check
+// @return: bool - Returns true if the key is a count like key
 fn is_count_like_key(key: &str) -> bool {
     key == "count"
         || key == "n"
@@ -238,6 +275,9 @@ fn is_count_like_key(key: &str) -> bool {
         || key.ends_with("_count")
 }
 
+// Checks if the key should be noised
+// @param: key - The key to check
+// @return: bool - Returns true if the key should be noised
 fn should_noise_key(key: &str) -> bool {
     is_count_like_key(key)
         || key == "delta"
@@ -245,6 +285,10 @@ fn should_noise_key(key: &str) -> bool {
         || key.starts_with("incidence_")
 }
 
+// Counts the noised metrics
+// @param: value - The JSON value
+// @param: key - The key for the value
+// @return: usize - Returns the number of noised metrics
 fn count_noised_metrics(value: &Value, key: Option<&str>) -> usize {
     match value {
         Value::Number(_) => {
@@ -273,6 +317,9 @@ fn count_noised_metrics(value: &Value, key: Option<&str>) -> usize {
     }
 }
 
+// Samples the Laplace distribution
+// @param: scale - The scale for the Laplace distribution
+// @return: f64 - Returns the sampled value
 fn sample_laplace(scale: f64) -> f64 {
     if scale <= 0.0 {
         return 0.0;

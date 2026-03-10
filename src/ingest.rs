@@ -1,15 +1,22 @@
+// src/ingest.rs
+// Defines the ingestion functionality.
+
+// Standard library imports
 use std::collections::BTreeMap;
 use std::fs::File;
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
 
+// Third-party library imports
 use anyhow::{Result, anyhow};
 use duckdb::{Connection, Statement, params};
 use serde_json::Value;
 use walkdir::WalkDir;
 
+// Local module imports
 use crate::fhir;
 
+// Ingest options (simply to group related parameters)
 #[derive(Debug, Clone)]
 pub struct IngestOptions {
     pub input_dir: PathBuf,
@@ -17,6 +24,7 @@ pub struct IngestOptions {
     pub max_files: Option<usize>,
 }
 
+// Ingest report (simply to group related metrics)
 #[derive(Debug, Default)]
 pub struct IngestReport {
     pub files_scanned: usize,
@@ -27,9 +35,14 @@ pub struct IngestReport {
     pub resource_counts: BTreeMap<String, usize>,
 }
 
+// Runs the ingestion
+// @param: conn - Reference to the connection to the database
+// @param: opts - Reference to the ingestion options
+// @return: Result<IngestReport> - Returns the ingestion report
 pub fn run_ingest(conn: &mut Connection, opts: &IngestOptions) -> Result<IngestReport> {
-    ensure_event_uniqueness(conn)?;
+    ensure_event_uniqueness(conn)?; // Removes duplicate events and improves performance through indexing
 
+    // Get the list of files to ingest as PathBufs of JSON files
     let mut files: Vec<PathBuf> = WalkDir::new(&opts.input_dir)
         .into_iter()
         .filter_map(Result::ok)
@@ -49,13 +62,15 @@ pub fn run_ingest(conn: &mut Connection, opts: &IngestOptions) -> Result<IngestR
         })
         .collect();
 
-    files.sort();
+    files.sort(); // Sort the files to process them in order
+    // If max_files is set, truncate the list to the maximum number of files to ingest
     if let Some(max) = opts.max_files {
-        files.truncate(max);
+        files.truncate(max); 
     }
 
-    let tx = conn.transaction()?;
+    let tx = conn.transaction()?; // Start a transaction
 
+    // Prepare all necessary statements for the ingestion
     let mut insert_patient = tx.prepare(
         r#"
         INSERT OR REPLACE INTO bronze_patient (
@@ -116,12 +131,15 @@ pub fn run_ingest(conn: &mut Connection, opts: &IngestOptions) -> Result<IngestR
         "#,
     )?;
 
+    // Instanciate ingestion report with default values
     let mut report = IngestReport::default();
 
+    // Iterate over the files to ingest
     for path in files {
         report.files_scanned += 1;
         let ingest_file = display_path(&path);
 
+        // Opens the file 
         let file = match File::open(&path) {
             Ok(file) => file,
             Err(err) => {
@@ -138,6 +156,7 @@ pub fn run_ingest(conn: &mut Connection, opts: &IngestOptions) -> Result<IngestR
             }
         };
 
+        // Reads the file into a buffer and parses it into a JSON value named bundle
         let reader = BufReader::new(file);
         let bundle: Value = match serde_json::from_reader(reader) {
             Ok(bundle) => bundle,
@@ -155,6 +174,7 @@ pub fn run_ingest(conn: &mut Connection, opts: &IngestOptions) -> Result<IngestR
             }
         };
 
+        // Gets the entries from the bundle and creates an array of json objects which then has key-value maps inside
         let entries = match bundle.get("entry").and_then(Value::as_array) {
             Some(entries) => entries,
             None => {
@@ -173,6 +193,7 @@ pub fn run_ingest(conn: &mut Connection, opts: &IngestOptions) -> Result<IngestR
 
         report.files_ingested += 1;
 
+        // Iterate over entries and use resource for ingestion
         for entry in entries {
             let resource = match entry.get("resource") {
                 Some(resource) => resource,
@@ -190,10 +211,12 @@ pub fn run_ingest(conn: &mut Connection, opts: &IngestOptions) -> Result<IngestR
                 }
             };
 
+            // Gets the resource type and id using the fhir module
             let resource_type = fhir::resource_type(resource).unwrap_or("Unknown");
             let resource_id = fhir::resource_id(resource);
             report.resources_seen += 1;
 
+            // Inserts the resource into the database using the appropriate function
             let insert_result = match resource_type {
                 "Patient" => ingest_patient(
                     &mut insert_patient,
@@ -259,6 +282,7 @@ pub fn run_ingest(conn: &mut Connection, opts: &IngestOptions) -> Result<IngestR
         }
     }
 
+    // Drop the prepared statements
     drop(insert_patient);
     drop(insert_condition);
     drop(insert_medication);
@@ -266,11 +290,17 @@ pub fn run_ingest(conn: &mut Connection, opts: &IngestOptions) -> Result<IngestR
     drop(insert_encounter);
     drop(insert_procedure);
     drop(insert_error_stmt);
-    tx.commit()?;
 
+    // Commit the transaction
+    tx.commit()?; // Commit the transaction
+
+    // Return the ingestion report
     Ok(report)
 }
 
+// Ensures the event uniqueness: Basically replaces the existing tables with new ones only consisting unique events
+// @param: conn - Reference to the connection to the database
+// @return: Result<()> - Returns an error if the event uniqueness is not ensured
 fn ensure_event_uniqueness(conn: &Connection) -> Result<()> {
     if event_indexes_present(conn)? {
         return Ok(());
@@ -323,6 +353,9 @@ fn ensure_event_uniqueness(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+// Checks if the event indexes are present: Indexes are used to speed up the queries (faster than using a WHERE clause)
+// @param: conn - Reference to the connection to the database
+// @return: Result<bool> - Returns true if the event indexes are present, false otherwise
 fn event_indexes_present(conn: &Connection) -> Result<bool> {
     let required_indexes = [
         "idx_bronze_condition_event_id",
@@ -345,10 +378,21 @@ fn event_indexes_present(conn: &Connection) -> Result<bool> {
     Ok(true)
 }
 
+// Turns path into an owned string
+// @param: path - Reference to the path of the file
+// @return: String - Returns the path of the file
 fn display_path(path: &Path) -> String {
     path.to_string_lossy().into_owned()
 }
 
+// Inserts an error into the database
+// @param: stmt - Reference to the statement to execute
+// @param: ingest_file - Reference to the ingest file
+// @param: resource_type - Reference to the resource type
+// @param: resource_id - Reference to the resource id
+// @param: error_code - Reference to the error code
+// @param: message - Reference to the error message
+// @return: Result<()> - Returns an error if the error is not inserted
 fn insert_error(
     stmt: &mut Statement<'_>,
     ingest_file: &str,
@@ -367,6 +411,9 @@ fn insert_error(
     Ok(())
 }
 
+// Truncates an error message to 256 characters
+// @param: message - Reference to the error message
+// @return: String - Returns the truncated error message
 fn truncate_error(message: &str) -> String {
     const MAX_LEN: usize = 256;
     if message.len() <= MAX_LEN {
@@ -380,6 +427,10 @@ fn truncate_error(message: &str) -> String {
     }
 }
 
+// Gets the patient pseudo id for a resource
+// @param: resource - Reference to the resource
+// @param: node_secret - Reference to the node secret
+// @return: Result<String> - Returns the patient pseudo id
 fn patient_pseudo_for_resource(
     resource: &Value,
     node_secret: &str,
@@ -400,12 +451,23 @@ fn resolve_subject_resource_identity(
     Ok((patient_pseudo_id, event_id))
 }
 
+// Gets the required resource id: Resource must have an id
+// @param: resource - Reference to the resource
+// @param: resource_name - Reference to the resource name
+// @return: Result<String> - Returns the required resource id
 fn required_resource_id(resource: &Value, resource_name: &str) -> Result<String> {
     fhir::resource_id(resource)
         .map(ToString::to_string)
         .ok_or_else(|| anyhow!("missing {resource_name} id"))
 }
 
+// Ingests a patient: Inserts the patient into the database
+// @param: stmt - Reference to the prepared SQL statement to execute
+// @param: resource - Reference to the resource
+// @param: ingest_file - Reference to the ingest file
+// @param: node_secret - Reference to the node secret
+// @return: Result<bool> - Returns true if the patient is ingested, false otherwise
+// Note: A patient is a person who is being tracked for health events
 fn ingest_patient(
     stmt: &mut Statement<'_>,
     resource: &Value,
@@ -453,6 +515,13 @@ fn ingest_patient(
     Ok(true)
 }
 
+// Ingests a condition: Inserts the condition into the database
+// @param: stmt - Reference to the prepared SQL statement to execute
+// @param: resource - Reference to the resource
+// @param: ingest_file - Reference to the ingest file
+// @param: node_secret - Reference to the node secret
+// @return: Result<bool> - Returns true if the condition is ingested, false otherwise
+// Note: A condition is a medical event that describes a health condition of a patient
 fn ingest_condition(
     stmt: &mut Statement<'_>,
     resource: &Value,
@@ -496,6 +565,13 @@ fn ingest_condition(
     Ok(true)
 }
 
+// Ingests a medication request: Inserts the medication request into the database
+// @param: stmt - Reference to the prepared SQL statement to execute
+// @param: resource - Reference to the resource
+// @param: ingest_file - Reference to the ingest file
+// @param: node_secret - Reference to the node secret
+// @return: Result<bool> - Returns true if the medication request is ingested, false otherwise
+// Note: A medication request is a request for a medication
 fn ingest_medication_request(
     stmt: &mut Statement<'_>,
     resource: &Value,
@@ -546,6 +622,13 @@ fn ingest_medication_request(
     Ok(true)
 }
 
+// Ingests an observation: Inserts the observation into the database
+// @param: stmt - Reference to the prepared SQL statement to execute
+// @param: resource - Reference to the resource
+// @param: ingest_file - Reference to the ingest file
+// @param: node_secret - Reference to the node secret
+// @return: Result<bool> - Returns true if the observation is ingested, false otherwise
+// Note: An observation is a measurement of a patient's health
 fn ingest_observation(
     stmt: &mut Statement<'_>,
     resource: &Value,
@@ -601,6 +684,13 @@ fn ingest_observation(
     Ok(true)
 }
 
+// Ingests an encounter: Inserts the encounter into the database
+// @param: stmt - Reference to the prepared SQL statement to execute
+// @param: resource - Reference to the resource
+// @param: ingest_file - Reference to the ingest file
+// @param: node_secret - Reference to the node secret
+// @return: Result<bool> - Returns true if the encounter is ingested, false otherwise
+// Note: An encounter is a visit to a healthcare provider
 fn ingest_encounter(
     stmt: &mut Statement<'_>,
     resource: &Value,
@@ -638,6 +728,13 @@ fn ingest_encounter(
     Ok(true)
 }
 
+// Ingests a procedure: Inserts the procedure into the database
+// @param: stmt - Reference to the prepared SQL statement to execute
+// @param: resource - Reference to the resource
+// @param: ingest_file - Reference to the ingest file
+// @param: node_secret - Reference to the node secret
+// @return: Result<bool> - Returns true if the procedure is ingested, false otherwise
+// Note: A procedure is a medical procedure that is performed on a patient
 fn ingest_procedure(
     stmt: &mut Statement<'_>,
     resource: &Value,
