@@ -3,9 +3,9 @@
 
 // Modules
 mod db;
-mod features;
 mod fhir;
 mod ingest;
+mod materialize;
 mod normalize;
 mod privacy;
 mod query;
@@ -148,7 +148,7 @@ fn main() -> Result<()> {
         // Materializes the data
         Commands::Materialize { db } => {
             let conn = open_initialized_connection(&db)?;
-            features::run_materialize(&conn)?;
+            materialize::run_materialize(&conn)?;
             println!("Feature materialization complete");
         }
 
@@ -171,7 +171,7 @@ fn main() -> Result<()> {
                 max_files,
             )?;
             normalize::run_normalize(&conn)?;
-            features::run_materialize(&conn)?;
+            materialize::run_materialize(&conn)?;
             println!("Pipeline run complete");
         }
 
