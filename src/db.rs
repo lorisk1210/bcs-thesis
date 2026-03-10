@@ -1,19 +1,27 @@
+// src/db.rs
+// Defines the database schema and functions to interact with the database.
+
+// Standard library imports
 use std::path::Path;
 
+// Third-party library imports
 use anyhow::Result;
 use duckdb::Connection;
 
+// Opens a connection to the specified database
 pub fn open_connection(db_path: &Path) -> Result<Connection> {
     let conn = Connection::open(db_path)?;
+    // Set the number of threads to 4 and disable the progress bar
     conn.execute_batch(
         r#"
-        PRAGMA threads=4;
+        PRAGMA threads=4; 
         PRAGMA enable_progress_bar=false;
         "#,
     )?;
     Ok(conn)
 }
 
+// Initializes the schema in the specified database
 pub fn init_schema(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         r#"

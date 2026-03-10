@@ -1,6 +1,14 @@
+// src/normalize.rs
+// Normalizes the data in the database
+
+// Standard library imports
 use anyhow::Result;
 use duckdb::Connection;
 
+// Normalizes the data in the database
+// Turns messy/raw bronze ingest tables into clean, consistent analytical core
+// @param: conn - The connection to the database
+// @return: Result<()> - Returns an error if the normalization fails
 pub fn run_normalize(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         r#"
