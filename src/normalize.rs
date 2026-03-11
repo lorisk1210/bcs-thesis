@@ -19,7 +19,6 @@ pub fn run_normalize(conn: &Connection) -> Result<()> {
             LOWER(gender) AS gender,
             TRY_CAST(deceased_ts AS TIMESTAMP) AS deceased_at,
             COALESCE(deceased_bool, FALSE) AS deceased_bool,
-            city,
             state,
             country,
             MIN(ingest_file) AS source_file
