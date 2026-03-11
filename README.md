@@ -6,6 +6,7 @@ Rust-first prototype for a zero-raw-data-exposure analytics node over Synthea FH
 
 - Stage 1 ingestion from FHIR Bundle JSON (`entry[].resource`) into allowlisted DuckDB Bronze tables.
 - Immediate patient pseudonymization (`HMAC_SHA256`) at ingestion.
+- Ingestion-time de-identification: birth dates are stored in 5-year buckets, other clinical dates are stored at year-level only, and patient location is limited to state/country.
 - Stage 2 normalization into analytical fact/dim tables.
 - Stage 3 feature/cohort materialization tables.
 - Allowlisted query templates aligned with thesis Section 3 query families (proxy versions where needed).
