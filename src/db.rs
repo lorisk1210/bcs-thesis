@@ -31,7 +31,6 @@ pub fn init_schema(conn: &Connection) -> Result<()> {
             gender TEXT,
             deceased_ts TEXT,
             deceased_bool BOOLEAN,
-            city TEXT,
             state TEXT,
             country TEXT,
             ingest_file TEXT
@@ -144,5 +143,6 @@ pub fn init_schema(conn: &Connection) -> Result<()> {
         );
         "#,
     )?;
+
     Ok(())
 }

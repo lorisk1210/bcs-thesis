@@ -74,8 +74,8 @@ pub fn run_ingest(conn: &mut Connection, opts: &IngestOptions) -> Result<IngestR
     let mut insert_patient = tx.prepare(
         r#"
         INSERT OR REPLACE INTO bronze_patient (
-            patient_pseudo_id, birth_date, gender, deceased_ts, deceased_bool, city, state, country, ingest_file
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+            patient_pseudo_id, birth_date, gender, deceased_ts, deceased_bool, state, country, ingest_file
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
         "#,
     )?;
 
@@ -427,6 +427,36 @@ fn truncate_error(message: &str) -> String {
     }
 }
 
+// Extracts the year part from FHIR date/datetime literals like YYYY-MM-DD or YYYY-MM-DDTHH:MM:SSZ
+// @param: raw - Reference to the raw date/datetime literal
+// @return: Option<i32> - Returns the year part of the date/datetime literal
+fn extract_year(raw: &str) -> Option<i32> {
+    let year = raw.get(0..4)?;
+    if !year.chars().all(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    year.parse::<i32>().ok()
+}
+
+// Coarsens a date/datetime literal to year-level precision by mapping it to YYYY-01-01
+// @param: raw - Reference to the raw date/datetime literal
+// @return: Option<String> - Returns the coarsened date/datetime literal
+fn coarsen_to_year_start(raw: &str) -> Option<String> {
+    let year = extract_year(raw)?;
+    Some(format!("{year:04}-01-01"))
+}
+
+// Coarsens a date/datetime literal to a 5-year bucket represented by its midpoint year.
+// Example: 1985-1989 -> 1987-01-01.
+// @param: raw - Reference to the raw date/datetime literal
+// @return: Option<String> - Returns the coarsened date/datetime literal
+fn coarsen_to_five_year_bucket_anchor(raw: &str) -> Option<String> {
+    let year = extract_year(raw)?;
+    let bucket_start = year - year.rem_euclid(5);
+    let bucket_anchor = bucket_start + 2;
+    Some(format!("{bucket_anchor:04}-01-01"))
+}
+
 // Gets the patient pseudo id for a resource
 // @param: resource - Reference to the resource
 // @param: node_secret - Reference to the node secret
@@ -441,6 +471,11 @@ fn patient_pseudo_for_resource(
         .ok_or_else(|| anyhow!("failed to pseudonymize patient id"))
 }
 
+// Resolves the subject resource identity: The subject resource identity is the patient pseudo id and the event id
+// @param: resource - Reference to the resource
+// @param: resource_name - Reference to the resource name
+// @param: node_secret - Reference to the node secret
+// @return: Result<(String, String)> - Returns the subject resource identity
 fn resolve_subject_resource_identity(
     resource: &Value,
     resource_name: &str,
@@ -478,19 +513,17 @@ fn ingest_patient(
     let patient_pseudo_id = fhir::pseudonymize_patient_id(node_secret, &raw_patient_id)
         .ok_or_else(|| anyhow!("failed to pseudonymize patient id"))?;
 
-    let birth_date = fhir::get_str(resource, &["birthDate"]).map(ToString::to_string);
+    let birth_date = fhir::get_str(resource, &["birthDate"])
+        .and_then(coarsen_to_five_year_bucket_anchor);
     let gender = fhir::get_str(resource, &["gender"]).map(ToString::to_string);
-    let deceased_ts = fhir::get_str(resource, &["deceasedDateTime"]).map(ToString::to_string);
+    let deceased_ts = fhir::get_str(resource, &["deceasedDateTime"])
+        .and_then(coarsen_to_year_start);
     let deceased_bool = fhir::get_bool(resource, &["deceasedBoolean"]);
 
     let address = resource
         .get("address")
         .and_then(Value::as_array)
         .and_then(|arr| arr.first());
-    let city = address
-        .and_then(|addr| addr.get("city"))
-        .and_then(Value::as_str)
-        .map(ToString::to_string);
     let state = address
         .and_then(|addr| addr.get("state"))
         .and_then(Value::as_str)
@@ -506,7 +539,6 @@ fn ingest_patient(
         gender,
         deceased_ts,
         deceased_bool,
-        city,
         state,
         country,
         ingest_file,
@@ -544,9 +576,9 @@ fn ingest_condition(
         .map(|v| fhir::first_coding(v).1)
         .unwrap_or(None);
     let onset_ts = fhir::get_str(resource, &["onsetDateTime"])
-        .map(ToString::to_string)
-        .or_else(|| fhir::get_str(resource, &["onsetPeriod", "start"]).map(ToString::to_string));
-    let recorded_ts = fhir::get_str(resource, &["recordedDate"]).map(ToString::to_string);
+        .and_then(coarsen_to_year_start)
+        .or_else(|| fhir::get_str(resource, &["onsetPeriod", "start"]).and_then(coarsen_to_year_start));
+    let recorded_ts = fhir::get_str(resource, &["recordedDate"]).and_then(coarsen_to_year_start);
 
     stmt.execute(params![
         event_id,
@@ -586,13 +618,13 @@ fn ingest_medication_request(
     let encounter_id = fhir::encounter_id(resource);
     let (medication_system, medication_code, medication_display) =
         fhir::first_codeable_concept(resource, "medicationCodeableConcept");
-    let authored_on = fhir::get_str(resource, &["authoredOn"]).map(ToString::to_string);
+    let authored_on = fhir::get_str(resource, &["authoredOn"]).and_then(coarsen_to_year_start);
     let start_ts = fhir::get_str(resource, &["dispenseRequest", "validityPeriod", "start"])
-        .map(ToString::to_string)
-        .or_else(|| fhir::get_str(resource, &["effectivePeriod", "start"]).map(ToString::to_string));
+        .and_then(coarsen_to_year_start)
+        .or_else(|| fhir::get_str(resource, &["effectivePeriod", "start"]).and_then(coarsen_to_year_start));
     let end_ts = fhir::get_str(resource, &["dispenseRequest", "validityPeriod", "end"])
-        .map(ToString::to_string)
-        .or_else(|| fhir::get_str(resource, &["effectivePeriod", "end"]).map(ToString::to_string));
+        .and_then(coarsen_to_year_start)
+        .or_else(|| fhir::get_str(resource, &["effectivePeriod", "end"]).and_then(coarsen_to_year_start));
     let dosage_text = resource
         .get("dosageInstruction")
         .and_then(Value::as_array)
@@ -660,8 +692,9 @@ fn ingest_observation(
                 .map(|v| fhir::first_coding(v).2)
                 .unwrap_or(None)
         });
-    let effective_ts = fhir::effective_ts(resource);
-    let issued_ts = fhir::get_str(resource, &["issued"]).map(ToString::to_string);
+    let effective_ts = fhir::effective_ts(resource)
+        .and_then(|ts| coarsen_to_year_start(&ts));
+    let issued_ts = fhir::get_str(resource, &["issued"]).and_then(coarsen_to_year_start);
     let status = fhir::get_str(resource, &["status"]).map(ToString::to_string);
 
     stmt.execute(params![
@@ -705,8 +738,10 @@ fn ingest_encounter(
     let class_code = fhir::get_str(resource, &["class", "code"]).map(ToString::to_string);
     let (type_system, type_code, type_display) = fhir::first_code_from_array(resource, "type");
     let (reason_system, reason_code, reason_display) = fhir::first_code_from_array(resource, "reasonCode");
-    let start_ts = fhir::period_start(resource, "period");
-    let end_ts = fhir::period_end(resource, "period");
+    let start_ts = fhir::period_start(resource, "period")
+        .and_then(|ts| coarsen_to_year_start(&ts));
+    let end_ts = fhir::period_end(resource, "period")
+        .and_then(|ts| coarsen_to_year_start(&ts));
     let status = fhir::get_str(resource, &["status"]).map(ToString::to_string);
 
     stmt.execute(params![
@@ -749,8 +784,8 @@ fn ingest_procedure(
     let encounter_id = fhir::encounter_id(resource);
     let (code_system, code, code_display) = fhir::first_codeable_concept(resource, "code");
     let performed_ts = fhir::get_str(resource, &["performedDateTime"])
-        .map(ToString::to_string)
-        .or_else(|| fhir::get_str(resource, &["performedPeriod", "start"]).map(ToString::to_string));
+        .and_then(coarsen_to_year_start)
+        .or_else(|| fhir::get_str(resource, &["performedPeriod", "start"]).and_then(coarsen_to_year_start));
     let status = fhir::get_str(resource, &["status"]).map(ToString::to_string);
 
     stmt.execute(params![
