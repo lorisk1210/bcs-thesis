@@ -1,10 +1,16 @@
+// src/main.rs
+// CLI entrypoint for federated orchestration across hospital nodes.
+
+// Standard library imports
 use std::path::{Path, PathBuf};
 
+// Third-party library imports
 use anyhow::{Result, anyhow};
 use clap::{Parser, Subcommand};
 use refinery_protocol::{ClipBounds, FederationMode, QueryTemplate};
 use serde_json::Value;
 
+// Local module imports
 mod aggregate;
 mod client;
 mod config;
@@ -19,6 +25,7 @@ use dp_release::release_result;
 use jobs::FederatedJob;
 use protocol_runner::run_job;
 
+// Defines the available CLI subcommands for the orchestrator binary.
 #[derive(Debug, Subcommand)]
 enum Commands {
     Query {
@@ -49,6 +56,7 @@ enum Commands {
     },
 }
 
+// Top-level CLI options for the orchestrator executable.
 #[derive(Debug, Parser)]
 #[command(name = "refinery-orchestrator")]
 #[command(version)]
@@ -58,6 +66,7 @@ struct Cli {
     command: Commands,
 }
 
+// Main: Parses the CLI command and dispatches federated workflows.
 #[tokio::main]
 async fn main() -> Result<()> {
     load_dotenv();
@@ -149,11 +158,16 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
+// Loads query parameters from a JSON file.
+// @param: path - Path to the JSON parameter file
+// @return: Result<Value> - Parsed JSON parameters
 fn load_params_file(path: &Path) -> Result<Value> {
     let raw = std::fs::read_to_string(path)?;
     Ok(serde_json::from_str(&raw)?)
 }
 
+// Creates a unique federated job identifier.
+// @return: String - Timestamped random job id
 fn new_job_id() -> String {
     format!(
         "job-{}-{:08x}",

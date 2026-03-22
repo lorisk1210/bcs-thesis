@@ -1,11 +1,20 @@
+// src/protocol_runner.rs
+// Runs one federated job against all selected nodes.
+
+// Third-party library imports
 use anyhow::{Result, anyhow};
 use futures::future::try_join_all;
 use refinery_protocol::FederationMode;
 use refinery_protocol::grpc::SubmitJobRequest;
 
+// Local module imports
 use crate::client::{ClientTlsOptions, submit_job};
 use crate::jobs::FederatedJob;
 
+// Dispatches one federated job to all selected nodes and collects responses.
+// @param: job - Federated job definition containing query and target nodes
+// @param: tls - Optional TLS client settings for node connections
+// @return: Result<Vec<SubmitJobResponse>> - Successful node responses
 pub async fn run_job(job: &FederatedJob, tls: &ClientTlsOptions) -> Result<Vec<refinery_protocol::grpc::SubmitJobResponse>> {
     match job.federation_mode {
         FederationMode::Plaintext => {
