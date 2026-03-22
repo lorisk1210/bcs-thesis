@@ -1,10 +1,17 @@
+// src/dp_release.rs
+// Applies the final orchestrator-side differential privacy release step.
+
+// Third-party library imports
 use anyhow::{Result, anyhow};
 use rand::Rng;
+
+// Local module imports
 use refinery_protocol::QueryResult;
 use serde_json::Value;
 
 use crate::config::GlobalPrivacyConfig;
 
+// Result of the global release gate after aggregating node outputs.
 #[derive(Debug, Clone)]
 pub struct GlobalReleaseResult {
     pub accepted: bool,
@@ -12,6 +19,10 @@ pub struct GlobalReleaseResult {
     pub noisy_result: Option<Value>,
 }
 
+// Applies the final global release policy and injects DP noise when accepted.
+// @param: query_result - Aggregated federated result before release
+// @param: config - Global privacy settings for the orchestrator
+// @return: Result<GlobalReleaseResult> - Release decision and optional noised payload
 pub fn release_result(
     query_result: &QueryResult,
     config: &GlobalPrivacyConfig,
@@ -49,10 +60,19 @@ pub fn release_result(
     })
 }
 
+// Adds DP noise recursively to supported numeric result fields.
+// @param: value - Mutable JSON result payload
+// @param: value_scale - Laplace scale for non-count metrics
+// @param: count_scale - Laplace scale for count-like metrics
 fn add_noise_to_json(value: &mut Value, value_scale: f64, count_scale: f64) {
     add_noise_with_key(value, value_scale, count_scale, None);
 }
 
+// Walks the result JSON and applies noise to whitelisted keys.
+// @param: value - Mutable JSON subtree
+// @param: value_scale - Laplace scale for non-count metrics
+// @param: count_scale - Laplace scale for count-like metrics
+// @param: key - Optional parent key describing the current value
 fn add_noise_with_key(value: &mut Value, value_scale: f64, count_scale: f64, key: Option<&str>) {
     match value {
         Value::Number(num) => {
@@ -94,6 +114,10 @@ fn add_noise_with_key(value: &mut Value, value_scale: f64, count_scale: f64, key
     }
 }
 
+// Counts how many numeric metrics will receive DP noise.
+// @param: value - JSON subtree to inspect
+// @param: key - Optional parent key describing the current value
+// @return: usize - Number of noised numeric metrics
 fn count_noised_metrics(value: &Value, key: Option<&str>) -> usize {
     match value {
         Value::Number(_) => {
@@ -122,10 +146,16 @@ fn count_noised_metrics(value: &Value, key: Option<&str>) -> usize {
     }
 }
 
+// Checks whether a metric key should use count-style noise scaling.
+// @param: key - JSON field name
+// @return: bool - True when the field behaves like a count
 fn is_count_like_key(key: &str) -> bool {
     key == "count" || key == "n" || key.starts_with("n_") || key.ends_with("_count")
 }
 
+// Checks whether a metric key is eligible for DP noise.
+// @param: key - JSON field name
+// @return: bool - True when the field should be noised
 fn should_noise_key(key: &str) -> bool {
     is_count_like_key(key)
         || key == "delta"
@@ -133,6 +163,9 @@ fn should_noise_key(key: &str) -> bool {
         || key.starts_with("incidence_")
 }
 
+// Samples Laplace noise with the provided scale.
+// @param: scale - Laplace scale parameter
+// @return: f64 - One Laplace-distributed sample
 fn sample_laplace(scale: f64) -> f64 {
     if scale <= 0.0 {
         return 0.0;

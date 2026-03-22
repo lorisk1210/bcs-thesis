@@ -1,9 +1,15 @@
+// src/config.rs
+// Defines orchestrator configuration loading from environment variables.
+
+// Standard library imports
 use std::env;
 use std::fmt::Display;
 use std::str::FromStr;
 
+// Third-party library imports
 use anyhow::{Result, anyhow};
 
+// Global privacy settings applied after node aggregation.
 #[derive(Debug, Clone)]
 pub struct GlobalPrivacyConfig {
     pub epsilon: f64,
@@ -11,10 +17,13 @@ pub struct GlobalPrivacyConfig {
     pub total_budget: f64,
 }
 
+// Loads environment variables from the local `.env` file.
 pub fn load_dotenv() {
     let _ = dotenvy::from_filename(".env");
 }
 
+// Loads the orchestrator privacy configuration from environment variables.
+// @return: Result<GlobalPrivacyConfig> - Parsed and validated privacy settings
 pub fn load_privacy_config() -> Result<GlobalPrivacyConfig> {
     let config = GlobalPrivacyConfig {
         epsilon: parse_env("REFINERY_EPSILON")?,
@@ -35,6 +44,9 @@ pub fn load_privacy_config() -> Result<GlobalPrivacyConfig> {
     Ok(config)
 }
 
+// Loads a required environment variable.
+// @param: name - Environment variable name
+// @return: Result<String> - Trimmed non-empty value
 fn required_env(name: &str) -> Result<String> {
     match env::var(name) {
         Ok(value) => {
@@ -50,6 +62,9 @@ fn required_env(name: &str) -> Result<String> {
     }
 }
 
+// Parses an environment variable into a typed value.
+// @param: name - Environment variable name
+// @return: Result<T> - Parsed typed configuration value
 fn parse_env<T>(name: &str) -> Result<T>
 where
     T: FromStr,
