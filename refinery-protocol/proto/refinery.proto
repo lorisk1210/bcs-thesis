@@ -2,23 +2,34 @@ syntax = "proto3";
 
 package refinery;
 
+// NodeService defines the remote API exposed by each hospital node.
 service NodeService {
+  // Reports whether the node service is alive.
   rpc HealthCheck (HealthCheckRequest) returns (HealthCheckResponse);
+  // Returns node metadata and supported execution capabilities.
   rpc GetCapabilities (GetCapabilitiesRequest) returns (GetCapabilitiesResponse);
+  // Runs the local ingest -> normalize -> materialize pipeline on the node.
   rpc RunPipeline (RunPipelineRequest) returns (RunPipelineResponse);
+  // Executes a federated job request on the node.
   rpc SubmitJob (SubmitJobRequest) returns (SubmitJobResponse);
+  // Returns the node-local status for a federated job.
   rpc GetJobStatus (GetJobStatusRequest) returns (GetJobStatusResponse);
+  // Reserved for later SMPC protocol rounds.
   rpc RunFederationRound (RunFederationRoundRequest) returns (RunFederationRoundResponse);
 }
 
+// Empty health-check request.
 message HealthCheckRequest {}
 
+// Health-check response with a simple node status string.
 message HealthCheckResponse {
   string status = 1;
 }
 
+// Empty capabilities request.
 message GetCapabilitiesRequest {}
 
+// Node capability metadata returned to the orchestrator.
 message GetCapabilitiesResponse {
   string node_id = 1;
   string protocol_version = 2;
@@ -27,16 +38,19 @@ message GetCapabilitiesResponse {
   repeated string supported_federation_modes = 5;
 }
 
+// Request to run the local data pipeline on a node.
 message RunPipelineRequest {
   uint64 max_files = 1;
 }
 
+// Response returned after a pipeline run request finishes.
 message RunPipelineResponse {
   bool success = 1;
   string message = 2;
   string report_json = 3;
 }
 
+// Canonical federated job request submitted by the orchestrator.
 message SubmitJobRequest {
   string job_id = 1;
   string template = 2;
@@ -46,6 +60,7 @@ message SubmitJobRequest {
   string federation_mode = 6;
 }
 
+// Node response after evaluating a federated job request.
 message SubmitJobResponse {
   string job_id = 1;
   bool accepted = 2;
@@ -56,10 +71,12 @@ message SubmitJobResponse {
   string fingerprint = 7;
 }
 
+// Request to fetch node-local status for a previously submitted job.
 message GetJobStatusRequest {
   string job_id = 1;
 }
 
+// Job status response returned by a node.
 message GetJobStatusResponse {
   string job_id = 1;
   string status = 2;
@@ -67,11 +84,13 @@ message GetJobStatusResponse {
   string reason = 4;
 }
 
+// Placeholder request for later SMPC protocol rounds.
 message RunFederationRoundRequest {
   string job_id = 1;
   string payload_json = 2;
 }
 
+// Placeholder response for later SMPC protocol rounds.
 message RunFederationRoundResponse {
   bool accepted = 1;
   string reason = 2;

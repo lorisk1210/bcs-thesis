@@ -1,12 +1,19 @@
+// src/stats.rs
+// Shared sufficient-statistics aggregation and final rendering logic.
+
+// Standard library imports
 use std::collections::BTreeMap;
 
+// Third-party library imports
 use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
+// Local module imports
 use crate::errors::invalid_stats_shape;
 use crate::query::{ClipBounds, QueryResult, QueryTemplate};
 
+// Local statistics computed by one hospital node for one query.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LocalStatistics {
     pub template: QueryTemplate,
@@ -14,6 +21,10 @@ pub struct LocalStatistics {
     pub stats: Value,
 }
 
+// Aggregates per-node statistics into one federated statistics payload.
+// @param: template - Query template that defines the expected stats shape
+// @param: items - Local statistics returned by the participating nodes
+// @return: Result<LocalStatistics> - Aggregated statistics for the full federation
 pub fn aggregate_local_statistics(
     template: QueryTemplate,
     items: &[LocalStatistics],
@@ -65,6 +76,10 @@ pub fn aggregate_local_statistics(
     })
 }
 
+// Renders a final query result from aggregated sufficient statistics.
+// @param: aggregated - Aggregated federation statistics
+// @param: clip - Clipping bounds used for bounded metrics
+// @return: Result<QueryResult> - Final rendered result with sensitivity metadata
 pub fn render_query_result(
     aggregated: &LocalStatistics,
     clip: ClipBounds,
@@ -140,6 +155,7 @@ pub fn render_query_result(
     })
 }
 
+// Aggregates grouped statistics such as subgroup and dose-response buckets.
 fn aggregate_group_sums(items: &[LocalStatistics], group_key: &str) -> Result<Value> {
     let mut combined: BTreeMap<String, (u64, f64)> = BTreeMap::new();
 
@@ -175,6 +191,7 @@ fn aggregate_group_sums(items: &[LocalStatistics], group_key: &str) -> Result<Va
     Ok(Value::Array(rendered))
 }
 
+// Renders grouped federated statistics into the final response schema.
 fn render_groups(stats: &Value, group_key: &str) -> Result<Value> {
     let groups = stats
         .get("groups")
@@ -199,6 +216,7 @@ fn render_groups(stats: &Value, group_key: &str) -> Result<Value> {
     Ok(Value::Array(rendered))
 }
 
+// Computes sensitivity for the final rendered query result.
 fn sensitivity_for(template: QueryTemplate, aggregated: &LocalStatistics, clip: ClipBounds) -> f64 {
     match template {
         QueryTemplate::CohortFeasibilityCount => 1.0,
@@ -219,30 +237,36 @@ fn sensitivity_for(template: QueryTemplate, aggregated: &LocalStatistics, clip: 
     }
 }
 
+// Computes clipped mean sensitivity for bounded continuous outcomes.
 fn clipped_mean_sensitivity(clip: ClipBounds, cohort_size: usize) -> f64 {
     (clip.max - clip.min).abs() / cohort_size.max(1) as f64
 }
 
+// Computes inverse-count sensitivity for count-derived rates.
 fn inverse_count_sensitivity(cohort_size: usize) -> f64 {
     1.0 / cohort_size.max(1) as f64
 }
 
+// Reads one required unsigned integer field from a statistics payload.
 fn required_u64(value: &Value, key: &str) -> Result<u64> {
     value.get(key)
         .and_then(Value::as_u64)
         .ok_or_else(|| invalid_stats_shape(key))
 }
 
+// Reads one required floating-point field from a statistics payload.
 fn required_f64(value: &Value, key: &str) -> Result<f64> {
     value.get(key)
         .and_then(Value::as_f64)
         .ok_or_else(|| invalid_stats_shape(key))
 }
 
+// Computes a mean only when the denominator is non-zero.
 fn safe_mean(sum: f64, n: u64) -> Option<f64> {
     (n > 0).then_some(sum / n as f64)
 }
 
+// Computes a rate only when the denominator is non-zero.
 fn safe_rate(count: f64, n: u64) -> Option<f64> {
     (n > 0).then_some(count / n as f64)
 }
