@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 // Third-party library imports
 use anyhow::{Result, anyhow};
 use duckdb::{Connection, Statement, params};
+use serde::Serialize;
 use serde_json::Value;
 use walkdir::WalkDir;
 
@@ -25,7 +26,7 @@ pub struct IngestOptions {
 }
 
 // Ingest report (simply to group related metrics)
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone, Serialize)]
 pub struct IngestReport {
     pub files_scanned: usize,
     pub files_ingested: usize,
