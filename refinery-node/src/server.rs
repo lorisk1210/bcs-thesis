@@ -1,9 +1,14 @@
+// src/server.rs
+// gRPC server that exposes the hospital node as a network service.
+
+// Standard library imports
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::str::FromStr;
+use std::sync::Arc;
 
+// Third-party library imports
 use anyhow::{Context, Result};
 use refinery_protocol::grpc::node_service_server::{NodeService, NodeServiceServer};
 use refinery_protocol::grpc::{
@@ -16,11 +21,13 @@ use tokio::sync::Mutex;
 use tonic::transport::{Certificate, Identity, Server, ServerTlsConfig};
 use tonic::{Request, Response, Status};
 
+// Local module imports
 use crate::app;
 use crate::config;
 use crate::local_policy;
 use crate::query;
 
+// Optional TLS settings for the node server.
 #[derive(Debug, Clone)]
 pub struct TlsConfig {
     pub cert_path: Option<PathBuf>,
@@ -28,6 +35,7 @@ pub struct TlsConfig {
     pub client_ca_cert_path: Option<PathBuf>,
 }
 
+// Runtime configuration for one hospital node service instance.
 #[derive(Debug, Clone)]
 pub struct NodeServerConfig {
     pub node_id: String,
@@ -37,6 +45,7 @@ pub struct NodeServerConfig {
     pub tls: TlsConfig,
 }
 
+// Minimal in-memory status for submitted jobs.
 #[derive(Debug, Clone)]
 struct JobRecord {
     status: String,
@@ -44,17 +53,22 @@ struct JobRecord {
     reason: String,
 }
 
+// Shared server state across gRPC handlers.
 #[derive(Clone)]
 struct NodeState {
     config: NodeServerConfig,
     jobs: Arc<Mutex<HashMap<String, JobRecord>>>,
 }
 
+// gRPC service implementation for the hospital node.
 #[derive(Clone)]
 struct NodeGrpcService {
     state: NodeState,
 }
 
+// Starts the node gRPC server.
+// @param: config - Runtime configuration for the node service
+// @return: Result<()> - Returns an error if the server fails to start or serve
 pub async fn serve(config: NodeServerConfig) -> Result<()> {
     let addr: SocketAddr = config
         .bind_addr
@@ -81,6 +95,9 @@ pub async fn serve(config: NodeServerConfig) -> Result<()> {
     Ok(())
 }
 
+// Loads TLS configuration if certificate paths were provided.
+// @param: config - TLS-related file paths
+// @return: Result<Option<ServerTlsConfig>> - TLS config or None for plaintext transport
 async fn load_tls_config(config: &TlsConfig) -> Result<Option<ServerTlsConfig>> {
     match (&config.cert_path, &config.key_path) {
         (Some(cert_path), Some(key_path)) => {
@@ -101,6 +118,7 @@ async fn load_tls_config(config: &TlsConfig) -> Result<Option<ServerTlsConfig>> 
 
 #[tonic::async_trait]
 impl NodeService for NodeGrpcService {
+    // HealthCheck RPC: Reports whether the node service is up.
     async fn health_check(
         &self,
         _request: Request<HealthCheckRequest>,
@@ -110,6 +128,7 @@ impl NodeService for NodeGrpcService {
         }))
     }
 
+    // GetCapabilities RPC: Returns supported templates and protocol modes.
     async fn get_capabilities(
         &self,
         _request: Request<GetCapabilitiesRequest>,
@@ -129,6 +148,7 @@ impl NodeService for NodeGrpcService {
         }))
     }
 
+    // RunPipeline RPC: Executes ingest -> normalize -> materialize on this hospital node.
     async fn run_pipeline(
         &self,
         request: Request<RunPipelineRequest>,
@@ -153,6 +173,7 @@ impl NodeService for NodeGrpcService {
         }))
     }
 
+    // SubmitJob RPC: Computes local sufficient statistics and applies the local participation gate.
     async fn submit_job(
         &self,
         request: Request<SubmitJobRequest>,
@@ -241,6 +262,7 @@ impl NodeService for NodeGrpcService {
         Ok(Response::new(response))
     }
 
+    // GetJobStatus RPC: Returns the in-memory status of a previously submitted federated job.
     async fn get_job_status(
         &self,
         request: Request<GetJobStatusRequest>,
@@ -257,6 +279,7 @@ impl NodeService for NodeGrpcService {
         }))
     }
 
+    // RunFederationRound RPC: Reserved for future SMPC protocol rounds.
     async fn run_federation_round(
         &self,
         _request: Request<RunFederationRoundRequest>,
@@ -267,18 +290,22 @@ impl NodeService for NodeGrpcService {
     }
 }
 
+// Converts a tokio join error into a gRPC status.
 fn join_error(error: tokio::task::JoinError) -> Status {
     Status::internal(format!("task join error: {error}"))
 }
 
+// Converts an anyhow error into a gRPC status.
 fn status_from_anyhow(error: anyhow::Error) -> Status {
     Status::internal(error.to_string())
 }
 
+// Converts a serde JSON error into a gRPC status.
 fn status_from_serde(error: serde_json::Error) -> Status {
     Status::internal(error.to_string())
 }
 
+// Converts a serde JSON error into anyhow so spawn_blocking can use one error type.
 fn status_from_serde_to_anyhow(error: serde_json::Error) -> anyhow::Error {
     anyhow::anyhow!(error)
 }

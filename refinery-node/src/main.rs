@@ -1,5 +1,10 @@
+// src/main.rs
+// CLI entrypoint for local hospital-node operations and server startup.
+
+// Standard library imports
 use std::path::PathBuf;
 
+// Third-party library imports
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use refinery_node::app;
@@ -9,6 +14,7 @@ use refinery_node::server::{NodeServerConfig, TlsConfig, serve};
 use refinery_protocol::QueryTemplate;
 use serde_json::Value;
 
+// Defines the available CLI subcommands for the hospital node binary.
 #[derive(Debug, Subcommand)]
 enum Commands {
     Init {
@@ -75,6 +81,7 @@ enum Commands {
     },
 }
 
+// CLI definition
 #[derive(Debug, Parser)]
 #[command(name = "refinery-node")]
 #[command(version)]
@@ -84,6 +91,9 @@ struct Cli {
     command: Commands,
 }
 
+// Main: Parses the CLI command and dispatches to the shared node application code.
+// @param: None - No parameters are required
+// @return: Result<()> - Returns an error if the command fails
 #[tokio::main]
 async fn main() -> Result<()> {
     refinery_node::config::load_dotenv();
@@ -197,6 +207,8 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
+// Prints an ingestion report in the same style as the original single-node CLI.
+// @param: report - Ingestion report returned by the pipeline
 fn print_ingest_report(report: &refinery_node::ingest::IngestReport) {
     println!("files_scanned: {}", report.files_scanned);
     println!("files_ingested: {}", report.files_ingested);
@@ -208,6 +220,12 @@ fn print_ingest_report(report: &refinery_node::ingest::IngestReport) {
     }
 }
 
+// Prints the top codes for one analytical table.
+// @param: conn - Database connection
+// @param: table_name - Analytical table to inspect
+// @param: code_column - Code column to aggregate
+// @param: top - Number of rows to print
+// @return: Result<()> - Error if the inspect target is unsupported
 fn print_top_codes(
     conn: &duckdb::Connection,
     table_name: &str,
