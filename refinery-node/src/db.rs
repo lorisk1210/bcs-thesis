@@ -141,6 +141,16 @@ pub fn init_schema(conn: &Connection) -> Result<()> {
             epsilon DOUBLE,
             executed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
+
+        CREATE TABLE IF NOT EXISTS federated_job_audit (
+            job_id TEXT,
+            query_fingerprint TEXT,
+            template_name TEXT,
+            cohort_size BIGINT,
+            accepted BOOLEAN,
+            reason TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
         "#,
     )?;
 

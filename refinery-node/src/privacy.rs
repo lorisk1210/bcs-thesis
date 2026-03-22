@@ -6,10 +6,8 @@ use anyhow::{Result, anyhow};
 use chrono::Utc;
 use duckdb::{Connection, Transaction, params};
 use rand::Rng;
+use refinery_protocol::QueryResult;
 use serde_json::Value;
-
-// Local module imports
-use crate::query::QueryResult;
 
 // Struct for the privacy configuration
 #[derive(Debug, Clone)]

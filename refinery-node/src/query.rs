@@ -1,61 +1,18 @@
-// src/query.rs
-// Defines the query templates and functions to execute them
-
-// Third-party library imports
-use anyhow::{anyhow, Result};
-use clap::ValueEnum;
+use anyhow::{Result, anyhow};
 use duckdb::Connection;
-use serde_json::{json, Map, Value};
+use refinery_protocol::{
+    ClipBounds, LocalStatistics, QueryResult, QueryTemplate, render_query_result,
+};
+use serde_json::{Map, Value, json};
 
-// Local module imports
 use crate::fhir;
 
-// Enum for available query templates
-#[derive(Debug, Clone, Copy, ValueEnum)]
-pub enum QueryTemplate {
-    CohortFeasibilityCount,
-    ComparativeEffectivenessDelta,
-    TimeToEventProxy,
-    SubgroupEffectEstimate,
-    DoseResponseTrend,
-    AeIncidenceSignalProxy,
-    DdiSignalProxy,
+#[derive(Debug, Default, Clone)]
+struct ArmMetric {
+    n: usize,
+    total: f64,
 }
 
-// Implementation for QueryTemplate
-impl QueryTemplate {
-    // Converts the query template to a string
-    // @param: self - The query template
-    // @return: &'static str - The string representation of the query template
-    pub fn as_str(self) -> &'static str {
-        match self {
-            QueryTemplate::CohortFeasibilityCount => "cohort_feasibility_count",
-            QueryTemplate::ComparativeEffectivenessDelta => "comparative_effectiveness_delta",
-            QueryTemplate::TimeToEventProxy => "time_to_event_proxy",
-            QueryTemplate::SubgroupEffectEstimate => "subgroup_effect_estimate",
-            QueryTemplate::DoseResponseTrend => "dose_response_trend",
-            QueryTemplate::AeIncidenceSignalProxy => "ae_incidence_signal_proxy",
-            QueryTemplate::DdiSignalProxy => "ddi_signal_proxy",
-        }
-    }
-}
-
-// Struct for the query result
-#[derive(Debug, Clone)]
-pub struct QueryResult {
-    pub template_name: String,
-    pub raw_result: Value,
-    pub cohort_size: usize,
-    pub sensitivity: f64,
-}
-
-// Executes the query template depending on the template type
-// @param: conn - The connection to the database
-// @param: template - The query template
-// @param: params - The parameters for the query
-// @param: clip_min - The minimum value for the clip
-// @param: clip_max - The maximum value for the clip
-// @return: Result<QueryResult> - Returns the query result
 pub fn execute_template(
     conn: &Connection,
     template: QueryTemplate,
@@ -63,70 +20,55 @@ pub fn execute_template(
     clip_min: f64,
     clip_max: f64,
 ) -> Result<QueryResult> {
+    let statistics = compute_local_statistics(
+        conn,
+        template,
+        params,
+        ClipBounds {
+            min: clip_min,
+            max: clip_max,
+        },
+    )?;
+    render_query_result(
+        &statistics,
+        ClipBounds {
+            min: clip_min,
+            max: clip_max,
+        },
+    )
+}
+
+pub fn compute_local_statistics(
+    conn: &Connection,
+    template: QueryTemplate,
+    params: &Value,
+    clip: ClipBounds,
+) -> Result<LocalStatistics> {
     match template {
         QueryTemplate::CohortFeasibilityCount => execute_cohort_count(conn, template, params),
         QueryTemplate::ComparativeEffectivenessDelta => {
-            execute_comparative_effectiveness(conn, template, params, clip_min, clip_max)
+            execute_comparative_effectiveness(conn, template, params, clip)
         }
         QueryTemplate::TimeToEventProxy => execute_time_to_event(conn, template, params),
-        QueryTemplate::SubgroupEffectEstimate => {
-            execute_subgroup_effect(conn, template, params, clip_min, clip_max)
-        }
-        QueryTemplate::DoseResponseTrend => execute_dose_response(conn, template, params, clip_min, clip_max),
+        QueryTemplate::SubgroupEffectEstimate => execute_subgroup_effect(conn, template, params, clip),
+        QueryTemplate::DoseResponseTrend => execute_dose_response(conn, template, params, clip),
         QueryTemplate::AeIncidenceSignalProxy => execute_ae_signal(conn, template, params),
         QueryTemplate::DdiSignalProxy => execute_ddi_signal(conn, template, params),
     }
 }
 
-// Struct for the arm metric
-#[derive(Debug, Default, Clone)]
-struct ArmMetric {
-    n: usize,
-    metric: Option<f64>,
-}
-
-// Builds the query result
-// @param: template - The query template
-// @param: raw_result - The raw result from the SQL query
-// @param: cohort_size - The size of the cohort
-// @param: sensitivity - The sensitivity of the query
-// @return: QueryResult - Returns the query result
-fn build_query_result(
+fn build_local_statistics(
     template: QueryTemplate,
-    raw_result: Value,
+    stats: Value,
     cohort_size: usize,
-    sensitivity: f64,
-) -> QueryResult {
-    QueryResult {
-        template_name: template.as_str().to_string(),
-        raw_result,
+) -> LocalStatistics {
+    LocalStatistics {
+        template,
         cohort_size,
-        sensitivity,
+        stats,
     }
 }
 
-// Calculates the clipped mean sensitivity
-// @param: clip_min - The minimum value for the clip
-// @param: clip_max - The maximum value for the clip
-// @param: cohort_size - The size of the cohort
-// @return: f64 - Returns the clipped mean sensitivity
-fn clipped_mean_sensitivity(clip_min: f64, clip_max: f64, cohort_size: usize) -> f64 {
-    (clip_max - clip_min).abs() / (cohort_size.max(1) as f64)
-}
-
-// Calculates the inverse count sensitivity
-// @param: cohort_size - The size of the cohort
-// @return: f64 - Returns the inverse count sensitivity
-fn inverse_count_sensitivity(cohort_size: usize) -> f64 {
-    1.0 / cohort_size.max(1) as f64
-}
-
-// Collects the named arm metrics from the SQL query
-// @param: conn - The connection to the database
-// @param: sql - The SQL query
-// @param: arm_a_name - The name of the first arm
-// @param: arm_b_name - The name of the second arm
-// @return: Result<(ArmMetric, ArmMetric)> - Returns the two arm metrics
 fn collect_named_arm_metrics(
     conn: &Connection,
     sql: &str,
@@ -142,24 +84,19 @@ fn collect_named_arm_metrics(
     while let Some(row) = rows.next()? {
         let arm: String = row.get(0)?;
         let n: i64 = row.get(1)?;
-        let metric: Option<f64> = row.get(2)?;
+        let total: Option<f64> = row.get(2)?;
         if arm == arm_a_name {
             arm_a.n = n.max(0) as usize;
-            arm_a.metric = metric;
+            arm_a.total = total.unwrap_or(0.0);
         } else if arm == arm_b_name {
             arm_b.n = n.max(0) as usize;
-            arm_b.metric = metric;
+            arm_b.total = total.unwrap_or(0.0);
         }
     }
 
     Ok((arm_a, arm_b))
 }
 
-// Collects the grouped metrics from the SQL query
-// @param: conn - The connection to the database
-// @param: sql - The SQL query
-// @param: group_key - The key for the group
-// @return: Result<(usize, Vec<Value>)> - Returns the total number of metrics and the grouped metrics
 fn collect_grouped_metrics(conn: &Connection, sql: &str, group_key: &str) -> Result<(usize, Vec<Value>)> {
     let mut stmt = conn.prepare(sql)?;
     let mut rows = stmt.query([])?;
@@ -170,26 +107,21 @@ fn collect_grouped_metrics(conn: &Connection, sql: &str, group_key: &str) -> Res
     while let Some(row) = rows.next()? {
         let group_value: String = row.get(0)?;
         let n: i64 = row.get(1)?;
-        let mean_outcome: Option<f64> = row.get(2)?;
+        let outcome_sum: Option<f64> = row.get(2)?;
         let n_usize = n.max(0) as usize;
         total_n += n_usize;
 
         let mut group_json = Map::new();
         group_json.insert(group_key.to_string(), Value::String(group_value));
         group_json.insert("n".to_string(), json!(n_usize));
-        group_json.insert("mean_outcome".to_string(), json!(mean_outcome));
+        group_json.insert("outcome_sum".to_string(), json!(outcome_sum.unwrap_or(0.0)));
         groups.push(Value::Object(group_json));
     }
 
     Ok((total_n, groups))
 }
 
-// Executes the cohort count query template
-// @param: conn - The connection to the database
-// @param: template - The query template
-// @param: params - The parameters for the query
-// @return: Result<QueryResult> - Returns the query result
-fn execute_cohort_count(conn: &Connection, template: QueryTemplate, params: &Value) -> Result<QueryResult> {
+fn execute_cohort_count(conn: &Connection, template: QueryTemplate, params: &Value) -> Result<LocalStatistics> {
     let filter = cohort_filter_sql("p", params, true)?;
     let sql = format!(
         r#"
@@ -202,28 +134,19 @@ fn execute_cohort_count(conn: &Connection, template: QueryTemplate, params: &Val
     let cohort_size: i64 = conn.query_row(&sql, [], |row| row.get(0))?;
     let count = cohort_size.max(0) as usize;
 
-    Ok(build_query_result(
+    Ok(build_local_statistics(
         template,
         json!({"count": count}),
         count,
-        1.0,
     ))
 }
 
-// Executes the comparative effectiveness query template
-// @param: conn - The connection to the database
-// @param: template - The query template
-// @param: params - The parameters for the query
-// @param: clip_min - The minimum value for the clip
-// @param: clip_max - The maximum value for the clip
-// @return: Result<QueryResult> - Returns the query result
 fn execute_comparative_effectiveness(
     conn: &Connection,
     template: QueryTemplate,
     params: &Value,
-    clip_min: f64,
-    clip_max: f64,
-) -> Result<QueryResult> {
+    clip: ClipBounds,
+) -> Result<LocalStatistics> {
     let exposed = required_code(params, "exposed_medication_code")?;
     let control = required_code(params, "control_medication_code")?;
     let outcome = required_code(params, "outcome_observation_code")?;
@@ -269,43 +192,33 @@ fn execute_comparative_effectiveness(
         SELECT
             a.arm,
             COUNT(*)::BIGINT AS n,
-            AVG(outcomes.outcome_mean) AS mean_outcome
+            SUM(outcomes.outcome_mean) AS outcome_sum
         FROM arms a
         JOIN outcomes ON outcomes.patient_pseudo_id = a.patient_pseudo_id
         WHERE a.arm IS NOT NULL
         GROUP BY a.arm
         ORDER BY a.arm
-        "#
+        "#,
+        clip_min = clip.min,
+        clip_max = clip.max,
     );
 
     let (exposed_arm, control_arm) = collect_named_arm_metrics(conn, &sql, "exposed", "control")?;
-
     let cohort_size = exposed_arm.n + control_arm.n;
-    let delta = match (exposed_arm.metric, control_arm.metric) {
-        (Some(exp), Some(ctrl)) => Some(exp - ctrl),
-        _ => None,
-    };
 
-    Ok(build_query_result(
+    Ok(build_local_statistics(
         template,
         json!({
             "n_exposed": exposed_arm.n,
             "n_control": control_arm.n,
-            "mean_outcome_exposed": exposed_arm.metric,
-            "mean_outcome_control": control_arm.metric,
-            "delta": delta
+            "outcome_sum_exposed": exposed_arm.total,
+            "outcome_sum_control": control_arm.total
         }),
         cohort_size,
-        clipped_mean_sensitivity(clip_min, clip_max, cohort_size),
     ))
 }
 
-// Executes the time to event query template
-// @param: conn - The connection to the database
-// @param: template - The query template
-// @param: params - The parameters for the query
-// @return: Result<QueryResult> - Returns the query result
-fn execute_time_to_event(conn: &Connection, template: QueryTemplate, params: &Value) -> Result<QueryResult> {
+fn execute_time_to_event(conn: &Connection, template: QueryTemplate, params: &Value) -> Result<LocalStatistics> {
     let index_med = required_code(params, "index_medication_code")?;
     let event_condition = required_code(params, "event_condition_code")?;
     let max_days = params.get("max_days").and_then(Value::as_i64).unwrap_or(3650).max(1);
@@ -348,42 +261,33 @@ fn execute_time_to_event(conn: &Connection, template: QueryTemplate, params: &Va
         )
         SELECT
             COUNT(*)::BIGINT,
-            AVG(days_to_event)
+            SUM(days_to_event)
         FROM joined
         "#
     );
 
-    let (n, mean_days): (i64, Option<f64>) =
+    let (n, sum_days): (i64, Option<f64>) =
         conn.query_row(&sql, [], |row| Ok((row.get(0)?, row.get(1)?)))?;
 
     let cohort_size = n.max(0) as usize;
-    let sensitivity = max_days as f64 / (cohort_size.max(1) as f64);
 
-    Ok(build_query_result(
+    Ok(build_local_statistics(
         template,
         json!({
             "n": cohort_size,
-            "mean_days_to_event": mean_days
+            "sum_days_to_event": sum_days.unwrap_or(0.0),
+            "max_days": max_days
         }),
         cohort_size,
-        sensitivity,
     ))
 }
 
-// Executes the subgroup effect query template
-// @param: conn - The connection to the database
-// @param: template - The query template
-// @param: params - The parameters for the query
-// @param: clip_min - The minimum value for the clip
-// @param: clip_max - The maximum value for the clip
-// @return: Result<QueryResult> - Returns the query result
 fn execute_subgroup_effect(
     conn: &Connection,
     template: QueryTemplate,
     params: &Value,
-    clip_min: f64,
-    clip_max: f64,
-) -> Result<QueryResult> {
+    clip: ClipBounds,
+) -> Result<LocalStatistics> {
     let med_code = required_code(params, "medication_code")?;
     let outcome_code = required_code(params, "outcome_observation_code")?;
     let subgroup = params
@@ -411,9 +315,7 @@ fn execute_subgroup_effect(
         for window in cutoffs.windows(2) {
             let lower = window[0];
             let upper = window[1];
-            case_sql.push_str(&format!(
-                " WHEN p.age_years < {upper} THEN '[{lower},{upper})'"
-            ));
+            case_sql.push_str(&format!(" WHEN p.age_years < {upper} THEN '[{lower},{upper})'"));
         }
 
         let last = *cutoffs.last().unwrap_or(&65);
@@ -444,40 +346,33 @@ fn execute_subgroup_effect(
         SELECT
             {subgroup_expr} AS subgroup,
             COUNT(*)::BIGINT AS n,
-            AVG(outcomes.outcome_mean) AS mean_outcome
+            SUM(outcomes.outcome_mean) AS outcome_sum
         FROM exposed e
         JOIN outcomes ON outcomes.patient_pseudo_id = e.patient_pseudo_id
         JOIN feature_patient_summary p ON p.patient_pseudo_id = e.patient_pseudo_id
         WHERE 1=1 {filter}
         GROUP BY subgroup
         ORDER BY subgroup
-        "#
+        "#,
+        clip_min = clip.min,
+        clip_max = clip.max,
     );
 
     let (cohort_size, groups) = collect_grouped_metrics(conn, &sql, "subgroup")?;
 
-    Ok(build_query_result(
+    Ok(build_local_statistics(
         template,
         json!({"groups": groups}),
         cohort_size,
-        clipped_mean_sensitivity(clip_min, clip_max, cohort_size),
     ))
 }
 
-// Executes the dose response trend query template
-// @param: conn - The connection to the database
-// @param: template - The query template
-// @param: params - The parameters for the query
-// @param: clip_min - The minimum value for the clip
-// @param: clip_max - The maximum value for the clip
-// @return: Result<QueryResult> - Returns the query result
 fn execute_dose_response(
     conn: &Connection,
     template: QueryTemplate,
     params: &Value,
-    clip_min: f64,
-    clip_max: f64,
-) -> Result<QueryResult> {
+    clip: ClipBounds,
+) -> Result<LocalStatistics> {
     let med_code = required_code(params, "medication_code")?;
     let outcome_code = required_code(params, "outcome_observation_code")?;
 
@@ -514,29 +409,25 @@ fn execute_dose_response(
         SELECT
             dose_bucket,
             COUNT(*)::BIGINT AS n,
-            AVG(outcome_mean) AS mean_outcome
+            SUM(outcome_mean) AS outcome_sum
         FROM joined
         GROUP BY dose_bucket
         ORDER BY dose_bucket
-        "#
+        "#,
+        clip_min = clip.min,
+        clip_max = clip.max,
     );
 
     let (cohort_size, groups) = collect_grouped_metrics(conn, &sql, "dose_bucket")?;
 
-    Ok(build_query_result(
+    Ok(build_local_statistics(
         template,
         json!({"groups": groups}),
         cohort_size,
-        clipped_mean_sensitivity(clip_min, clip_max, cohort_size),
     ))
 }
 
-// Executes the AE incidence signal proxy query template
-// @param: conn - The connection to the database
-// @param: template - The query template
-// @param: params - The parameters for the query
-// @return: Result<QueryResult> - Returns the query result
-fn execute_ae_signal(conn: &Connection, template: QueryTemplate, params: &Value) -> Result<QueryResult> {
+fn execute_ae_signal(conn: &Connection, template: QueryTemplate, params: &Value) -> Result<LocalStatistics> {
     let exposed = required_code(params, "exposed_medication_code")?;
     let control = required_code(params, "control_medication_code")?;
     let ae_code = required_code(params, "ae_condition_code")?;
@@ -575,7 +466,7 @@ fn execute_ae_signal(conn: &Connection, template: QueryTemplate, params: &Value)
         SELECT
             arm,
             COUNT(*)::BIGINT AS n,
-            AVG(ae_flags.ae_flag) AS incidence
+            SUM(ae_flags.ae_flag) AS ae_count
         FROM arms
         JOIN ae_flags USING (patient_pseudo_id)
         WHERE arm IS NOT NULL
@@ -587,25 +478,19 @@ fn execute_ae_signal(conn: &Connection, template: QueryTemplate, params: &Value)
     let (exposed_arm, control_arm) = collect_named_arm_metrics(conn, &sql, "exposed", "control")?;
     let cohort_size = exposed_arm.n + control_arm.n;
 
-    Ok(build_query_result(
+    Ok(build_local_statistics(
         template,
         json!({
             "n_exposed": exposed_arm.n,
             "n_control": control_arm.n,
-            "incidence_exposed": exposed_arm.metric,
-            "incidence_control": control_arm.metric
+            "ae_count_exposed": exposed_arm.total,
+            "ae_count_control": control_arm.total
         }),
         cohort_size,
-        inverse_count_sensitivity(cohort_size),
     ))
 }
 
-// Executes the DDI signal proxy query template
-// @param: conn - The connection to the database
-// @param: template - The query template
-// @param: params - The parameters for the query
-// @return: Result<QueryResult> - Returns the query result
-fn execute_ddi_signal(conn: &Connection, template: QueryTemplate, params: &Value) -> Result<QueryResult> {
+fn execute_ddi_signal(conn: &Connection, template: QueryTemplate, params: &Value) -> Result<LocalStatistics> {
     let med_a = required_code(params, "medication_a_code")?;
     let med_b = required_code(params, "medication_b_code")?;
     let ae_code = required_code(params, "ae_condition_code")?;
@@ -642,7 +527,7 @@ fn execute_ddi_signal(conn: &Connection, template: QueryTemplate, params: &Value
         SELECT
             arm,
             COUNT(*)::BIGINT AS n,
-            AVG(ae_flags.ae_flag) AS incidence
+            SUM(ae_flags.ae_flag) AS ae_count
         FROM arms
         JOIN ae_flags USING (patient_pseudo_id)
         GROUP BY arm
@@ -653,23 +538,18 @@ fn execute_ddi_signal(conn: &Connection, template: QueryTemplate, params: &Value
     let (combo_arm, a_only_arm) = collect_named_arm_metrics(conn, &sql, "combo", "a_only")?;
     let cohort_size = combo_arm.n + a_only_arm.n;
 
-    Ok(build_query_result(
+    Ok(build_local_statistics(
         template,
         json!({
             "n_combo": combo_arm.n,
             "n_a_only": a_only_arm.n,
-            "incidence_combo": combo_arm.metric,
-            "incidence_a_only": a_only_arm.metric
+            "ae_count_combo": combo_arm.total,
+            "ae_count_a_only": a_only_arm.total
         }),
         cohort_size,
-        inverse_count_sensitivity(cohort_size),
     ))
 }
 
-// Gets the required code from the parameters
-// @param: params - The parameters
-// @param: key - The key for the code
-// @return: Result<String> - Returns the code
 fn required_code(params: &Value, key: &str) -> Result<String> {
     let raw = params
         .get(key)
@@ -678,10 +558,6 @@ fn required_code(params: &Value, key: &str) -> Result<String> {
     fhir::sanitize_code_literal(raw).ok_or_else(|| anyhow!("invalid code literal for '{key}'"))
 }
 
-// Gets the optional code list from the parameters
-// @param: params - The parameters
-// @param: key - The key for the code list
-// @return: Result<Vec<String>> - Returns the code list
 fn optional_code_list(params: &Value, key: &str) -> Result<Vec<String>> {
     let Some(arr) = params.get(key).and_then(Value::as_array) else {
         return Ok(Vec::new());
@@ -699,11 +575,6 @@ fn optional_code_list(params: &Value, key: &str) -> Result<Vec<String>> {
     Ok(out)
 }
 
-// Gets the cohort filter SQL from the parameters
-// @param: patient_alias - The alias for the patient
-// @param: params - The parameters
-// @param: include_medication_codes - Whether to include medication codes
-// @return: Result<String> - Returns the cohort filter SQL
 fn cohort_filter_sql(patient_alias: &str, params: &Value, include_medication_codes: bool) -> Result<String> {
     let mut filters = String::new();
     let min_age = params.get("min_age").and_then(Value::as_i64);
@@ -720,7 +591,6 @@ fn cohort_filter_sql(patient_alias: &str, params: &Value, include_medication_cod
         filters.push_str(&format!(
             " AND {patient_alias}.age_years >= {min_age}",
             patient_alias = patient_alias,
-            min_age = min_age
         ));
     }
 
@@ -728,7 +598,6 @@ fn cohort_filter_sql(patient_alias: &str, params: &Value, include_medication_cod
         filters.push_str(&format!(
             " AND {patient_alias}.age_years <= {max_age}",
             patient_alias = patient_alias,
-            max_age = max_age
         ));
     }
 
@@ -742,7 +611,6 @@ fn cohort_filter_sql(patient_alias: &str, params: &Value, include_medication_cod
             filters.push_str(&format!(
                 " AND LOWER({patient_alias}.gender) = '{gender}'",
                 patient_alias = patient_alias,
-                gender = gender
             ));
         }
     }
@@ -770,9 +638,6 @@ fn cohort_filter_sql(patient_alias: &str, params: &Value, include_medication_cod
     Ok(filters)
 }
 
-// Gets the code list SQL from the codes
-// @param: codes - The codes
-// @return: String - Returns the code list SQL
 fn code_list_sql(codes: &[String]) -> String {
     codes
         .iter()
