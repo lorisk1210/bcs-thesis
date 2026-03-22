@@ -140,6 +140,72 @@ See sample parameter files in `examples/queries/`.
 - `time-to-event-proxy` releases noised count + noised mean only (median omitted due to DP sensitivity constraints).
 - AE/DDI templates release noised incidences; risk ratios should be derived client-side from released incidences.
 
+## Current local rules
+
+The hospital node currently enforces two separate local rule sets:
+
+### 1. Local standalone CLI release rules
+
+Used when running:
+
+```bash
+cargo run -p refinery-node -- query ...
+```
+
+Current behavior:
+
+- the node computes a local query result
+- the local result is rejected if `cohort_size < REFINERY_MIN_COHORT`
+- the local result is rejected if the local privacy budget would exceed `REFINERY_TOTAL_BUDGET`
+- if accepted, Laplace noise is applied using `REFINERY_EPSILON`
+
+Where this is implemented:
+
+- [refinery-node/src/privacy.rs](/Users/lorisklindworth/Documents/Uni_HSG/Semester%206/Bachelorarbeit/refinery/refinery-node/src/privacy.rs)
+
+What changes these rules:
+
+- `REFINERY_EPSILON`
+- `REFINERY_MIN_COHORT`
+- `REFINERY_TOTAL_BUDGET`
+
+### 2. Local federated participation rules
+
+Used when the orchestrator submits a federated job to a hospital node.
+
+Current behavior:
+
+- the node computes local sufficient statistics first
+- the node decides whether it may participate in the federated job
+- right now that decision is based only on the local minimum cohort rule
+- if `local cohort_size < REFINERY_MIN_COHORT`, the node rejects participation
+- if it passes, the node returns its local statistics to the orchestrator in plaintext mode
+
+Where this is implemented:
+
+- [refinery-node/src/local_policy.rs](/Users/lorisklindworth/Documents/Uni_HSG/Semester%206/Bachelorarbeit/refinery/refinery-node/src/local_policy.rs)
+
+Where the decision is called from:
+
+- [refinery-node/src/server.rs](/Users/lorisklindworth/Documents/Uni_HSG/Semester%206/Bachelorarbeit/refinery/refinery-node/src/server.rs)
+
+What changes these rules right now:
+
+- `REFINERY_MIN_COHORT`
+
+How to change the local rules:
+
+- change environment thresholds in `.env` if you only want to tune policy values
+- change [refinery-node/src/local_policy.rs](/Users/lorisklindworth/Documents/Uni_HSG/Semester%206/Bachelorarbeit/refinery/refinery-node/src/local_policy.rs) if you want new federated participation rules
+- change [refinery-node/src/privacy.rs](/Users/lorisklindworth/Documents/Uni_HSG/Semester%206/Bachelorarbeit/refinery/refinery-node/src/privacy.rs) if you want different local standalone release behavior
+
+Examples of future rules that would belong in `local_policy.rs`:
+
+- allowlist specific templates only
+- per-site rate limits
+- per-site federated budget checks
+- institution-specific approval rules
+
 ## Current limitations
 
 - Pharmacovigilance uses proxy event definitions via `Condition` (Synthea export has no `AdverseEvent` resources in this dataset).

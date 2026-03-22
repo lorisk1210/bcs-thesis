@@ -1,3 +1,6 @@
+// src/lib.rs
+// Re-exports the hospital node modules so the CLI and server can share the same code.
+
 pub mod app;
 pub mod config;
 pub mod db;

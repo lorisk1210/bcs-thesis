@@ -1,3 +1,7 @@
+// src/query.rs
+// Executes allowlisted local queries and converts them into sufficient statistics.
+
+// Third-party library imports
 use anyhow::{Result, anyhow};
 use duckdb::Connection;
 use refinery_protocol::{
@@ -5,14 +9,23 @@ use refinery_protocol::{
 };
 use serde_json::{Map, Value, json};
 
+// Local module imports
 use crate::fhir;
 
+// Aggregated metric for one query arm before federation.
 #[derive(Debug, Default, Clone)]
 struct ArmMetric {
     n: usize,
     total: f64,
 }
 
+// Executes a template end-to-end for the local CLI.
+// @param: conn - Database connection
+// @param: template - Allowlisted query template
+// @param: params - Query parameters as JSON
+// @param: clip_min - Lower clipping bound for bounded metrics
+// @param: clip_max - Upper clipping bound for bounded metrics
+// @return: Result<QueryResult> - Fully rendered local query result
 pub fn execute_template(
     conn: &Connection,
     template: QueryTemplate,
@@ -38,6 +51,12 @@ pub fn execute_template(
     )
 }
 
+// Computes local sufficient statistics used by the federated orchestrator.
+// @param: conn - Database connection
+// @param: template - Allowlisted query template
+// @param: params - Query parameters as JSON
+// @param: clip - Clipping bounds for bounded metrics
+// @return: Result<LocalStatistics> - Local contribution for later aggregation
 pub fn compute_local_statistics(
     conn: &Connection,
     template: QueryTemplate,
@@ -57,6 +76,7 @@ pub fn compute_local_statistics(
     }
 }
 
+// Builds a local statistics payload for one query template.
 fn build_local_statistics(
     template: QueryTemplate,
     stats: Value,
@@ -69,6 +89,7 @@ fn build_local_statistics(
     }
 }
 
+// Collects per-arm counts and sums from a SQL query.
 fn collect_named_arm_metrics(
     conn: &Connection,
     sql: &str,
@@ -97,6 +118,7 @@ fn collect_named_arm_metrics(
     Ok((arm_a, arm_b))
 }
 
+// Collects grouped counts and sums used for subgroup and dose-response templates.
 fn collect_grouped_metrics(conn: &Connection, sql: &str, group_key: &str) -> Result<(usize, Vec<Value>)> {
     let mut stmt = conn.prepare(sql)?;
     let mut rows = stmt.query([])?;
@@ -121,6 +143,7 @@ fn collect_grouped_metrics(conn: &Connection, sql: &str, group_key: &str) -> Res
     Ok((total_n, groups))
 }
 
+// Computes local statistics for the cohort feasibility template.
 fn execute_cohort_count(conn: &Connection, template: QueryTemplate, params: &Value) -> Result<LocalStatistics> {
     let filter = cohort_filter_sql("p", params, true)?;
     let sql = format!(
@@ -141,6 +164,7 @@ fn execute_cohort_count(conn: &Connection, template: QueryTemplate, params: &Val
     ))
 }
 
+// Computes local per-arm counts and bounded outcome sums for comparative effectiveness.
 fn execute_comparative_effectiveness(
     conn: &Connection,
     template: QueryTemplate,
@@ -218,6 +242,7 @@ fn execute_comparative_effectiveness(
     ))
 }
 
+// Computes local counts and summed time-to-event values for the proxy template.
 fn execute_time_to_event(conn: &Connection, template: QueryTemplate, params: &Value) -> Result<LocalStatistics> {
     let index_med = required_code(params, "index_medication_code")?;
     let event_condition = required_code(params, "event_condition_code")?;
@@ -282,6 +307,7 @@ fn execute_time_to_event(conn: &Connection, template: QueryTemplate, params: &Va
     ))
 }
 
+// Computes subgroup-local counts and bounded outcome sums.
 fn execute_subgroup_effect(
     conn: &Connection,
     template: QueryTemplate,
@@ -367,6 +393,7 @@ fn execute_subgroup_effect(
     ))
 }
 
+// Computes dose-bucket-local counts and bounded outcome sums.
 fn execute_dose_response(
     conn: &Connection,
     template: QueryTemplate,
@@ -427,6 +454,7 @@ fn execute_dose_response(
     ))
 }
 
+// Computes local AE event counts and denominators for exposed and control arms.
 fn execute_ae_signal(conn: &Connection, template: QueryTemplate, params: &Value) -> Result<LocalStatistics> {
     let exposed = required_code(params, "exposed_medication_code")?;
     let control = required_code(params, "control_medication_code")?;
@@ -490,6 +518,7 @@ fn execute_ae_signal(conn: &Connection, template: QueryTemplate, params: &Value)
     ))
 }
 
+// Computes local event counts and denominators for the DDI proxy comparison.
 fn execute_ddi_signal(conn: &Connection, template: QueryTemplate, params: &Value) -> Result<LocalStatistics> {
     let med_a = required_code(params, "medication_a_code")?;
     let med_b = required_code(params, "medication_b_code")?;
@@ -550,6 +579,7 @@ fn execute_ddi_signal(conn: &Connection, template: QueryTemplate, params: &Value
     ))
 }
 
+// Reads one required coded parameter and sanitizes it for SQL use.
 fn required_code(params: &Value, key: &str) -> Result<String> {
     let raw = params
         .get(key)
@@ -558,6 +588,7 @@ fn required_code(params: &Value, key: &str) -> Result<String> {
     fhir::sanitize_code_literal(raw).ok_or_else(|| anyhow!("invalid code literal for '{key}'"))
 }
 
+// Reads an optional array of coded parameters and sanitizes them for SQL use.
 fn optional_code_list(params: &Value, key: &str) -> Result<Vec<String>> {
     let Some(arr) = params.get(key).and_then(Value::as_array) else {
         return Ok(Vec::new());
@@ -575,6 +606,7 @@ fn optional_code_list(params: &Value, key: &str) -> Result<Vec<String>> {
     Ok(out)
 }
 
+// Builds shared patient filters used across query templates.
 fn cohort_filter_sql(patient_alias: &str, params: &Value, include_medication_codes: bool) -> Result<String> {
     let mut filters = String::new();
     let min_age = params.get("min_age").and_then(Value::as_i64);
@@ -638,6 +670,7 @@ fn cohort_filter_sql(patient_alias: &str, params: &Value, include_medication_cod
     Ok(filters)
 }
 
+// Formats a list of SQL-safe code literals for an IN (...) clause.
 fn code_list_sql(codes: &[String]) -> String {
     codes
         .iter()
