@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "refinery-check",
     "refinery-node",
     "refinery-organize",
     "refinery-orchestrator",

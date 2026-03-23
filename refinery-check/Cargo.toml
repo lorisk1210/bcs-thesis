@@ -1,0 +1,16 @@
+[package]
+name = "refinery-check"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+chrono.workspace = true
+clap.workspace = true
+duckdb.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+refinery-node = { path = "../refinery-node" }
+refinery-orchestrator = { path = "../refinery-orchestrator" }
+refinery-protocol = { path = "../refinery-protocol" }
