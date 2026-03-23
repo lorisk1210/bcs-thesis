@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 
 // Third-party library imports
 use anyhow::{Context, Result, anyhow};
+use chrono::{NaiveDate, Utc};
 use refinery_protocol::QueryTemplate;
 use serde::Serialize;
 use serde_json::Value;
@@ -15,7 +16,7 @@ use sha2::{Digest, Sha256};
 // Local module imports
 use crate::config;
 use crate::db;
-use crate::ingest::{self, IngestOptions, IngestReport};
+use crate::ingest::{self, IngestOptions, IngestReport, TransformMode};
 use crate::materialize;
 use crate::normalize;
 
@@ -46,6 +47,16 @@ pub fn run_ingest(
     input_dir: PathBuf,
     max_files: Option<usize>,
 ) -> Result<IngestReport> {
+    run_ingest_with_mode(conn, input_dir, max_files, TransformMode::Coarsened)
+}
+
+// Runs ingestion using an explicit transform mode.
+pub fn run_ingest_with_mode(
+    conn: &mut duckdb::Connection,
+    input_dir: PathBuf,
+    max_files: Option<usize>,
+    transform_mode: TransformMode,
+) -> Result<IngestReport> {
     let node_secret = config::load_node_secret()?;
     ingest::run_ingest(
         conn,
@@ -53,6 +64,7 @@ pub fn run_ingest(
             input_dir,
             node_secret,
             max_files,
+            transform_mode,
         },
     )
 }
@@ -67,10 +79,27 @@ pub fn run_pipeline(
     input_dir: &Path,
     max_files: Option<usize>,
 ) -> Result<PipelineRunSummary> {
+    run_pipeline_with_options(
+        db_path,
+        input_dir,
+        max_files,
+        TransformMode::Coarsened,
+        Utc::now().date_naive(),
+    )
+}
+
+// Runs the full local node pipeline with explicit ingest and materialization options.
+pub fn run_pipeline_with_options(
+    db_path: &Path,
+    input_dir: &Path,
+    max_files: Option<usize>,
+    transform_mode: TransformMode,
+    as_of_date: NaiveDate,
+) -> Result<PipelineRunSummary> {
     let mut conn = open_initialized_connection(db_path)?;
-    let ingest = run_ingest(&mut conn, input_dir.to_path_buf(), max_files)?;
+    let ingest = run_ingest_with_mode(&mut conn, input_dir.to_path_buf(), max_files, transform_mode)?;
     normalize::run_normalize(&conn)?;
-    materialize::run_materialize(&conn)?;
+    materialize::run_materialize_as_of(&conn, as_of_date)?;
 
     Ok(PipelineRunSummary {
         ingest,
