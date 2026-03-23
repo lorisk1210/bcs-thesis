@@ -11,11 +11,11 @@ use refinery_protocol::grpc::SubmitJobRequest;
 use crate::client::{ClientTlsOptions, submit_job};
 use crate::jobs::FederatedJob;
 
-// Dispatches one federated job to all selected nodes and collects responses.
-// @param: job - Federated job definition containing query and target nodes
-// @param: tls - Optional TLS client settings for node connections
-// @return: Result<Vec<SubmitJobResponse>> - Successful node responses
-pub async fn run_job(job: &FederatedJob, tls: &ClientTlsOptions) -> Result<Vec<refinery_protocol::grpc::SubmitJobResponse>> {
+// Dispatches one federated job to all selected nodes and returns every node response, including rejections.
+pub async fn collect_job_responses(
+    job: &FederatedJob,
+    tls: &ClientTlsOptions,
+) -> Result<Vec<refinery_protocol::grpc::SubmitJobResponse>> {
     match job.federation_mode {
         FederationMode::Plaintext => {
             let params_json = serde_json::to_string(&job.params)?;
@@ -33,17 +33,25 @@ pub async fn run_job(job: &FederatedJob, tls: &ClientTlsOptions) -> Result<Vec<r
                     tls,
                 )
             });
-            let responses = try_join_all(futures).await?;
-            if let Some(rejection) = responses.iter().find(|response| !response.accepted) {
-                return Err(anyhow!(
-                    "federated job rejected by a node: {}",
-                    rejection.reason
-                ));
-            }
-            Ok(responses)
+            try_join_all(futures).await
         }
         FederationMode::SmpcAdditiveSharing => Err(anyhow!(
             "smpc_additive_sharing is not implemented yet; use plaintext mode"
         )),
     }
+}
+
+// Dispatches one federated job to all selected nodes and collects responses.
+// @param: job - Federated job definition containing query and target nodes
+// @param: tls - Optional TLS client settings for node connections
+// @return: Result<Vec<SubmitJobResponse>> - Successful node responses
+pub async fn run_job(job: &FederatedJob, tls: &ClientTlsOptions) -> Result<Vec<refinery_protocol::grpc::SubmitJobResponse>> {
+    let responses = collect_job_responses(job, tls).await?;
+    if let Some(rejection) = responses.iter().find(|response| !response.accepted) {
+        return Err(anyhow!(
+            "federated job rejected by a node: {}",
+            rejection.reason
+        ));
+    }
+    Ok(responses)
 }

@@ -3,6 +3,7 @@
 
 // Standard library imports
 use anyhow::Result;
+use chrono::{NaiveDate, Utc};
 use duckdb::Connection;
 
 // Turns clinical facts into ready-to-use features
@@ -15,8 +16,14 @@ use duckdb::Connection;
 // feature_event_flags: quick boolean indicators for common cohort filters/stratification
 // feature_patient_summary: one row per patient with demographic + summary clinical features.
 pub fn run_materialize(conn: &Connection) -> Result<()> {
+    run_materialize_as_of(conn, Utc::now().date_naive())
+}
+
+// Turns clinical facts into ready-to-use features using a fixed as-of date for stable age calculations.
+pub fn run_materialize_as_of(conn: &Connection, as_of_date: NaiveDate) -> Result<()> {
     conn.execute_batch(
-        r#"
+        &format!(
+            r#"
         CREATE OR REPLACE TABLE feature_medication_exposure AS
         SELECT
             patient_pseudo_id,
@@ -70,7 +77,7 @@ pub fn run_materialize(conn: &Connection) -> Result<()> {
             p.patient_pseudo_id,
             p.gender,
             p.birth_date,
-            DATE_DIFF('year', p.birth_date, CURRENT_DATE) AS age_years,
+            DATE_DIFF('year', p.birth_date, DATE '{as_of_date}') AS age_years,
             COALESCE(c.comorbidity_count, 0) AS comorbidity_count,
             COALESCE(f.had_inpatient_encounter, 0) AS had_inpatient_encounter,
             COALESCE(f.had_condition_record, 0) AS had_condition_record
@@ -78,6 +85,7 @@ pub fn run_materialize(conn: &Connection) -> Result<()> {
         LEFT JOIN feature_comorbidity c USING (patient_pseudo_id)
         LEFT JOIN feature_event_flags f USING (patient_pseudo_id);
         "#,
+        ),
     )?;
 
     Ok(())

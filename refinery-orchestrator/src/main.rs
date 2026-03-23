@@ -7,23 +7,14 @@ use std::path::{Path, PathBuf};
 // Third-party library imports
 use anyhow::{Result, anyhow};
 use clap::{Parser, Subcommand};
+use refinery_orchestrator::aggregate::aggregate_plaintext_responses;
+use refinery_orchestrator::client::{ClientTlsOptions, capabilities, health_check};
+use refinery_orchestrator::config::{load_dotenv, load_privacy_config};
+use refinery_orchestrator::dp_release::release_result;
+use refinery_orchestrator::jobs::FederatedJob;
+use refinery_orchestrator::protocol_runner::run_job;
 use refinery_protocol::{ClipBounds, FederationMode, QueryTemplate};
 use serde_json::Value;
-
-// Local module imports
-mod aggregate;
-mod client;
-mod config;
-mod dp_release;
-mod jobs;
-mod protocol_runner;
-
-use aggregate::aggregate_plaintext_responses;
-use client::{ClientTlsOptions, capabilities, health_check};
-use config::{load_dotenv, load_privacy_config};
-use dp_release::release_result;
-use jobs::FederatedJob;
-use protocol_runner::run_job;
 
 // Defines the available CLI subcommands for the orchestrator binary.
 #[derive(Debug, Subcommand)]
