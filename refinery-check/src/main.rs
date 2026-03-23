@@ -12,8 +12,9 @@ use refinery_protocol::{ClipBounds, QueryTemplate};
 
 // Local module imports
 use refinery_check::{
-    CompareMode, CompareRequest, default_as_of_date, exit_code, parse_raw_node_spec,
-    render_text_report, run_compare,
+    CompareMode, CompareRequest, PrepareRequest, default_as_of_date, exit_code,
+    parse_raw_node_spec, prepare_baselines, render_text_prepare_report, render_text_report,
+    run_compare,
 };
 use refinery_node::app;
 
@@ -35,6 +36,16 @@ enum OutputFormat {
 // Available refinery-check CLI subcommands.
 #[derive(Debug, Subcommand)]
 enum Commands {
+    Prepare {
+        #[arg(long)]
+        prepared_dir: std::path::PathBuf,
+        #[arg(long, required = true)]
+        raw_node: Vec<String>,
+        #[arg(long)]
+        as_of_date: Option<chrono::NaiveDate>,
+        #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+        format: OutputFormat,
+    },
     Compare {
         #[arg(long)]
         template: QueryTemplate,
@@ -42,7 +53,9 @@ enum Commands {
         params_file: std::path::PathBuf,
         #[arg(long, required = true)]
         node: Vec<String>,
-        #[arg(long, required = true)]
+        #[arg(long)]
+        prepared_dir: Option<std::path::PathBuf>,
+        #[arg(long)]
         raw_node: Vec<String>,
         #[arg(long, default_value_t = 0.0)]
         clip_min: f64,
@@ -90,10 +103,38 @@ async fn run() -> Result<i32> {
     let cli = Cli::parse();
 
     match cli.command {
+        Commands::Prepare {
+            prepared_dir,
+            raw_node,
+            as_of_date,
+            format,
+        } => {
+            let raw_nodes = raw_node
+                .iter()
+                .map(|spec| parse_raw_node_spec(spec))
+                .collect::<Result<Vec<_>>>()?;
+            let report = prepare_baselines(PrepareRequest {
+                prepared_dir,
+                raw_nodes,
+                as_of_date: as_of_date.unwrap_or_else(default_as_of_date),
+            })?;
+
+            match format {
+                OutputFormat::Text => {
+                    println!("{}", render_text_prepare_report(&report));
+                }
+                OutputFormat::Json => {
+                    println!("{}", serde_json::to_string_pretty(&report)?);
+                }
+            }
+
+            Ok(0)
+        }
         Commands::Compare {
             template,
             params_file,
             node,
+            prepared_dir,
             raw_node,
             clip_min,
             clip_max,
@@ -103,6 +144,16 @@ async fn run() -> Result<i32> {
             ca_cert,
             tls_domain_name,
         } => {
+            if prepared_dir.is_some() && !raw_node.is_empty() {
+                return Err(anyhow::anyhow!(
+                    "use either --prepared-dir or --raw-node, not both"
+                ));
+            }
+            if prepared_dir.is_none() && raw_node.is_empty() {
+                return Err(anyhow::anyhow!(
+                    "compare requires either --prepared-dir or at least one --raw-node"
+                ));
+            }
             let params = app::load_params_file(&params_file)?;
             let raw_nodes = raw_node
                 .iter()
@@ -121,6 +172,7 @@ async fn run() -> Result<i32> {
                     max: clip_max,
                 },
                 node_endpoints: node,
+                prepared_dir,
                 raw_nodes,
                 as_of_date: as_of_date.unwrap_or_else(default_as_of_date),
                 tls: ClientTlsOptions {
