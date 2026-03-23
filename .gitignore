@@ -3,4 +3,5 @@
 .env
 /data/*.duckdb
 /data/*.wal
+/data/*
 /jsonraw/nodes/*
