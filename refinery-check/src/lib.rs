@@ -3,13 +3,14 @@
 
 // Standard library imports
 use std::collections::{BTreeMap, BTreeSet};
+use std::fs;
 use std::path::{Path, PathBuf};
 
 // Third-party library imports
 use anyhow::{Context, Result, anyhow};
 use chrono::{NaiveDate, Utc};
 use duckdb::Connection;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
 // Local module imports
@@ -46,9 +47,18 @@ pub struct CompareRequest {
     pub params: Value,
     pub clip: ClipBounds,
     pub node_endpoints: Vec<String>,
+    pub prepared_dir: Option<PathBuf>,
     pub raw_nodes: Vec<RawNodeInput>,
     pub as_of_date: NaiveDate,
     pub tls: ClientTlsOptions,
+}
+
+// Request used to prepare reusable baseline databases on disk.
+#[derive(Debug, Clone)]
+pub struct PrepareRequest {
+    pub prepared_dir: PathBuf,
+    pub raw_nodes: Vec<RawNodeInput>,
+    pub as_of_date: NaiveDate,
 }
 
 // Resolved node metadata after matching live endpoints to raw input directories.
@@ -57,6 +67,8 @@ struct PreparedNode {
     endpoint: String,
     node_id: String,
     raw_input_dir: PathBuf,
+    coarsened_db_path: Option<PathBuf>,
+    exact_db_path: Option<PathBuf>,
 }
 
 // Full comparison output returned by refinery-check.
@@ -68,6 +80,14 @@ pub struct ComparisonReport {
     pub raw_distortion: ComparisonSection,
 }
 
+// Output returned after preparing reusable baseline databases.
+#[derive(Debug, Clone, Serialize)]
+pub struct PrepareReport {
+    pub prepared_dir: String,
+    pub as_of_date: String,
+    pub nodes: Vec<PreparedBaselineReport>,
+}
+
 // Stable request metadata included in text and JSON reports.
 #[derive(Debug, Clone, Serialize)]
 pub struct RequestMetadata {
@@ -77,6 +97,15 @@ pub struct RequestMetadata {
     pub clip_max: f64,
     pub as_of_date: String,
     pub params: Value,
+}
+
+// One prepared baseline database pair written to disk.
+#[derive(Debug, Clone, Serialize)]
+pub struct PreparedBaselineReport {
+    pub node_id: String,
+    pub raw_input_dir: String,
+    pub coarsened_db_path: String,
+    pub exact_db_path: String,
 }
 
 // Resolved node mapping emitted in the report.
@@ -137,11 +166,34 @@ pub enum DistortionExpectation {
     DistortionExpected,
 }
 
+// Metadata persisted in a prepared baseline directory.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PreparedDirectoryMetadata {
+    version: u32,
+    as_of_date: String,
+    nodes: Vec<PreparedNodeMetadata>,
+}
+
+// One node entry inside the prepared baseline metadata file.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PreparedNodeMetadata {
+    node_id: String,
+    raw_input_dir: String,
+    coarsened_db_path: String,
+    exact_db_path: String,
+}
+
 // Executes refinery-check end-to-end and returns the structured report.
 // @param: request - Fully resolved comparison request
 // @return: Result<ComparisonReport> - Comparison report with parity/distortion sections
 pub async fn run_compare(request: CompareRequest) -> Result<ComparisonReport> {
-    let prepared_nodes = prepare_nodes(&request.node_endpoints, &request.raw_nodes, &request.tls).await?;
+    let prepared_nodes = match &request.prepared_dir {
+        Some(prepared_dir) => {
+            let metadata = load_prepared_metadata(prepared_dir)?;
+            prepare_nodes_from_metadata(&request.node_endpoints, &metadata, &request.tls).await?
+        }
+        None => prepare_nodes(&request.node_endpoints, &request.raw_nodes, &request.tls).await?,
+    };
     let request_metadata = RequestMetadata {
         mode: mode_name(request.mode).to_string(),
         template: request.template.as_str().to_string(),
@@ -159,24 +211,44 @@ pub async fn run_compare(request: CompareRequest) -> Result<ComparisonReport> {
         })
         .collect::<Vec<_>>();
 
-    let coarsened_baseline = build_baseline_result(
-        &prepared_nodes,
-        request.template,
-        &request.params,
-        request.clip,
-        request.as_of_date,
-        TransformMode::Coarsened,
-    )?;
-
-    let exact_baseline = if matches!(request.mode, CompareMode::Full | CompareMode::RawDistortion) {
-        Some(build_baseline_result(
+    let coarsened_baseline = if request.prepared_dir.is_some() {
+        build_baseline_result_from_prepared(
+            &prepared_nodes,
+            request.template,
+            &request.params,
+            request.clip,
+            PreparedBaselineKind::Coarsened,
+        )?
+    } else {
+        build_baseline_result_from_raw(
             &prepared_nodes,
             request.template,
             &request.params,
             request.clip,
             request.as_of_date,
-            TransformMode::Exact,
-        )?)
+            TransformMode::Coarsened,
+        )?
+    };
+
+    let exact_baseline = if matches!(request.mode, CompareMode::Full | CompareMode::RawDistortion) {
+        Some(if request.prepared_dir.is_some() {
+            build_baseline_result_from_prepared(
+                &prepared_nodes,
+                request.template,
+                &request.params,
+                request.clip,
+                PreparedBaselineKind::Exact,
+            )?
+        } else {
+            build_baseline_result_from_raw(
+                &prepared_nodes,
+                request.template,
+                &request.params,
+                request.clip,
+                request.as_of_date,
+                TransformMode::Exact,
+            )?
+        })
     } else {
         None
     };
@@ -274,6 +346,83 @@ pub async fn run_compare(request: CompareRequest) -> Result<ComparisonReport> {
     })
 }
 
+// Prepares reusable coarsened and exact baseline databases on disk.
+// @param: request - Preparation request containing the target directory and raw nodes
+// @return: Result<PrepareReport> - Report describing the prepared baseline files
+pub fn prepare_baselines(request: PrepareRequest) -> Result<PrepareReport> {
+    let mut raw_by_node_id = BTreeMap::new();
+    for raw_node in &request.raw_nodes {
+        if raw_by_node_id
+            .insert(raw_node.node_id.clone(), raw_node.input_dir.clone())
+            .is_some()
+        {
+            return Err(anyhow!(
+                "duplicate raw node mapping for {}",
+                raw_node.node_id
+            ));
+        }
+    }
+
+    let coarsened_dir = request.prepared_dir.join("coarsened");
+    let exact_dir = request.prepared_dir.join("exact");
+    fs::create_dir_all(&coarsened_dir)?;
+    fs::create_dir_all(&exact_dir)?;
+
+    let mut nodes = Vec::with_capacity(request.raw_nodes.len());
+    for raw_node in &request.raw_nodes {
+        let file_stem = safe_node_file_stem(&raw_node.node_id);
+        let coarsened_db_path = coarsened_dir.join(format!("{file_stem}.duckdb"));
+        let exact_db_path = exact_dir.join(format!("{file_stem}.duckdb"));
+
+        remove_if_exists(&coarsened_db_path)?;
+        remove_if_exists(&exact_db_path)?;
+
+        app::run_pipeline_with_options(
+            &coarsened_db_path,
+            &raw_node.input_dir,
+            None,
+            TransformMode::Coarsened,
+            request.as_of_date,
+        )?;
+        app::run_pipeline_with_options(
+            &exact_db_path,
+            &raw_node.input_dir,
+            None,
+            TransformMode::Exact,
+            request.as_of_date,
+        )?;
+
+        nodes.push(PreparedNodeMetadata {
+            node_id: raw_node.node_id.clone(),
+            raw_input_dir: raw_node.input_dir.display().to_string(),
+            coarsened_db_path: coarsened_db_path.display().to_string(),
+            exact_db_path: exact_db_path.display().to_string(),
+        });
+    }
+
+    let metadata = PreparedDirectoryMetadata {
+        version: 1,
+        as_of_date: request.as_of_date.to_string(),
+        nodes,
+    };
+    write_prepared_metadata(&request.prepared_dir, &metadata)?;
+
+    Ok(PrepareReport {
+        prepared_dir: request.prepared_dir.display().to_string(),
+        as_of_date: metadata.as_of_date,
+        nodes: metadata
+            .nodes
+            .iter()
+            .map(|node| PreparedBaselineReport {
+                node_id: node.node_id.clone(),
+                raw_input_dir: node.raw_input_dir.clone(),
+                coarsened_db_path: node.coarsened_db_path.clone(),
+                exact_db_path: node.exact_db_path.clone(),
+            })
+            .collect(),
+    })
+}
+
 // Parses one `node_id=/path/to/raw/bundles` CLI argument.
 // @param: spec - Raw node mapping in CLI form
 // @return: Result<RawNodeInput> - Parsed node id and input directory
@@ -293,6 +442,25 @@ pub fn parse_raw_node_spec(spec: &str) -> Result<RawNodeInput> {
 // Returns the default as-of date used for stable age calculations.
 pub fn default_as_of_date() -> NaiveDate {
     Utc::now().date_naive()
+}
+
+// Renders the preparation report as human-readable text.
+// @param: report - Structured preparation report
+// @return: String - Text report for CLI output
+pub fn render_text_prepare_report(report: &PrepareReport) -> String {
+    let mut out = String::new();
+    out.push_str(&format!(
+        "prepared_dir: {}\nas_of_date: {}\n",
+        report.prepared_dir, report.as_of_date
+    ));
+    out.push_str("nodes:\n");
+    for node in &report.nodes {
+        out.push_str(&format!("  - {}\n", node.node_id));
+        out.push_str(&format!("    raw_input_dir: {}\n", node.raw_input_dir));
+        out.push_str(&format!("    coarsened_db: {}\n", node.coarsened_db_path));
+        out.push_str(&format!("    exact_db: {}\n", node.exact_db_path));
+    }
+    out
 }
 
 // Renders the comparison report as human-readable text.
@@ -410,6 +578,8 @@ async fn prepare_nodes(
             endpoint: endpoint.clone(),
             node_id: caps.node_id,
             raw_input_dir,
+            coarsened_db_path: None,
+            exact_db_path: None,
         });
     }
 
@@ -421,8 +591,44 @@ async fn prepare_nodes(
     Ok(prepared)
 }
 
-// Builds one aggregated baseline result from the configured raw node directories.
-fn build_baseline_result(
+// Resolves live node endpoints to prepared baseline database paths using node capabilities.
+async fn prepare_nodes_from_metadata(
+    endpoints: &[String],
+    metadata: &PreparedDirectoryMetadata,
+    tls: &ClientTlsOptions,
+) -> Result<Vec<PreparedNode>> {
+    let mut metadata_by_node_id = metadata
+        .nodes
+        .iter()
+        .map(|node| (node.node_id.clone(), node.clone()))
+        .collect::<BTreeMap<_, _>>();
+    let mut prepared = Vec::with_capacity(endpoints.len());
+    let mut seen_ids = BTreeSet::new();
+
+    for endpoint in endpoints {
+        let caps = capabilities(endpoint, tls)
+            .await
+            .with_context(|| format!("failed to fetch capabilities from {endpoint}"))?;
+        if !seen_ids.insert(caps.node_id.clone()) {
+            return Err(anyhow!("duplicate live node id reported: {}", caps.node_id));
+        }
+        let node = metadata_by_node_id
+            .remove(&caps.node_id)
+            .ok_or_else(|| anyhow!("prepared baselines missing node id {}", caps.node_id))?;
+        prepared.push(PreparedNode {
+            endpoint: endpoint.clone(),
+            node_id: node.node_id,
+            raw_input_dir: PathBuf::from(node.raw_input_dir),
+            coarsened_db_path: Some(PathBuf::from(node.coarsened_db_path)),
+            exact_db_path: Some(PathBuf::from(node.exact_db_path)),
+        });
+    }
+
+    Ok(prepared)
+}
+
+// Builds one aggregated baseline result by rebuilding from the raw node directories.
+fn build_baseline_result_from_raw(
     nodes: &[PreparedNode],
     template: QueryTemplate,
     params: &Value,
@@ -455,6 +661,30 @@ fn build_baseline_result(
     render_query_result(&aggregated, clip)
 }
 
+// Builds one aggregated baseline result from already prepared baseline databases.
+fn build_baseline_result_from_prepared(
+    nodes: &[PreparedNode],
+    template: QueryTemplate,
+    params: &Value,
+    clip: ClipBounds,
+    baseline_kind: PreparedBaselineKind,
+) -> Result<QueryResult> {
+    let local_stats = nodes
+        .iter()
+        .map(|node| {
+            build_local_statistics_from_prepared_db(node, template, params, clip, baseline_kind)
+                .with_context(|| {
+                    format!(
+                        "failed to query prepared {:?} baseline for node {}",
+                        baseline_kind, node.node_id
+                    )
+                })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let aggregated = aggregate_local_statistics(template, &local_stats)?;
+    render_query_result(&aggregated, clip)
+}
+
 // Builds one local statistics payload from raw FHIR bundles in an in-memory DuckDB database.
 fn build_local_statistics_from_raw_node(
     input_dir: &Path,
@@ -476,6 +706,108 @@ fn build_local_statistics_from_raw_node(
     normalize::run_normalize(&conn)?;
     materialize::run_materialize_as_of(&conn, as_of_date)?;
     query::compute_local_statistics(&conn, template, params, clip)
+}
+
+// Identifies which prepared database should be opened for a query.
+#[derive(Debug, Clone, Copy)]
+enum PreparedBaselineKind {
+    Coarsened,
+    Exact,
+}
+
+// Builds one local statistics payload by querying a prepared DuckDB database on disk.
+fn build_local_statistics_from_prepared_db(
+    node: &PreparedNode,
+    template: QueryTemplate,
+    params: &Value,
+    clip: ClipBounds,
+    baseline_kind: PreparedBaselineKind,
+) -> Result<LocalStatistics> {
+    let db_path = match baseline_kind {
+        PreparedBaselineKind::Coarsened => node
+            .coarsened_db_path
+            .as_ref()
+            .ok_or_else(|| anyhow!("missing prepared coarsened db path"))?,
+        PreparedBaselineKind::Exact => node
+            .exact_db_path
+            .as_ref()
+            .ok_or_else(|| anyhow!("missing prepared exact db path"))?,
+    };
+    let conn = app::open_initialized_connection(db_path)?;
+    query::compute_local_statistics(&conn, template, params, clip)
+}
+
+// Loads the metadata file from a prepared baseline directory.
+fn load_prepared_metadata(prepared_dir: &Path) -> Result<PreparedDirectoryMetadata> {
+    let metadata_path = prepared_metadata_path(prepared_dir);
+    let raw = fs::read_to_string(&metadata_path).with_context(|| {
+        format!(
+            "failed to read prepared metadata file {}",
+            metadata_path.display()
+        )
+    })?;
+    let metadata = serde_json::from_str::<PreparedDirectoryMetadata>(&raw).with_context(|| {
+        format!(
+            "failed to parse prepared metadata file {}",
+            metadata_path.display()
+        )
+    })?;
+    if metadata.version != 1 {
+        return Err(anyhow!(
+            "unsupported prepared baseline metadata version {}",
+            metadata.version
+        ));
+    }
+    Ok(metadata)
+}
+
+// Writes the metadata file into a prepared baseline directory.
+fn write_prepared_metadata(
+    prepared_dir: &Path,
+    metadata: &PreparedDirectoryMetadata,
+) -> Result<()> {
+    fs::create_dir_all(prepared_dir)?;
+    let metadata_path = prepared_metadata_path(prepared_dir);
+    fs::write(&metadata_path, serde_json::to_string_pretty(metadata)?).with_context(|| {
+        format!(
+            "failed to write prepared metadata file {}",
+            metadata_path.display()
+        )
+    })?;
+    Ok(())
+}
+
+// Returns the metadata file path for a prepared baseline directory.
+fn prepared_metadata_path(prepared_dir: &Path) -> PathBuf {
+    prepared_dir.join("metadata.json")
+}
+
+// Removes a file if it already exists.
+fn remove_if_exists(path: &Path) -> Result<()> {
+    if path.exists() {
+        fs::remove_file(path)
+            .with_context(|| format!("failed to remove existing file {}", path.display()))?;
+    }
+    Ok(())
+}
+
+// Converts a node id into a stable file stem for prepared databases.
+fn safe_node_file_stem(node_id: &str) -> String {
+    let value = node_id
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_') {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+    if value.is_empty() {
+        "node".to_string()
+    } else {
+        value
+    }
 }
 
 // Converts the enum comparison mode into the stable report string.
