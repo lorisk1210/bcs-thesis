@@ -23,6 +23,7 @@ pub struct IngestOptions {
     pub input_dir: PathBuf,
     pub node_secret: String,
     pub max_files: Option<usize>,
+    pub transform_mode: TransformMode,
 }
 
 // Ingest report (simply to group related metrics)
@@ -34,6 +35,13 @@ pub struct IngestReport {
     pub resources_ingested: usize,
     pub errors_logged: usize,
     pub resource_counts: BTreeMap<String, usize>,
+}
+
+// Controls whether dates and timestamps are coarsened during ingestion.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TransformMode {
+    Coarsened,
+    Exact,
 }
 
 // Runs the ingestion
@@ -224,36 +232,42 @@ pub fn run_ingest(conn: &mut Connection, opts: &IngestOptions) -> Result<IngestR
                     resource,
                     &ingest_file,
                     &opts.node_secret,
+                    opts.transform_mode,
                 ),
                 "Condition" => ingest_condition(
                     &mut insert_condition,
                     resource,
                     &ingest_file,
                     &opts.node_secret,
+                    opts.transform_mode,
                 ),
                 "MedicationRequest" => ingest_medication_request(
                     &mut insert_medication,
                     resource,
                     &ingest_file,
                     &opts.node_secret,
+                    opts.transform_mode,
                 ),
                 "Observation" => ingest_observation(
                     &mut insert_observation,
                     resource,
                     &ingest_file,
                     &opts.node_secret,
+                    opts.transform_mode,
                 ),
                 "Encounter" => ingest_encounter(
                     &mut insert_encounter,
                     resource,
                     &ingest_file,
                     &opts.node_secret,
+                    opts.transform_mode,
                 ),
                 "Procedure" => ingest_procedure(
                     &mut insert_procedure,
                     resource,
                     &ingest_file,
                     &opts.node_secret,
+                    opts.transform_mode,
                 ),
                 _ => Ok(false),
             };
@@ -458,6 +472,22 @@ fn coarsen_to_five_year_bucket_anchor(raw: &str) -> Option<String> {
     Some(format!("{bucket_anchor:04}-01-01"))
 }
 
+// Applies the configured patient birth-date transform.
+fn transform_birth_date(raw: &str, mode: TransformMode) -> Option<String> {
+    match mode {
+        TransformMode::Coarsened => coarsen_to_five_year_bucket_anchor(raw),
+        TransformMode::Exact => Some(raw.to_string()),
+    }
+}
+
+// Applies the configured clinical timestamp/date transform.
+fn transform_clinical_datetime(raw: &str, mode: TransformMode) -> Option<String> {
+    match mode {
+        TransformMode::Coarsened => coarsen_to_year_start(raw),
+        TransformMode::Exact => Some(raw.to_string()),
+    }
+}
+
 // Gets the patient pseudo id for a resource
 // @param: resource - Reference to the resource
 // @param: node_secret - Reference to the node secret
@@ -509,16 +539,17 @@ fn ingest_patient(
     resource: &Value,
     ingest_file: &str,
     node_secret: &str,
+    transform_mode: TransformMode,
 ) -> Result<bool> {
     let raw_patient_id = required_resource_id(resource, "patient")?;
     let patient_pseudo_id = fhir::pseudonymize_patient_id(node_secret, &raw_patient_id)
         .ok_or_else(|| anyhow!("failed to pseudonymize patient id"))?;
 
     let birth_date = fhir::get_str(resource, &["birthDate"])
-        .and_then(coarsen_to_five_year_bucket_anchor);
+        .and_then(|raw| transform_birth_date(raw, transform_mode));
     let gender = fhir::get_str(resource, &["gender"]).map(ToString::to_string);
     let deceased_ts = fhir::get_str(resource, &["deceasedDateTime"])
-        .and_then(coarsen_to_year_start);
+        .and_then(|raw| transform_clinical_datetime(raw, transform_mode));
     let deceased_bool = fhir::get_bool(resource, &["deceasedBoolean"]);
 
     let address = resource
@@ -560,6 +591,7 @@ fn ingest_condition(
     resource: &Value,
     ingest_file: &str,
     node_secret: &str,
+    transform_mode: TransformMode,
 ) -> Result<bool> {
     let (patient_pseudo_id, event_id) = resolve_subject_resource_identity(
         resource,
@@ -577,9 +609,13 @@ fn ingest_condition(
         .map(|v| fhir::first_coding(v).1)
         .unwrap_or(None);
     let onset_ts = fhir::get_str(resource, &["onsetDateTime"])
-        .and_then(coarsen_to_year_start)
-        .or_else(|| fhir::get_str(resource, &["onsetPeriod", "start"]).and_then(coarsen_to_year_start));
-    let recorded_ts = fhir::get_str(resource, &["recordedDate"]).and_then(coarsen_to_year_start);
+        .and_then(|raw| transform_clinical_datetime(raw, transform_mode))
+        .or_else(|| {
+            fhir::get_str(resource, &["onsetPeriod", "start"])
+                .and_then(|raw| transform_clinical_datetime(raw, transform_mode))
+        });
+    let recorded_ts = fhir::get_str(resource, &["recordedDate"])
+        .and_then(|raw| transform_clinical_datetime(raw, transform_mode));
 
     stmt.execute(params![
         event_id,
@@ -610,6 +646,7 @@ fn ingest_medication_request(
     resource: &Value,
     ingest_file: &str,
     node_secret: &str,
+    transform_mode: TransformMode,
 ) -> Result<bool> {
     let (patient_pseudo_id, event_id) = resolve_subject_resource_identity(
         resource,
@@ -619,13 +656,20 @@ fn ingest_medication_request(
     let encounter_id = fhir::encounter_id(resource);
     let (medication_system, medication_code, medication_display) =
         fhir::first_codeable_concept(resource, "medicationCodeableConcept");
-    let authored_on = fhir::get_str(resource, &["authoredOn"]).and_then(coarsen_to_year_start);
+    let authored_on = fhir::get_str(resource, &["authoredOn"])
+        .and_then(|raw| transform_clinical_datetime(raw, transform_mode));
     let start_ts = fhir::get_str(resource, &["dispenseRequest", "validityPeriod", "start"])
-        .and_then(coarsen_to_year_start)
-        .or_else(|| fhir::get_str(resource, &["effectivePeriod", "start"]).and_then(coarsen_to_year_start));
+        .and_then(|raw| transform_clinical_datetime(raw, transform_mode))
+        .or_else(|| {
+            fhir::get_str(resource, &["effectivePeriod", "start"])
+                .and_then(|raw| transform_clinical_datetime(raw, transform_mode))
+        });
     let end_ts = fhir::get_str(resource, &["dispenseRequest", "validityPeriod", "end"])
-        .and_then(coarsen_to_year_start)
-        .or_else(|| fhir::get_str(resource, &["effectivePeriod", "end"]).and_then(coarsen_to_year_start));
+        .and_then(|raw| transform_clinical_datetime(raw, transform_mode))
+        .or_else(|| {
+            fhir::get_str(resource, &["effectivePeriod", "end"])
+                .and_then(|raw| transform_clinical_datetime(raw, transform_mode))
+        });
     let dosage_text = resource
         .get("dosageInstruction")
         .and_then(Value::as_array)
@@ -667,6 +711,7 @@ fn ingest_observation(
     resource: &Value,
     ingest_file: &str,
     node_secret: &str,
+    transform_mode: TransformMode,
 ) -> Result<bool> {
     let (patient_pseudo_id, event_id) = resolve_subject_resource_identity(
         resource,
@@ -694,8 +739,9 @@ fn ingest_observation(
                 .unwrap_or(None)
         });
     let effective_ts = fhir::effective_ts(resource)
-        .and_then(|ts| coarsen_to_year_start(&ts));
-    let issued_ts = fhir::get_str(resource, &["issued"]).and_then(coarsen_to_year_start);
+        .and_then(|ts| transform_clinical_datetime(&ts, transform_mode));
+    let issued_ts = fhir::get_str(resource, &["issued"])
+        .and_then(|raw| transform_clinical_datetime(raw, transform_mode));
     let status = fhir::get_str(resource, &["status"]).map(ToString::to_string);
 
     stmt.execute(params![
@@ -730,6 +776,7 @@ fn ingest_encounter(
     resource: &Value,
     ingest_file: &str,
     node_secret: &str,
+    transform_mode: TransformMode,
 ) -> Result<bool> {
     let (patient_pseudo_id, event_id) = resolve_subject_resource_identity(
         resource,
@@ -740,9 +787,9 @@ fn ingest_encounter(
     let (type_system, type_code, type_display) = fhir::first_code_from_array(resource, "type");
     let (reason_system, reason_code, reason_display) = fhir::first_code_from_array(resource, "reasonCode");
     let start_ts = fhir::period_start(resource, "period")
-        .and_then(|ts| coarsen_to_year_start(&ts));
+        .and_then(|ts| transform_clinical_datetime(&ts, transform_mode));
     let end_ts = fhir::period_end(resource, "period")
-        .and_then(|ts| coarsen_to_year_start(&ts));
+        .and_then(|ts| transform_clinical_datetime(&ts, transform_mode));
     let status = fhir::get_str(resource, &["status"]).map(ToString::to_string);
 
     stmt.execute(params![
@@ -776,6 +823,7 @@ fn ingest_procedure(
     resource: &Value,
     ingest_file: &str,
     node_secret: &str,
+    transform_mode: TransformMode,
 ) -> Result<bool> {
     let (patient_pseudo_id, event_id) = resolve_subject_resource_identity(
         resource,
@@ -785,8 +833,11 @@ fn ingest_procedure(
     let encounter_id = fhir::encounter_id(resource);
     let (code_system, code, code_display) = fhir::first_codeable_concept(resource, "code");
     let performed_ts = fhir::get_str(resource, &["performedDateTime"])
-        .and_then(coarsen_to_year_start)
-        .or_else(|| fhir::get_str(resource, &["performedPeriod", "start"]).and_then(coarsen_to_year_start));
+        .and_then(|raw| transform_clinical_datetime(raw, transform_mode))
+        .or_else(|| {
+            fhir::get_str(resource, &["performedPeriod", "start"])
+                .and_then(|raw| transform_clinical_datetime(raw, transform_mode))
+        });
     let status = fhir::get_str(resource, &["status"]).map(ToString::to_string);
 
     stmt.execute(params![
