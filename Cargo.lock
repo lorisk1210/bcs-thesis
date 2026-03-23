@@ -2000,6 +2000,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "refinery-organize"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+]
+
+[[package]]
 name = "refinery-protocol"
 version = "0.1.0"
 dependencies = [

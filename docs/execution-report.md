@@ -89,3 +89,13 @@ cargo run -- query \
 - Corrected FHIR reference parsing to handle `urn:uuid:<id>` subject references so event resources correctly join to patient pseudonyms.
 - Improved DP post-processing to clamp count-like fields to non-negative values.
 - Used separate DP scale for counts (`1/epsilon`) vs continuous metrics (`sensitivity/epsilon`) to avoid unstable count outputs.
+
+## Dataset organization
+
+- `jsonraw` is the canonical source dataset.
+- Generated node partitions belong under `jsonraw/nodes/` and can be recreated at any time.
+- Rebuild partitions with:
+
+```bash
+cargo run -p refinery-organize -- partition --nodes 3
+```
