@@ -1,0 +1,17 @@
+[package]
+name = "refinery-orchestrator"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+chrono.workspace = true
+clap.workspace = true
+dotenvy.workspace = true
+futures.workspace = true
+rand.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tonic.workspace = true
+refinery-protocol = { path = "../refinery-protocol" }

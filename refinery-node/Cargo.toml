@@ -1,0 +1,21 @@
+[package]
+name = "refinery-node"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+chrono.workspace = true
+clap.workspace = true
+dotenvy.workspace = true
+duckdb.workspace = true
+hex.workspace = true
+hmac.workspace = true
+rand.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+tokio.workspace = true
+tonic.workspace = true
+walkdir.workspace = true
+refinery-protocol = { path = "../refinery-protocol" }

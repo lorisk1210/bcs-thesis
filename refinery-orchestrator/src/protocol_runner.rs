@@ -1,0 +1,57 @@
+// src/protocol_runner.rs
+// Runs one federated job against all selected nodes.
+
+// Third-party library imports
+use anyhow::{Result, anyhow};
+use futures::future::try_join_all;
+use refinery_protocol::FederationMode;
+use refinery_protocol::grpc::SubmitJobRequest;
+
+// Local module imports
+use crate::client::{ClientTlsOptions, submit_job};
+use crate::jobs::FederatedJob;
+
+// Dispatches one federated job to all selected nodes and returns every node response, including rejections.
+pub async fn collect_job_responses(
+    job: &FederatedJob,
+    tls: &ClientTlsOptions,
+) -> Result<Vec<refinery_protocol::grpc::SubmitJobResponse>> {
+    match job.federation_mode {
+        FederationMode::Plaintext => {
+            let params_json = serde_json::to_string(&job.params)?;
+            let futures = job.nodes.iter().map(|node| {
+                submit_job(
+                    node,
+                    SubmitJobRequest {
+                        job_id: job.job_id.clone(),
+                        template: job.template.as_str().to_string(),
+                        params_json: params_json.clone(),
+                        clip_min: job.clip.min,
+                        clip_max: job.clip.max,
+                        federation_mode: job.federation_mode.as_str().to_string(),
+                    },
+                    tls,
+                )
+            });
+            try_join_all(futures).await
+        }
+        FederationMode::SmpcAdditiveSharing => Err(anyhow!(
+            "smpc_additive_sharing is not implemented yet; use plaintext mode"
+        )),
+    }
+}
+
+// Dispatches one federated job to all selected nodes and collects responses.
+// @param: job - Federated job definition containing query and target nodes
+// @param: tls - Optional TLS client settings for node connections
+// @return: Result<Vec<SubmitJobResponse>> - Successful node responses
+pub async fn run_job(job: &FederatedJob, tls: &ClientTlsOptions) -> Result<Vec<refinery_protocol::grpc::SubmitJobResponse>> {
+    let responses = collect_job_responses(job, tls).await?;
+    if let Some(rejection) = responses.iter().find(|response| !response.accepted) {
+        return Err(anyhow!(
+            "federated job rejected by a node: {}",
+            rejection.reason
+        ));
+    }
+    Ok(responses)
+}
