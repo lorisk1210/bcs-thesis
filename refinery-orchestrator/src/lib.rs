@@ -7,3 +7,4 @@ pub mod db;
 pub mod dp_release;
 pub mod jobs;
 pub mod protocol_runner;
+pub mod smpc;
