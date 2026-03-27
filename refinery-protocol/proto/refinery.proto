@@ -36,6 +36,30 @@ message GetCapabilitiesResponse {
   string schema_version = 3;
   repeated string supported_templates = 4;
   repeated string supported_federation_modes = 5;
+  bytes smpc_public_key = 6;
+  string smpc_key_fingerprint = 7;
+  repeated string supported_smpc_protocols = 8;
+}
+
+message ParticipantManifestEntry {
+  string node_id = 1;
+  string endpoint = 2;
+  bytes smpc_public_key = 3;
+  string smpc_key_fingerprint = 4;
+}
+
+message SealedSharePacket {
+  string job_id = 1;
+  string job_context_hash = 2;
+  string protocol_name = 3;
+  string protocol_version = 4;
+  string sender_node_id = 5;
+  string recipient_node_id = 6;
+  string schema_id = 7;
+  repeated string slot_labels = 8;
+  bytes nonce = 9;
+  bytes ciphertext = 10;
+  string packet_hash = 11;
 }
 
 // Request to run the local data pipeline on a node.
@@ -58,6 +82,10 @@ message SubmitJobRequest {
   double clip_min = 4;
   double clip_max = 5;
   string federation_mode = 6;
+  string protocol_name = 7;
+  string protocol_version = 8;
+  string job_context_hash = 9;
+  repeated ParticipantManifestEntry participants = 10;
 }
 
 // Node response after evaluating a federated job request.
@@ -69,6 +97,15 @@ message SubmitJobResponse {
   string stats_json = 5;
   uint64 cohort_size = 6;
   string fingerprint = 7;
+  string node_id = 8;
+  string schema_id = 9;
+  repeated string slot_labels = 10;
+  bytes canonical_slots = 11;
+  repeated SealedSharePacket share_packets = 12;
+  string vector_hash = 13;
+  string protocol_name = 14;
+  string protocol_version = 15;
+  string job_context_hash = 16;
 }
 
 // Request to fetch node-local status for a previously submitted job.
@@ -87,12 +124,26 @@ message GetJobStatusResponse {
 // Placeholder request for later SMPC protocol rounds.
 message RunFederationRoundRequest {
   string job_id = 1;
-  string payload_json = 2;
+  string round_name = 2;
+  string job_context_hash = 3;
+  string protocol_name = 4;
+  string protocol_version = 5;
+  string schema_id = 6;
+  repeated string slot_labels = 7;
+  repeated SealedSharePacket share_packets = 8;
+  string recipient_node_id = 9;
 }
 
 // Placeholder response for later SMPC protocol rounds.
 message RunFederationRoundResponse {
   bool accepted = 1;
   string reason = 2;
-  string payload_json = 3;
+  string node_id = 3;
+  string schema_id = 4;
+  repeated string slot_labels = 5;
+  bytes aggregate_share = 6;
+  string vector_hash = 7;
+  string job_context_hash = 8;
+  string protocol_name = 9;
+  string protocol_version = 10;
 }

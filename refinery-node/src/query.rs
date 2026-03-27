@@ -79,14 +79,11 @@ pub fn compute_local_statistics(
 // Builds a local statistics payload for one query template.
 fn build_local_statistics(
     template: QueryTemplate,
+    params: &Value,
     stats: Value,
     cohort_size: usize,
-) -> LocalStatistics {
-    LocalStatistics {
-        template,
-        cohort_size,
-        stats,
-    }
+) -> Result<LocalStatistics> {
+    LocalStatistics::from_stats_value(template, params, stats, cohort_size)
 }
 
 // Collects per-arm counts and sums from a SQL query.
@@ -157,11 +154,12 @@ fn execute_cohort_count(conn: &Connection, template: QueryTemplate, params: &Val
     let cohort_size: i64 = conn.query_row(&sql, [], |row| row.get(0))?;
     let count = cohort_size.max(0) as usize;
 
-    Ok(build_local_statistics(
+    build_local_statistics(
         template,
+        params,
         json!({"count": count}),
         count,
-    ))
+    )
 }
 
 // Computes local per-arm counts and bounded outcome sums for comparative effectiveness.
@@ -230,8 +228,9 @@ fn execute_comparative_effectiveness(
     let (exposed_arm, control_arm) = collect_named_arm_metrics(conn, &sql, "exposed", "control")?;
     let cohort_size = exposed_arm.n + control_arm.n;
 
-    Ok(build_local_statistics(
+    build_local_statistics(
         template,
+        params,
         json!({
             "n_exposed": exposed_arm.n,
             "n_control": control_arm.n,
@@ -239,7 +238,7 @@ fn execute_comparative_effectiveness(
             "outcome_sum_control": control_arm.total
         }),
         cohort_size,
-    ))
+    )
 }
 
 // Computes local counts and summed time-to-event values for the proxy template.
@@ -296,15 +295,16 @@ fn execute_time_to_event(conn: &Connection, template: QueryTemplate, params: &Va
 
     let cohort_size = n.max(0) as usize;
 
-    Ok(build_local_statistics(
+    build_local_statistics(
         template,
+        params,
         json!({
             "n": cohort_size,
             "sum_days_to_event": sum_days.unwrap_or(0.0),
             "max_days": max_days
         }),
         cohort_size,
-    ))
+    )
 }
 
 // Computes subgroup-local counts and bounded outcome sums.
@@ -386,11 +386,12 @@ fn execute_subgroup_effect(
 
     let (cohort_size, groups) = collect_grouped_metrics(conn, &sql, "subgroup")?;
 
-    Ok(build_local_statistics(
+    build_local_statistics(
         template,
+        params,
         json!({"groups": groups}),
         cohort_size,
-    ))
+    )
 }
 
 // Computes dose-bucket-local counts and bounded outcome sums.
@@ -447,11 +448,12 @@ fn execute_dose_response(
 
     let (cohort_size, groups) = collect_grouped_metrics(conn, &sql, "dose_bucket")?;
 
-    Ok(build_local_statistics(
+    build_local_statistics(
         template,
+        params,
         json!({"groups": groups}),
         cohort_size,
-    ))
+    )
 }
 
 // Computes local AE event counts and denominators for exposed and control arms.
@@ -506,8 +508,9 @@ fn execute_ae_signal(conn: &Connection, template: QueryTemplate, params: &Value)
     let (exposed_arm, control_arm) = collect_named_arm_metrics(conn, &sql, "exposed", "control")?;
     let cohort_size = exposed_arm.n + control_arm.n;
 
-    Ok(build_local_statistics(
+    build_local_statistics(
         template,
+        params,
         json!({
             "n_exposed": exposed_arm.n,
             "n_control": control_arm.n,
@@ -515,7 +518,7 @@ fn execute_ae_signal(conn: &Connection, template: QueryTemplate, params: &Value)
             "ae_count_control": control_arm.total
         }),
         cohort_size,
-    ))
+    )
 }
 
 // Computes local event counts and denominators for the DDI proxy comparison.
@@ -567,8 +570,9 @@ fn execute_ddi_signal(conn: &Connection, template: QueryTemplate, params: &Value
     let (combo_arm, a_only_arm) = collect_named_arm_metrics(conn, &sql, "combo", "a_only")?;
     let cohort_size = combo_arm.n + a_only_arm.n;
 
-    Ok(build_local_statistics(
+    build_local_statistics(
         template,
+        params,
         json!({
             "n_combo": combo_arm.n,
             "n_a_only": a_only_arm.n,
@@ -576,7 +580,7 @@ fn execute_ddi_signal(conn: &Connection, template: QueryTemplate, params: &Value
             "ae_count_a_only": a_only_arm.total
         }),
         cohort_size,
-    ))
+    )
 }
 
 // Reads one required coded parameter and sanitizes it for SQL use.

@@ -5,12 +5,22 @@
 pub mod errors;
 pub mod federation;
 pub mod query;
+pub mod smpc;
 pub mod stats;
 
 // Re-exports for the most common protocol types.
 pub use federation::FederationMode;
 pub use query::{ClipBounds, QueryExecutionRequest, QueryResult, QueryTemplate};
-pub use stats::{LocalStatistics, aggregate_local_statistics, render_query_result};
+pub use smpc::{
+    PRIVATE_KEY_LENGTH, PUBLIC_KEY_LENGTH, SMPC_PROTOCOL_NAME, SMPC_PROTOCOL_VERSION,
+    SharePayload, compute_job_context_hash, decrypt_share_payload, encrypt_share_payload,
+    public_key_fingerprint, public_key_from_private_key, sealed_packet_hash,
+    slot_vector_hash, split_additive_shares, sum_slot_vectors, validate_private_key_bytes,
+};
+pub use stats::{
+    LocalStatistics, StatisticsSchema, aggregate_local_statistics, aggregate_slot_vectors,
+    decode_slot_bytes, encode_slot_bytes, render_query_result, schema_for_query,
+};
 
 // Generated gRPC types compiled from proto/refinery.proto.
 pub mod grpc {

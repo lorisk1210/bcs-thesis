@@ -31,8 +31,14 @@ pub fn enforce_local_participation(
     template: QueryTemplate,
     cohort_size: usize,
     config: &PrivacyConfig,
+    override_rejection_reason: Option<&str>,
 ) -> Result<LocalPolicyDecision> {
-    let decision = if cohort_size < config.min_cohort {
+    let decision = if let Some(reason) = override_rejection_reason {
+        LocalPolicyDecision {
+            accepted: false,
+            reason: reason.to_string(),
+        }
+    } else if cohort_size < config.min_cohort {
         LocalPolicyDecision {
             accepted: false,
             reason: format!(
