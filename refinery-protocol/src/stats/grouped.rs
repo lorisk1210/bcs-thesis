@@ -6,6 +6,7 @@ use anyhow::{Result, anyhow};
 use serde_json::{Map, Value, json};
 
 // Local module imports
+use super::helpers::{required_f64, required_u64, safe_mean};
 use super::StatisticsSchema;
 use super::encoding::{decode_count, decode_fixed, encode_count, encode_fixed};
 use crate::errors::invalid_stats_shape;
@@ -252,22 +253,4 @@ fn group_label_from_n_slot(slot_label: &str) -> Result<String> {
         .and_then(|value| value.strip_suffix(":n"))
         .map(str::to_string)
         .ok_or_else(|| invalid_stats_shape("group_slot_label"))
-}
-
-fn required_u64(value: &Value, key: &str) -> Result<u64> {
-    value
-        .get(key)
-        .and_then(Value::as_u64)
-        .ok_or_else(|| invalid_stats_shape(key))
-}
-
-fn required_f64(value: &Value, key: &str) -> Result<f64> {
-    value
-        .get(key)
-        .and_then(Value::as_f64)
-        .ok_or_else(|| invalid_stats_shape(key))
-}
-
-fn safe_mean(sum: f64, n: u64) -> Option<f64> {
-    (n > 0).then_some(sum / n as f64)
 }

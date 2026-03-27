@@ -11,7 +11,8 @@ use refinery_protocol::FederationMode;
 use crate::aggregate::aggregate_plaintext_responses;
 use crate::client::{ClientTlsOptions, submit_job};
 use crate::jobs::FederatedJob;
-use crate::smpc::{FederatedRunOutput, run_smpc_job};
+use crate::run_output::FederatedRunOutput;
+use crate::smpc::run_smpc_job;
 
 // Dispatches one plaintext federated job request to all nodes and returns their responses.
 pub async fn collect_job_responses(

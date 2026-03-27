@@ -15,6 +15,7 @@ use crate::grpc::{ParticipantManifestEntry, SealedSharePacket};
 
 pub const SMPC_PROTOCOL_NAME: &str = "smpc_additive_sharing";
 pub const SMPC_PROTOCOL_VERSION: &str = "v1";
+pub const SMPC_AGGREGATE_SHARE_ROUND_NAME: &str = "aggregate_share_v1";
 pub const PUBLIC_KEY_LENGTH: usize = 32;
 pub const PRIVATE_KEY_LENGTH: usize = 32;
 
@@ -47,7 +48,7 @@ pub fn public_key_from_private_key(private_key: &[u8; PRIVATE_KEY_LENGTH]) -> Ve
 // Computes a stable fingerprint for one SMPC public key.
 pub fn public_key_fingerprint(public_key: &[u8]) -> String {
     let digest = Sha256::digest(public_key);
-    hex_digest(&digest)
+    hex::encode(digest)
 }
 
 // Computes a stable job-context hash that binds query and participant metadata.
@@ -86,7 +87,7 @@ pub fn compute_job_context_hash(
         hasher.update(row.as_bytes());
     }
 
-    hex_digest(&hasher.finalize())
+    hex::encode(hasher.finalize())
 }
 
 // Splits one canonical vector into additive shares over the 64-bit ring.
@@ -109,24 +110,6 @@ pub fn split_additive_shares(slots: &[u64], share_count: usize) -> Result<Vec<Ve
     }
 
     Ok(shares)
-}
-
-// Adds multiple slot vectors inside the same 64-bit ring.
-pub fn sum_slot_vectors(vectors: &[Vec<u64>]) -> Result<Vec<u64>> {
-    let Some(first) = vectors.first() else {
-        return Err(anyhow!("cannot sum zero slot vectors"));
-    };
-
-    let mut sum = vec![0u64; first.len()];
-    for vector in vectors {
-        if vector.len() != sum.len() {
-            return Err(anyhow!("slot vector length mismatch"));
-        }
-        for (index, slot) in vector.iter().enumerate() {
-            sum[index] = sum[index].wrapping_add(*slot);
-        }
-    }
-    Ok(sum)
 }
 
 // Encrypts one share payload for a specific recipient.
@@ -178,13 +161,13 @@ pub fn sealed_packet_hash(packet: &SealedSharePacket) -> String {
     }
     hasher.update(&packet.nonce);
     hasher.update(&packet.ciphertext);
-    hex_digest(&hasher.finalize())
+    hex::encode(hasher.finalize())
 }
 
 // Computes a stable integrity hash for one encoded slot vector.
 pub fn slot_vector_hash(slot_bytes: &[u8]) -> String {
     let digest = Sha256::digest(slot_bytes);
-    hex_digest(&digest)
+    hex::encode(digest)
 }
 
 fn parse_public_key(bytes: &[u8]) -> Result<PublicKey> {
@@ -194,17 +177,10 @@ fn parse_public_key(bytes: &[u8]) -> Result<PublicKey> {
     Ok(PublicKey::from(key_bytes))
 }
 
-fn hex_digest(bytes: &[u8]) -> String {
-    let mut output = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        output.push_str(&format!("{byte:02x}"));
-    }
-    output
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::slot_vector::sum_slot_vectors;
 
     #[test]
     fn additive_shares_reconstruct_original_slot_vector() {

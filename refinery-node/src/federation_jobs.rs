@@ -18,6 +18,11 @@ use crate::server::NodeServerConfig;
 use crate::smpc::{self, SmpcJobState};
 
 // Minimal in-memory status for submitted jobs.
+pub(crate) const JOB_STATUS_COMPLETED: &str = "completed";
+pub(crate) const JOB_STATUS_REJECTED: &str = "rejected";
+pub(crate) const JOB_STATUS_ROUND1_READY: &str = "round1_ready";
+
+// Minimal in-memory status for submitted jobs.
 #[derive(Debug, Clone)]
 pub(crate) struct JobRecord {
     pub status: String,
@@ -30,9 +35,9 @@ pub(crate) struct JobRecord {
 // Executes round-1 submission handling and returns both response and persisted job status.
 pub(crate) fn execute_submit_job(
     config: &NodeServerConfig,
+    smpc_capability: Option<smpc::SmpcCapability>,
     req: SubmitJobRequest,
 ) -> Result<(SubmitJobResponse, JobRecord)> {
-    config::load_dotenv();
     let template = QueryTemplate::from_str(&req.template)?;
     let mode = FederationMode::from_str(&req.federation_mode)?;
     let params: serde_json::Value = serde_json::from_str(&req.params_json)?;
@@ -48,7 +53,6 @@ pub(crate) fn execute_submit_job(
     )?;
     let privacy_config = config::load_privacy_config()?;
     let fingerprint = app::fingerprint(template, &params, req.clip_min, req.clip_max);
-    let smpc_capability = smpc::load_smpc_capability()?;
     let override_rejection =
         smpc::smpc_override_rejection_reason(&req, mode, &config.node_id, smpc_capability.as_ref());
     let decision = local_policy::enforce_local_participation(
@@ -80,11 +84,10 @@ pub(crate) fn execute_submit_job(
 // Executes round-2 share aggregation handling for one accepted SMPC job.
 pub(crate) fn execute_federation_round(
     config: &NodeServerConfig,
+    smpc_capability: Option<smpc::SmpcCapability>,
     req: RunFederationRoundRequest,
     record: JobRecord,
 ) -> Result<RunFederationRoundResponse> {
-    config::load_dotenv();
-
     if !record.accepted || record.federation_mode != FederationMode::SmpcAdditiveSharing {
         return Ok(smpc::rejected_round_response(
             &config.node_id,
@@ -100,7 +103,7 @@ pub(crate) fn execute_federation_round(
             "job is not ready for SMPC round execution",
         ));
     };
-    let Some(smpc_capability) = smpc::load_smpc_capability()? else {
+    let Some(smpc_capability) = smpc_capability else {
         return Ok(smpc::rejected_round_response(
             &config.node_id,
             &req,
@@ -153,7 +156,13 @@ fn build_plaintext_submit_outcome(
                 stats.cohort_size as u64,
                 fingerprint,
             ),
-            build_job_record("rejected", false, decision.reason, FederationMode::Plaintext, None),
+            build_job_record(
+                JOB_STATUS_REJECTED,
+                false,
+                decision.reason,
+                FederationMode::Plaintext,
+                None,
+            ),
         ));
     }
 
@@ -179,7 +188,13 @@ fn build_plaintext_submit_outcome(
     };
     Ok((
         response,
-        build_job_record("completed", true, decision.reason, FederationMode::Plaintext, None),
+        build_job_record(
+            JOB_STATUS_COMPLETED,
+            true,
+            decision.reason,
+            FederationMode::Plaintext,
+            None,
+        ),
     ))
 }
 
@@ -203,7 +218,7 @@ fn build_smpc_submit_outcome(
                 fingerprint,
             ),
             build_job_record(
-                "rejected",
+                JOB_STATUS_REJECTED,
                 false,
                 decision.reason,
                 FederationMode::SmpcAdditiveSharing,
@@ -248,13 +263,117 @@ fn build_smpc_submit_outcome(
     Ok((
         response,
         build_job_record(
-            "round1_ready",
+            JOB_STATUS_ROUND1_READY,
             true,
             decision.reason,
             FederationMode::SmpcAdditiveSharing,
             Some(smpc_state),
         ),
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use refinery_protocol::SMPC_AGGREGATE_SHARE_ROUND_NAME;
+
+    fn test_config() -> NodeServerConfig {
+        NodeServerConfig {
+            node_id: "node-a".to_string(),
+            db_path: std::path::PathBuf::from("test.duckdb"),
+            input_dir: std::path::PathBuf::from("input"),
+            bind_addr: "127.0.0.1:50051".to_string(),
+            tls: crate::server::TlsConfig {
+                cert_path: None,
+                key_path: None,
+                client_ca_cert_path: None,
+            },
+        }
+    }
+
+    fn test_round_request() -> RunFederationRoundRequest {
+        RunFederationRoundRequest {
+            job_id: "job".to_string(),
+            round_name: SMPC_AGGREGATE_SHARE_ROUND_NAME.to_string(),
+            job_context_hash: "hash".to_string(),
+            protocol_name: refinery_protocol::SMPC_PROTOCOL_NAME.to_string(),
+            protocol_version: refinery_protocol::SMPC_PROTOCOL_VERSION.to_string(),
+            schema_id: "schema".to_string(),
+            slot_labels: vec!["count".to_string()],
+            share_packets: Vec::new(),
+            recipient_node_id: "node-a".to_string(),
+        }
+    }
+
+    #[test]
+    fn round_execution_rejects_non_smpc_jobs() {
+        let response = execute_federation_round(
+            &test_config(),
+            None,
+            test_round_request(),
+            JobRecord {
+                status: JOB_STATUS_COMPLETED.to_string(),
+                accepted: true,
+                reason: "accepted".to_string(),
+                federation_mode: FederationMode::Plaintext,
+                smpc_state: None,
+            },
+        )
+        .expect("round execution should return a response");
+
+        assert!(!response.accepted);
+        assert_eq!(response.reason, "job is not ready for SMPC round execution");
+    }
+
+    #[test]
+    fn round_execution_rejects_missing_smpc_state() {
+        let response = execute_federation_round(
+            &test_config(),
+            None,
+            test_round_request(),
+            JobRecord {
+                status: JOB_STATUS_ROUND1_READY.to_string(),
+                accepted: true,
+                reason: "accepted".to_string(),
+                federation_mode: FederationMode::SmpcAdditiveSharing,
+                smpc_state: None,
+            },
+        )
+        .expect("round execution should return a response");
+
+        assert!(!response.accepted);
+        assert_eq!(response.reason, "job is not ready for SMPC round execution");
+    }
+
+    #[test]
+    fn round_execution_rejects_missing_capability() {
+        let response = execute_federation_round(
+            &test_config(),
+            None,
+            test_round_request(),
+            JobRecord {
+                status: JOB_STATUS_ROUND1_READY.to_string(),
+                accepted: true,
+                reason: "accepted".to_string(),
+                federation_mode: FederationMode::SmpcAdditiveSharing,
+                smpc_state: Some(SmpcJobState {
+                    job_context_hash: "hash".to_string(),
+                    schema_id: "schema".to_string(),
+                    slot_labels: vec!["count".to_string()],
+                    protocol_name: refinery_protocol::SMPC_PROTOCOL_NAME.to_string(),
+                    protocol_version: refinery_protocol::SMPC_PROTOCOL_VERSION.to_string(),
+                    participant_keys: Default::default(),
+                }),
+            },
+        )
+        .expect("round execution should return a response");
+
+        assert!(!response.accepted);
+        assert_eq!(
+            response.reason,
+            "SMPC capability is not configured on this node"
+        );
+    }
 }
 
 fn build_job_record(

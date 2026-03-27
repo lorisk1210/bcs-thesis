@@ -3,6 +3,7 @@
 
 mod encoding;
 mod grouped;
+mod helpers;
 mod scalar;
 
 // Third-party library imports
@@ -12,8 +13,9 @@ use serde_json::Value;
 
 // Local module imports
 use crate::query::{ClipBounds, QueryResult, QueryTemplate};
+use crate::slot_vector;
 
-pub use encoding::{decode_slot_bytes, encode_slot_bytes};
+pub use crate::slot_vector::{decode_slot_bytes, encode_slot_bytes};
 
 // Canonical slot-vector schema for one query request.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -105,15 +107,18 @@ pub fn aggregate_local_statistics(
         .ok_or_else(|| anyhow!("cannot aggregate zero local statistics"))?;
     validate_aggregate_items(template, &first.schema_id, &first.slot_labels, items)?;
 
+    let mut slots =
+        slot_vector::sum_slot_slices(first.slot_labels.len(), items.iter().map(|item| item.slots.as_slice()))
+            .map_err(|_| anyhow!("slot vector length mismatch for {}", template.as_str()))?;
+    if let Some(result) = scalar::normalize_aggregated_slots(template, &mut slots, items.len()) {
+        result?;
+    }
+
     Ok(LocalStatistics {
         template,
         schema_id: first.schema_id.clone(),
         slot_labels: first.slot_labels.clone(),
-        slots: encoding::sum_slot_vectors(
-            template,
-            first.slot_labels.len(),
-            items.iter().map(|item| item.slots.as_slice()),
-        )?,
+        slots,
         cohort_size: items
             .iter()
             .try_fold(0usize, |total, item| total.checked_add(item.cohort_size))
@@ -132,11 +137,14 @@ pub fn aggregate_slot_vectors(
         return Err(anyhow!("cannot aggregate zero slot vectors"));
     }
 
-    let slots = encoding::sum_slot_vectors(
-        template,
-        slot_labels.len(),
-        slot_vectors.iter().map(|vector| vector.as_slice()),
-    )?;
+    let mut slots =
+        slot_vector::sum_slot_slices(slot_labels.len(), slot_vectors.iter().map(|vector| vector.as_slice()))
+        .map_err(|_| anyhow!("slot vector length mismatch for {}", template.as_str()))?;
+    if let Some(result) =
+        scalar::normalize_aggregated_slots(template, &mut slots, slot_vectors.len())
+    {
+        result?;
+    }
     let cohort_size = cohort_size_from_slots(template, slot_labels, &slots)?;
     Ok(LocalStatistics {
         template,
@@ -268,11 +276,7 @@ fn sensitivity_for(aggregated: &LocalStatistics, clip: ClipBounds) -> f64 {
         aggregated.cohort_size,
         clip,
     )
-    .unwrap_or_else(|| clipped_mean_sensitivity(clip, aggregated.cohort_size))
-}
-
-fn clipped_mean_sensitivity(clip: ClipBounds, cohort_size: usize) -> f64 {
-    (clip.max - clip.min).abs() / cohort_size.max(1) as f64
+    .unwrap_or_else(|| helpers::clipped_mean_sensitivity(clip, aggregated.cohort_size))
 }
 
 #[cfg(test)]
@@ -350,6 +354,43 @@ mod tests {
         assert_eq!(decoded["n_control"], json!(12));
         assert_eq!(decoded["outcome_sum_exposed"], json!(50.25));
         assert_eq!(decoded["outcome_sum_control"], json!(30.5));
+    }
+
+    #[test]
+    fn aggregate_local_statistics_preserves_time_to_event_max_days() {
+        let items = vec![
+            LocalStatistics::from_stats_value(
+                QueryTemplate::TimeToEventProxy,
+                &json!({"max_days": 90}),
+                json!({
+                    "n": 2,
+                    "sum_days_to_event": 30.0,
+                    "max_days": 90
+                }),
+                2,
+            )
+            .expect("local stats should encode"),
+            LocalStatistics::from_stats_value(
+                QueryTemplate::TimeToEventProxy,
+                &json!({"max_days": 90}),
+                json!({
+                    "n": 3,
+                    "sum_days_to_event": 75.0,
+                    "max_days": 90
+                }),
+                3,
+            )
+            .expect("local stats should encode"),
+        ];
+
+        let aggregated = aggregate_local_statistics(QueryTemplate::TimeToEventProxy, &items)
+            .expect("aggregation should succeed");
+        let decoded = aggregated.to_stats_value().expect("stats should decode");
+
+        assert_eq!(decoded["max_days"], json!(90));
+        let rendered = render_query_result(&aggregated, ClipBounds { min: 0.0, max: 300.0 })
+            .expect("result should render");
+        assert_eq!(rendered.sensitivity, 18.0);
     }
 
     #[test]
