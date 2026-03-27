@@ -10,6 +10,13 @@ use anyhow::{Result, anyhow};
 // Local module imports
 use crate::privacy::PrivacyConfig;
 
+// SMPC configuration derived from environment variables.
+#[derive(Debug, Clone)]
+pub struct SmpcConfig {
+    pub private_key_bytes: Option<[u8; 32]>,
+    pub min_participating_nodes: usize,
+}
+
 // Loads the environment variables from the `.env` file.
 pub fn load_dotenv() {
     let _ = dotenvy::from_filename(".env");
@@ -39,6 +46,47 @@ pub fn load_privacy_config() -> Result<PrivacyConfig> {
     }
 
     Ok(config)
+}
+
+// Loads the node SMPC configuration from environment variables.
+pub fn load_smpc_config() -> Result<SmpcConfig> {
+    let private_key_bytes = match env::var("REFINERY_SMPC_PRIVATE_KEY_HEX") {
+        Ok(value) => {
+            let decoded = hex::decode(value.trim())
+                .map_err(|err| anyhow!("failed to decode REFINERY_SMPC_PRIVATE_KEY_HEX: {err}"))?;
+            Some(refinery_protocol::validate_private_key_bytes(&decoded)?)
+        }
+        Err(env::VarError::NotPresent) => None,
+        Err(err) => return Err(anyhow!("failed to read REFINERY_SMPC_PRIVATE_KEY_HEX: {err}")),
+    };
+
+    let min_participating_nodes = match env::var("REFINERY_MIN_PARTICIPATING_NODES") {
+        Ok(value) => {
+            let parsed = value.trim().parse::<usize>().map_err(|err| {
+                anyhow!(
+                    "failed to parse REFINERY_MIN_PARTICIPATING_NODES={:?}: {err}",
+                    value
+                )
+            })?;
+            if parsed < 2 {
+                return Err(anyhow!(
+                    "REFINERY_MIN_PARTICIPATING_NODES must be >= 2"
+                ));
+            }
+            parsed
+        }
+        Err(env::VarError::NotPresent) => 3,
+        Err(err) => {
+            return Err(anyhow!(
+                "failed to read REFINERY_MIN_PARTICIPATING_NODES: {err}"
+            ))
+        }
+    };
+
+    Ok(SmpcConfig {
+        private_key_bytes,
+        min_participating_nodes,
+    })
 }
 
 // Loads a required environment variable.

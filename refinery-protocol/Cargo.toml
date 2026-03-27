@@ -7,10 +7,13 @@ build = "build.rs"
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true
+crypto_box.workspace = true
 prost.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
 tonic.workspace = true
+zeroize.workspace = true
 
 [build-dependencies]
 protoc-bin-vendored.workspace = true

@@ -7,9 +7,9 @@ use std::path::{Path, PathBuf};
 // Third-party library imports
 use anyhow::{Result, anyhow};
 use clap::{Parser, Subcommand};
-use refinery_orchestrator::aggregate::aggregate_plaintext_responses;
 use refinery_orchestrator::client::{ClientTlsOptions, capabilities, health_check};
 use refinery_orchestrator::config::{load_dotenv, load_privacy_config};
+use refinery_orchestrator::db::{open_ledger, record_job_finished, record_job_started};
 use refinery_orchestrator::dp_release::release_result;
 use refinery_orchestrator::jobs::FederatedJob;
 use refinery_orchestrator::protocol_runner::run_job;
@@ -97,17 +97,43 @@ async fn main() -> Result<()> {
                 domain_name: tls_domain_name,
             };
 
-            let responses = run_job(&job, &tls).await?;
-            let aggregated = aggregate_plaintext_responses(job.template, &responses, job.clip)?;
-            let release = release_result(&aggregated, &privacy_config)?;
+            let ledger = open_ledger(&privacy_config.ledger_db_path)?;
+            record_job_started(&ledger, &job, None)?;
+
+            let run_output = match run_job(&job, &tls, privacy_config.min_participating_nodes).await
+            {
+                Ok(output) => output,
+                Err(error) => {
+                    record_job_finished(
+                        &ledger,
+                        &job.job_id,
+                        "failed",
+                        0,
+                        &error.to_string(),
+                        None,
+                        None,
+                    )?;
+                    return Err(error);
+                }
+            };
+            let release = release_result(&run_output.aggregated, &privacy_config)?;
+            record_job_finished(
+                &ledger,
+                &job.job_id,
+                if release.accepted { "released" } else { "rejected" },
+                run_output.accepted_nodes,
+                &release.reason,
+                Some(&run_output.aggregated),
+                Some(&release),
+            )?;
 
             if release.accepted {
                 println!("job_id: {}", job.job_id);
                 println!("status: released");
                 println!("template: {}", job.template.as_str());
                 println!("federation_mode: {}", job.federation_mode.as_str());
-                println!("participating_nodes: {}", job.nodes.len());
-                println!("cohort_size: {}", aggregated.cohort_size);
+                println!("participating_nodes: {}", run_output.accepted_nodes);
+                println!("cohort_size: {}", run_output.aggregated.cohort_size);
                 println!(
                     "noisy_result: {}",
                     release.noisy_result.unwrap_or(Value::Null)
