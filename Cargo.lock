@@ -2157,6 +2157,7 @@ dependencies = [
  "anyhow",
  "clap",
  "crypto_box",
+ "hex",
  "prost",
  "protoc-bin-vendored",
  "serde",

@@ -2,7 +2,7 @@
 // Node-local helpers for SMPC capability discovery, share generation, and round validation.
 
 // Standard library imports
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 // Third-party library imports
 use anyhow::{Result, anyhow};
@@ -10,10 +10,11 @@ use refinery_protocol::grpc::{
     RunFederationRoundRequest, RunFederationRoundResponse, SealedSharePacket, SubmitJobRequest,
 };
 use refinery_protocol::{
-    FederationMode, LocalStatistics, PRIVATE_KEY_LENGTH, SMPC_PROTOCOL_NAME,
-    SMPC_PROTOCOL_VERSION, SharePayload, decode_slot_bytes, encode_slot_bytes,
-    encrypt_share_payload, public_key_fingerprint, public_key_from_private_key,
-    sealed_packet_hash, slot_vector_hash, split_additive_shares, sum_slot_vectors,
+    FederationMode, LocalStatistics, PRIVATE_KEY_LENGTH, SMPC_AGGREGATE_SHARE_ROUND_NAME,
+    SMPC_PROTOCOL_NAME, SMPC_PROTOCOL_VERSION, SharePayload, decode_slot_bytes,
+    encode_slot_bytes, encrypt_share_payload, public_key_fingerprint,
+    public_key_from_private_key, sealed_packet_hash, slot_vector_hash,
+    split_additive_shares, sum_slot_vectors,
 };
 use zeroize::Zeroize;
 
@@ -146,7 +147,7 @@ pub fn validate_round_request(
     state: &SmpcJobState,
     node_id: &str,
 ) -> Option<String> {
-    if request.round_name != "aggregate_share_v1" {
+    if request.round_name != SMPC_AGGREGATE_SHARE_ROUND_NAME {
         return Some("unsupported SMPC round name".to_string());
     }
     if request.recipient_node_id != node_id {
@@ -165,6 +166,15 @@ pub fn validate_round_request(
     }
     if request.share_packets.len() != state.participant_keys.len() {
         return Some("unexpected number of inbound share packets".to_string());
+    }
+    let mut seen_senders = BTreeSet::new();
+    for packet in &request.share_packets {
+        if !state.participant_keys.contains_key(&packet.sender_node_id) {
+            return Some("sender node is not part of the approved manifest".to_string());
+        }
+        if !seen_senders.insert(packet.sender_node_id.clone()) {
+            return Some("duplicate share packet sender".to_string());
+        }
     }
     None
 }
@@ -240,19 +250,17 @@ fn validate_share_packet(
     request: &RunFederationRoundRequest,
     node_id: &str,
 ) -> Option<String> {
-    if packet.job_id != request.job_id {
-        return Some("share packet job id mismatch".to_string());
-    }
-    if packet.job_context_hash != request.job_context_hash {
-        return Some("share packet context hash mismatch".to_string());
-    }
-    if packet.protocol_name != request.protocol_name
-        || packet.protocol_version != request.protocol_version
-    {
-        return Some("share packet protocol mismatch".to_string());
-    }
-    if packet.schema_id != request.schema_id || packet.slot_labels != request.slot_labels {
-        return Some("share packet schema mismatch".to_string());
+    if let Some(reason) = validate_share_context(
+        "packet",
+        &packet.job_id,
+        &packet.job_context_hash,
+        &packet.protocol_name,
+        &packet.protocol_version,
+        &packet.schema_id,
+        &packet.slot_labels,
+        request,
+    ) {
+        return Some(reason);
     }
     if packet.recipient_node_id != node_id {
         return Some("share packet recipient mismatch".to_string());
@@ -265,24 +273,47 @@ fn validate_share_payload(
     packet: &SealedSharePacket,
     request: &RunFederationRoundRequest,
 ) -> Option<String> {
-    if payload.job_id != request.job_id {
-        return Some("share payload job id mismatch".to_string());
-    }
-    if payload.job_context_hash != request.job_context_hash {
-        return Some("share payload context hash mismatch".to_string());
-    }
-    if payload.protocol_name != request.protocol_name
-        || payload.protocol_version != request.protocol_version
-    {
-        return Some("share payload protocol mismatch".to_string());
+    if let Some(reason) = validate_share_context(
+        "payload",
+        &payload.job_id,
+        &payload.job_context_hash,
+        &payload.protocol_name,
+        &payload.protocol_version,
+        &payload.schema_id,
+        &payload.slot_labels,
+        request,
+    ) {
+        return Some(reason);
     }
     if payload.sender_node_id != packet.sender_node_id
         || payload.recipient_node_id != packet.recipient_node_id
     {
         return Some("share payload sender or recipient mismatch".to_string());
     }
-    if payload.schema_id != request.schema_id || payload.slot_labels != request.slot_labels {
-        return Some("share payload schema mismatch".to_string());
+    None
+}
+
+fn validate_share_context(
+    label: &str,
+    job_id: &str,
+    job_context_hash: &str,
+    protocol_name: &str,
+    protocol_version: &str,
+    schema_id: &str,
+    slot_labels: &[String],
+    request: &RunFederationRoundRequest,
+) -> Option<String> {
+    if job_id != request.job_id {
+        return Some(format!("share {label} job id mismatch"));
+    }
+    if job_context_hash != request.job_context_hash {
+        return Some(format!("share {label} context hash mismatch"));
+    }
+    if protocol_name != request.protocol_name || protocol_version != request.protocol_version {
+        return Some(format!("share {label} protocol mismatch"));
+    }
+    if schema_id != request.schema_id || slot_labels != request.slot_labels {
+        return Some(format!("share {label} schema mismatch"));
     }
     None
 }
@@ -341,7 +372,7 @@ mod tests {
     fn rejected_round_response_drops_share_bytes() {
         let request = RunFederationRoundRequest {
             job_id: "job".to_string(),
-            round_name: "aggregate_share_v1".to_string(),
+            round_name: SMPC_AGGREGATE_SHARE_ROUND_NAME.to_string(),
             job_context_hash: "hash".to_string(),
             protocol_name: SMPC_PROTOCOL_NAME.to_string(),
             protocol_version: SMPC_PROTOCOL_VERSION.to_string(),
@@ -355,5 +386,62 @@ mod tests {
         assert!(!response.accepted);
         assert!(response.aggregate_share.is_empty());
         assert_eq!(response.reason, "bad packet");
+    }
+
+    #[test]
+    fn validate_round_request_rejects_duplicate_senders() {
+        let request = RunFederationRoundRequest {
+            job_id: "job".to_string(),
+            round_name: SMPC_AGGREGATE_SHARE_ROUND_NAME.to_string(),
+            job_context_hash: "hash".to_string(),
+            protocol_name: SMPC_PROTOCOL_NAME.to_string(),
+            protocol_version: SMPC_PROTOCOL_VERSION.to_string(),
+            schema_id: "schema".to_string(),
+            slot_labels: vec!["count".to_string()],
+            share_packets: vec![
+                SealedSharePacket {
+                    job_id: "job".to_string(),
+                    job_context_hash: "hash".to_string(),
+                    protocol_name: SMPC_PROTOCOL_NAME.to_string(),
+                    protocol_version: SMPC_PROTOCOL_VERSION.to_string(),
+                    sender_node_id: "node-a".to_string(),
+                    recipient_node_id: "node-b".to_string(),
+                    schema_id: "schema".to_string(),
+                    slot_labels: vec!["count".to_string()],
+                    nonce: vec![1],
+                    ciphertext: vec![2],
+                    packet_hash: "hash-a".to_string(),
+                },
+                SealedSharePacket {
+                    job_id: "job".to_string(),
+                    job_context_hash: "hash".to_string(),
+                    protocol_name: SMPC_PROTOCOL_NAME.to_string(),
+                    protocol_version: SMPC_PROTOCOL_VERSION.to_string(),
+                    sender_node_id: "node-a".to_string(),
+                    recipient_node_id: "node-b".to_string(),
+                    schema_id: "schema".to_string(),
+                    slot_labels: vec!["count".to_string()],
+                    nonce: vec![3],
+                    ciphertext: vec![4],
+                    packet_hash: "hash-b".to_string(),
+                },
+            ],
+            recipient_node_id: "node-b".to_string(),
+        };
+        let state = SmpcJobState {
+            job_context_hash: "hash".to_string(),
+            schema_id: "schema".to_string(),
+            slot_labels: vec!["count".to_string()],
+            protocol_name: SMPC_PROTOCOL_NAME.to_string(),
+            protocol_version: SMPC_PROTOCOL_VERSION.to_string(),
+            participant_keys: BTreeMap::from([
+                ("node-a".to_string(), vec![1u8; 32]),
+                ("node-b".to_string(), vec![2u8; 32]),
+            ]),
+        };
+
+        let reason =
+            validate_round_request(&request, &state, "node-b").expect("request should reject");
+        assert_eq!(reason, "duplicate share packet sender");
     }
 }

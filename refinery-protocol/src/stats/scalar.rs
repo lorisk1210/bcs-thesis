@@ -10,8 +10,10 @@ use super::StatisticsSchema;
 use super::encoding::{
     decode_count, decode_fixed, decode_signed, encode_count, encode_fixed, encode_signed,
 };
-use crate::errors::invalid_stats_shape;
 use crate::query::{ClipBounds, QueryTemplate};
+use super::helpers::{
+    clipped_mean_sensitivity, required_f64, required_i64, required_u64, safe_mean, safe_rate,
+};
 
 const TWO_ARM_COUNT_SLOTS: &[usize] = &[0, 1];
 
@@ -279,6 +281,19 @@ pub(crate) fn sensitivity(
     })
 }
 
+pub(crate) fn normalize_aggregated_slots(
+    template: QueryTemplate,
+    slots: &mut [u64],
+    participant_count: usize,
+) -> Option<Result<()>> {
+    scalar_template_spec(template).map(|spec| match spec.sensitivity {
+        ScalarSensitivityKind::TimeToEvent { max_days_index } => {
+            normalize_invariant_signed_slot(slots, max_days_index, participant_count, "max_days")
+        }
+        _ => Ok(()),
+    })
+}
+
 fn scalar_template_spec(template: QueryTemplate) -> Option<&'static ScalarTemplateSpec> {
     match template {
         QueryTemplate::CohortFeasibilityCount => Some(&COHORT_FEASIBILITY_SPEC),
@@ -290,37 +305,29 @@ fn scalar_template_spec(template: QueryTemplate) -> Option<&'static ScalarTempla
     }
 }
 
-fn clipped_mean_sensitivity(clip: ClipBounds, cohort_size: usize) -> f64 {
-    (clip.max - clip.min).abs() / cohort_size.max(1) as f64
-}
-
 fn inverse_count_sensitivity(cohort_size: usize) -> f64 {
     1.0 / cohort_size.max(1) as f64
 }
 
-fn required_u64(value: &Value, key: &str) -> Result<u64> {
-    value.get(key)
-        .and_then(Value::as_u64)
-        .ok_or_else(|| invalid_stats_shape(key))
-}
-
-fn required_f64(value: &Value, key: &str) -> Result<f64> {
-    value.get(key)
-        .and_then(Value::as_f64)
-        .ok_or_else(|| invalid_stats_shape(key))
-}
-
-fn required_i64(value: &Value, key: &str, default: Option<i64>) -> Result<i64> {
-    value.get(key)
-        .and_then(Value::as_i64)
-        .or(default)
-        .ok_or_else(|| invalid_stats_shape(key))
-}
-
-fn safe_mean(sum: f64, n: u64) -> Option<f64> {
-    (n > 0).then_some(sum / n as f64)
-}
-
-fn safe_rate(count: f64, n: u64) -> Option<f64> {
-    (n > 0).then_some(count / n as f64)
+fn normalize_invariant_signed_slot(
+    slots: &mut [u64],
+    index: usize,
+    participant_count: usize,
+    label: &str,
+) -> Result<()> {
+    if participant_count == 0 {
+        return Err(anyhow!("participant count must be > 0"));
+    }
+    let value = slots
+        .get(index)
+        .copied()
+        .ok_or_else(|| anyhow!("missing invariant slot {label}"))?;
+    let decoded = decode_signed(value)?;
+    let divisor =
+        i64::try_from(participant_count).map_err(|_| anyhow!("participant count overflow"))?;
+    if decoded % divisor != 0 {
+        return Err(anyhow!("aggregated invariant slot {label} is inconsistent"));
+    }
+    slots[index] = encode_signed(decoded / divisor)?;
+    Ok(())
 }

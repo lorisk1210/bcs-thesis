@@ -8,7 +8,7 @@ use anyhow::{Result, anyhow};
 use refinery_protocol::grpc::{RunFederationRoundResponse, SubmitJobResponse};
 use refinery_protocol::{
     ClipBounds, LocalStatistics, QueryResult, QueryTemplate, aggregate_local_statistics,
-    aggregate_slot_vectors, decode_slot_bytes, render_query_result,
+    aggregate_slot_vectors, decode_slot_bytes, render_query_result, slot_vector_hash,
 };
 
 // Aggregates plaintext node responses and renders the final query result.
@@ -34,6 +34,9 @@ pub fn aggregate_smpc_round_responses(
     template: QueryTemplate,
     schema_id: &str,
     slot_labels: &[String],
+    job_context_hash: &str,
+    protocol_name: &str,
+    protocol_version: &str,
     responses: &[RunFederationRoundResponse],
     clip: ClipBounds,
 ) -> Result<QueryResult> {
@@ -43,10 +46,43 @@ pub fn aggregate_smpc_round_responses(
 
     let vectors = responses
         .iter()
-        .map(|response| decode_slot_bytes(&response.aggregate_share))
+        .map(|response| {
+            validate_round_response(
+                response,
+                schema_id,
+                slot_labels,
+                job_context_hash,
+                protocol_name,
+                protocol_version,
+            )?;
+            decode_slot_bytes(&response.aggregate_share)
+        })
         .collect::<Result<Vec<_>>>()?;
     let aggregated = aggregate_slot_vectors(template, schema_id, slot_labels, &vectors)?;
     render_query_result(&aggregated, clip)
+}
+
+fn validate_round_response(
+    response: &RunFederationRoundResponse,
+    schema_id: &str,
+    slot_labels: &[String],
+    job_context_hash: &str,
+    protocol_name: &str,
+    protocol_version: &str,
+) -> Result<()> {
+    if response.schema_id != schema_id || response.slot_labels != slot_labels {
+        return Err(anyhow!("SMPC round response schema mismatch"));
+    }
+    if response.job_context_hash != job_context_hash {
+        return Err(anyhow!("SMPC round response job context hash mismatch"));
+    }
+    if response.protocol_name != protocol_name || response.protocol_version != protocol_version {
+        return Err(anyhow!("SMPC round response protocol metadata mismatch"));
+    }
+    if response.vector_hash != slot_vector_hash(&response.aggregate_share) {
+        return Err(anyhow!("SMPC round response vector hash mismatch"));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -79,17 +115,20 @@ mod tests {
         aggregate_shares
             .into_iter()
             .enumerate()
-            .map(|(index, share)| RunFederationRoundResponse {
-                accepted: true,
-                reason: "accepted".to_string(),
-                node_id: format!("node-{index}"),
-                schema_id: stats[0].schema_id.clone(),
-                slot_labels: stats[0].slot_labels.clone(),
-                aggregate_share: encode_slot_bytes(&share),
-                vector_hash: String::new(),
-                job_context_hash: "hash".to_string(),
-                protocol_name: SMPC_PROTOCOL_NAME.to_string(),
-                protocol_version: SMPC_PROTOCOL_VERSION.to_string(),
+            .map(|(index, share)| {
+                let aggregate_share = encode_slot_bytes(&share);
+                RunFederationRoundResponse {
+                    accepted: true,
+                    reason: "accepted".to_string(),
+                    node_id: format!("node-{index}"),
+                    schema_id: stats[0].schema_id.clone(),
+                    slot_labels: stats[0].slot_labels.clone(),
+                    vector_hash: slot_vector_hash(&aggregate_share),
+                    aggregate_share,
+                    job_context_hash: "hash".to_string(),
+                    protocol_name: SMPC_PROTOCOL_NAME.to_string(),
+                    protocol_version: SMPC_PROTOCOL_VERSION.to_string(),
+                }
             })
             .collect()
     }
@@ -167,6 +206,9 @@ mod tests {
             QueryTemplate::ComparativeEffectivenessDelta,
             &locals[0].schema_id,
             &locals[0].slot_labels,
+            "hash",
+            SMPC_PROTOCOL_NAME,
+            SMPC_PROTOCOL_VERSION,
             &round_two,
             ClipBounds { min: 0.0, max: 300.0 },
         )
@@ -241,6 +283,9 @@ mod tests {
             QueryTemplate::DoseResponseTrend,
             &locals[0].schema_id,
             &locals[0].slot_labels,
+            "hash",
+            SMPC_PROTOCOL_NAME,
+            SMPC_PROTOCOL_VERSION,
             &round_two,
             ClipBounds { min: 0.0, max: 300.0 },
         )
@@ -248,5 +293,43 @@ mod tests {
 
         assert_eq!(plaintext_result.raw_result, smpc_result.raw_result);
         assert_eq!(plaintext_result.cohort_size, smpc_result.cohort_size);
+    }
+
+    #[test]
+    fn smpc_aggregation_rejects_mismatched_metadata() {
+        let mut responses = build_round_two_responses(&[
+            LocalStatistics::from_stats_value(
+                QueryTemplate::CohortFeasibilityCount,
+                &json!({}),
+                json!({"count": 4}),
+                4,
+            )
+            .expect("local stats"),
+            LocalStatistics::from_stats_value(
+                QueryTemplate::CohortFeasibilityCount,
+                &json!({}),
+                json!({"count": 6}),
+                6,
+            )
+            .expect("local stats"),
+        ]);
+        responses[0].job_context_hash = "wrong-hash".to_string();
+        responses[0].vector_hash = slot_vector_hash(&responses[0].aggregate_share);
+
+        let error = aggregate_smpc_round_responses(
+            QueryTemplate::CohortFeasibilityCount,
+            "cohort_feasibility_count:v1",
+            &[String::from("count")],
+            "hash",
+            SMPC_PROTOCOL_NAME,
+            SMPC_PROTOCOL_VERSION,
+            &responses,
+            ClipBounds { min: 0.0, max: 300.0 },
+        )
+        .expect_err("aggregation should reject bad metadata");
+
+        assert!(error
+            .to_string()
+            .contains("job context hash mismatch"));
     }
 }

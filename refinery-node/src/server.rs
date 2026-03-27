@@ -22,8 +22,9 @@ use tonic::{Request, Response, Status};
 
 // Local module imports
 use crate::app;
-use crate::config;
-use crate::federation_jobs::{self, JobRecord};
+use crate::federation_jobs::{
+    self, JobRecord, JOB_STATUS_COMPLETED, JOB_STATUS_REJECTED,
+};
 use crate::smpc;
 
 // Optional TLS settings for the node server.
@@ -48,6 +49,7 @@ pub struct NodeServerConfig {
 #[derive(Clone)]
 struct NodeState {
     config: NodeServerConfig,
+    smpc_capability: Option<smpc::SmpcCapability>,
     jobs: Arc<Mutex<HashMap<String, JobRecord>>>,
 }
 
@@ -63,10 +65,12 @@ pub async fn serve(config: NodeServerConfig) -> Result<()> {
         .bind_addr
         .parse()
         .with_context(|| format!("invalid bind address {}", config.bind_addr))?;
+    let smpc_capability = smpc::load_smpc_capability()?;
 
     let service = NodeGrpcService {
         state: NodeState {
             config,
+            smpc_capability,
             jobs: Arc::new(Mutex::new(HashMap::new())),
         },
     };
@@ -117,18 +121,17 @@ impl NodeService for NodeGrpcService {
         &self,
         _request: Request<GetCapabilitiesRequest>,
     ) -> Result<Response<GetCapabilitiesResponse>, Status> {
-        let smpc_capability = smpc::load_smpc_capability().map_err(status_from_anyhow)?;
         let mut supported_federation_modes =
             vec![FederationMode::Plaintext.as_str().to_string()];
         let mut smpc_public_key = Vec::new();
         let mut smpc_key_fingerprint = String::new();
         let mut supported_smpc_protocols = Vec::new();
 
-        if let Some(smpc_capability) = smpc_capability {
+        if let Some(smpc_capability) = self.state.smpc_capability.as_ref() {
             supported_federation_modes
                 .push(FederationMode::SmpcAdditiveSharing.as_str().to_string());
-            smpc_public_key = smpc_capability.public_key;
-            smpc_key_fingerprint = smpc_capability.fingerprint;
+            smpc_public_key = smpc_capability.public_key.clone();
+            smpc_key_fingerprint = smpc_capability.fingerprint.clone();
             supported_smpc_protocols.push(format!(
                 "{}_{}",
                 refinery_protocol::SMPC_PROTOCOL_NAME,
@@ -161,7 +164,6 @@ impl NodeService for NodeGrpcService {
         };
         let state = self.state.clone();
         let summary = tokio::task::spawn_blocking(move || {
-            config::load_dotenv();
             app::run_pipeline(&state.config.db_path, &state.config.input_dir, max_files)
         })
         .await
@@ -183,9 +185,12 @@ impl NodeService for NodeGrpcService {
         let state = self.state.clone();
         let job_id = req.job_id.clone();
         let config = state.config.clone();
+        let smpc_capability = state.smpc_capability.clone();
 
         let (response, record) =
-            tokio::task::spawn_blocking(move || federation_jobs::execute_submit_job(&config, req))
+            tokio::task::spawn_blocking(move || {
+                federation_jobs::execute_submit_job(&config, smpc_capability, req)
+            })
                 .await
                 .map_err(join_error)?
                 .map_err(status_from_anyhow)?;
@@ -222,9 +227,15 @@ impl NodeService for NodeGrpcService {
         let record_for_round = record.clone();
         let job_id = req.job_id.clone();
         let config = state.config.clone();
+        let smpc_capability = state.smpc_capability.clone();
 
         let response = tokio::task::spawn_blocking(move || {
-            federation_jobs::execute_federation_round(&config, req, record_for_round)
+            federation_jobs::execute_federation_round(
+                &config,
+                smpc_capability,
+                req,
+                record_for_round,
+            )
         })
         .await
         .map_err(join_error)?
@@ -234,9 +245,9 @@ impl NodeService for NodeGrpcService {
             job_id,
             JobRecord {
                 status: if response.accepted {
-                    "completed".to_string()
+                    JOB_STATUS_COMPLETED.to_string()
                 } else {
-                    "rejected".to_string()
+                    JOB_STATUS_REJECTED.to_string()
                 },
                 accepted: response.accepted,
                 reason: response.reason.clone(),

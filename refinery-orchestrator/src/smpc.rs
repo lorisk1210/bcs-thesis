@@ -11,22 +11,15 @@ use refinery_protocol::grpc::{
     ParticipantManifestEntry, RunFederationRoundRequest, SubmitJobRequest, SubmitJobResponse,
 };
 use refinery_protocol::{
-    FederationMode, QueryResult, SMPC_PROTOCOL_NAME, SMPC_PROTOCOL_VERSION,
-    compute_job_context_hash,
+    FederationMode, SMPC_AGGREGATE_SHARE_ROUND_NAME, SMPC_PROTOCOL_NAME,
+    SMPC_PROTOCOL_VERSION, compute_job_context_hash,
 };
 
 // Local module imports
 use crate::aggregate::aggregate_smpc_round_responses;
 use crate::client::{ClientTlsOptions, capabilities, run_federation_round, submit_job};
 use crate::jobs::FederatedJob;
-
-// Final output of one federated execution after transport and aggregation.
-#[derive(Debug, Clone)]
-pub struct FederatedRunOutput {
-    pub aggregated: QueryResult,
-    pub accepted_nodes: usize,
-    pub job_context_hash: Option<String>,
-}
+use crate::run_output::FederatedRunOutput;
 
 #[derive(Debug, Clone)]
 struct ParticipantTarget {
@@ -112,7 +105,7 @@ pub async fn run_smpc_job(
             &participant.endpoint,
             RunFederationRoundRequest {
                 job_id: job.job_id.clone(),
-                round_name: "aggregate_share_v1".to_string(),
+                round_name: SMPC_AGGREGATE_SHARE_ROUND_NAME.to_string(),
                 job_context_hash: job_context_hash.clone(),
                 protocol_name: SMPC_PROTOCOL_NAME.to_string(),
                 protocol_version: SMPC_PROTOCOL_VERSION.to_string(),
@@ -136,6 +129,9 @@ pub async fn run_smpc_job(
         job.template,
         &schema_id,
         &slot_labels,
+        &job_context_hash,
+        SMPC_PROTOCOL_NAME,
+        SMPC_PROTOCOL_VERSION,
         &round2_responses,
         job.clip,
     )?;
@@ -181,18 +177,14 @@ async fn load_participants(
             ));
         }
         participants.push(ParticipantTarget {
-            endpoint,
+            endpoint: endpoint.clone(),
             manifest: ParticipantManifestEntry {
                 node_id: caps.node_id,
-                endpoint: String::new(),
+                endpoint,
                 smpc_public_key: caps.smpc_public_key,
                 smpc_key_fingerprint: caps.smpc_key_fingerprint,
             },
         });
-    }
-
-    for participant in &mut participants {
-        participant.manifest.endpoint = participant.endpoint.clone();
     }
     Ok(participants)
 }
