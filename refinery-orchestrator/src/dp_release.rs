@@ -3,7 +3,7 @@
 
 // Third-party library imports
 use anyhow::{Result, anyhow};
-use rand::Rng;
+use rand::{Rng, SeedableRng, rngs::StdRng};
 
 // Local module imports
 use refinery_protocol::QueryResult;
@@ -27,6 +27,19 @@ pub fn release_result(
     query_result: &QueryResult,
     config: &GlobalPrivacyConfig,
 ) -> Result<GlobalReleaseResult> {
+    let mut rng = rand::thread_rng();
+    release_result_with_rng(query_result, config, &mut rng)
+}
+
+// Applies the release policy using an explicit RNG for deterministic tests.
+pub fn release_result_with_rng<R>(
+    query_result: &QueryResult,
+    config: &GlobalPrivacyConfig,
+    rng: &mut R,
+) -> Result<GlobalReleaseResult>
+where
+    R: Rng + ?Sized,
+{
     if config.epsilon <= 0.0 {
         return Err(anyhow!("epsilon must be > 0"));
     }
@@ -51,7 +64,7 @@ pub fn release_result(
         query_result.sensitivity / epsilon_per_metric
     };
     let count_scale = 1.0 / epsilon_per_metric;
-    add_noise_to_json(&mut noisy_result, value_scale, count_scale);
+    add_noise_to_json(&mut noisy_result, value_scale, count_scale, rng);
 
     Ok(GlobalReleaseResult {
         accepted: true,
@@ -64,8 +77,11 @@ pub fn release_result(
 // @param: value - Mutable JSON result payload
 // @param: value_scale - Laplace scale for non-count metrics
 // @param: count_scale - Laplace scale for count-like metrics
-fn add_noise_to_json(value: &mut Value, value_scale: f64, count_scale: f64) {
-    add_noise_with_key(value, value_scale, count_scale, None);
+fn add_noise_to_json<R>(value: &mut Value, value_scale: f64, count_scale: f64, rng: &mut R)
+where
+    R: Rng + ?Sized,
+{
+    add_noise_with_key(value, value_scale, count_scale, None, rng);
 }
 
 // Walks the result JSON and applies noise to whitelisted keys.
@@ -73,7 +89,15 @@ fn add_noise_to_json(value: &mut Value, value_scale: f64, count_scale: f64) {
 // @param: value_scale - Laplace scale for non-count metrics
 // @param: count_scale - Laplace scale for count-like metrics
 // @param: key - Optional parent key describing the current value
-fn add_noise_with_key(value: &mut Value, value_scale: f64, count_scale: f64, key: Option<&str>) {
+fn add_noise_with_key<R>(
+    value: &mut Value,
+    value_scale: f64,
+    count_scale: f64,
+    key: Option<&str>,
+    rng: &mut R,
+) where
+    R: Rng + ?Sized,
+{
     match value {
         Value::Number(num) => {
             let Some(metric_key) = key else {
@@ -88,7 +112,7 @@ fn add_noise_with_key(value: &mut Value, value_scale: f64, count_scale: f64, key
                 } else {
                     value_scale
                 };
-                let mut noisy = base + sample_laplace(local_scale);
+                let mut noisy = base + sample_laplace(local_scale, rng);
                 if is_count_like_key(metric_key) {
                     noisy = noisy.max(0.0);
                 }
@@ -102,12 +126,12 @@ fn add_noise_with_key(value: &mut Value, value_scale: f64, count_scale: f64, key
                 } else {
                     None
                 };
-                add_noise_with_key(item, value_scale, count_scale, inherited_key);
+                add_noise_with_key(item, value_scale, count_scale, inherited_key, rng);
             }
         }
         Value::Object(map) => {
             for (child_key, item) in map.iter_mut() {
-                add_noise_with_key(item, value_scale, count_scale, Some(child_key.as_str()));
+                add_noise_with_key(item, value_scale, count_scale, Some(child_key.as_str()), rng);
             }
         }
         _ => {}
@@ -166,13 +190,56 @@ fn should_noise_key(key: &str) -> bool {
 // Samples Laplace noise with the provided scale.
 // @param: scale - Laplace scale parameter
 // @return: f64 - One Laplace-distributed sample
-fn sample_laplace(scale: f64) -> f64 {
+fn sample_laplace<R>(scale: f64, rng: &mut R) -> f64
+where
+    R: Rng + ?Sized,
+{
     if scale <= 0.0 {
         return 0.0;
     }
-    let mut rng = rand::thread_rng();
     let uniform_u: f64 = rng.gen_range(f64::EPSILON..(1.0 - f64::EPSILON));
     let centered = uniform_u - 0.5;
     let sign = if centered >= 0.0 { 1.0 } else { -1.0 };
     -scale * sign * (1.0 - 2.0 * centered.abs()).ln()
+}
+
+// Deterministic helper for tests that need the exact same DP output across paths.
+pub fn release_result_with_seed(
+    query_result: &QueryResult,
+    config: &GlobalPrivacyConfig,
+    seed: u64,
+) -> Result<GlobalReleaseResult> {
+    let mut rng = StdRng::seed_from_u64(seed);
+    release_result_with_rng(query_result, config, &mut rng)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn seeded_release_is_deterministic() {
+        let query_result = QueryResult {
+            template_name: "cohort_feasibility_count".to_string(),
+            raw_result: json!({"count": 20}),
+            cohort_size: 20,
+            sensitivity: 1.0,
+        };
+        let config = GlobalPrivacyConfig {
+            epsilon: 1.0,
+            min_cohort: 1,
+            total_budget: 10.0,
+            min_participating_nodes: 3,
+            ledger_db_path: "data/test_orchestrator.duckdb".into(),
+        };
+
+        let first =
+            release_result_with_seed(&query_result, &config, 42).expect("seeded release works");
+        let second =
+            release_result_with_seed(&query_result, &config, 42).expect("seeded release works");
+        assert_eq!(first.noisy_result, second.noisy_result);
+        assert_eq!(first.reason, second.reason);
+        assert_eq!(first.accepted, second.accepted);
+    }
 }
