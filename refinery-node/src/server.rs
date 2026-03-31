@@ -5,7 +5,6 @@
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::PathBuf;
-use std::str::FromStr;
 use std::sync::Arc;
 
 // Third-party library imports
@@ -23,9 +22,10 @@ use tonic::{Request, Response, Status};
 
 // Local module imports
 use crate::app;
-use crate::config;
-use crate::local_policy;
-use crate::query;
+use crate::federation_jobs::{
+    self, JobRecord, JOB_STATUS_COMPLETED, JOB_STATUS_REJECTED,
+};
+use crate::smpc;
 
 // Optional TLS settings for the node server.
 #[derive(Debug, Clone)]
@@ -45,18 +45,11 @@ pub struct NodeServerConfig {
     pub tls: TlsConfig,
 }
 
-// Minimal in-memory status for submitted jobs.
-#[derive(Debug, Clone)]
-struct JobRecord {
-    status: String,
-    accepted: bool,
-    reason: String,
-}
-
 // Shared server state across gRPC handlers.
 #[derive(Clone)]
 struct NodeState {
     config: NodeServerConfig,
+    smpc_capability: Option<smpc::SmpcCapability>,
     jobs: Arc<Mutex<HashMap<String, JobRecord>>>,
 }
 
@@ -67,17 +60,17 @@ struct NodeGrpcService {
 }
 
 // Starts the node gRPC server.
-// @param: config - Runtime configuration for the node service
-// @return: Result<()> - Returns an error if the server fails to start or serve
 pub async fn serve(config: NodeServerConfig) -> Result<()> {
     let addr: SocketAddr = config
         .bind_addr
         .parse()
         .with_context(|| format!("invalid bind address {}", config.bind_addr))?;
+    let smpc_capability = smpc::load_smpc_capability()?;
 
     let service = NodeGrpcService {
         state: NodeState {
             config,
+            smpc_capability,
             jobs: Arc::new(Mutex::new(HashMap::new())),
         },
     };
@@ -95,9 +88,6 @@ pub async fn serve(config: NodeServerConfig) -> Result<()> {
     Ok(())
 }
 
-// Loads TLS configuration if certificate paths were provided.
-// @param: config - TLS-related file paths
-// @return: Result<Option<ServerTlsConfig>> - TLS config or None for plaintext transport
 async fn load_tls_config(config: &TlsConfig) -> Result<Option<ServerTlsConfig>> {
     match (&config.cert_path, &config.key_path) {
         (Some(cert_path), Some(key_path)) => {
@@ -118,7 +108,6 @@ async fn load_tls_config(config: &TlsConfig) -> Result<Option<ServerTlsConfig>> 
 
 #[tonic::async_trait]
 impl NodeService for NodeGrpcService {
-    // HealthCheck RPC: Reports whether the node service is up.
     async fn health_check(
         &self,
         _request: Request<HealthCheckRequest>,
@@ -128,11 +117,28 @@ impl NodeService for NodeGrpcService {
         }))
     }
 
-    // GetCapabilities RPC: Returns supported templates and protocol modes.
     async fn get_capabilities(
         &self,
         _request: Request<GetCapabilitiesRequest>,
     ) -> Result<Response<GetCapabilitiesResponse>, Status> {
+        let mut supported_federation_modes =
+            vec![FederationMode::Plaintext.as_str().to_string()];
+        let mut smpc_public_key = Vec::new();
+        let mut smpc_key_fingerprint = String::new();
+        let mut supported_smpc_protocols = Vec::new();
+
+        if let Some(smpc_capability) = self.state.smpc_capability.as_ref() {
+            supported_federation_modes
+                .push(FederationMode::SmpcAdditiveSharing.as_str().to_string());
+            smpc_public_key = smpc_capability.public_key.clone();
+            smpc_key_fingerprint = smpc_capability.fingerprint.clone();
+            supported_smpc_protocols.push(format!(
+                "{}_{}",
+                refinery_protocol::SMPC_PROTOCOL_NAME,
+                refinery_protocol::SMPC_PROTOCOL_VERSION
+            ));
+        }
+
         Ok(Response::new(GetCapabilitiesResponse {
             node_id: self.state.config.node_id.clone(),
             protocol_version: "v1".to_string(),
@@ -141,14 +147,13 @@ impl NodeService for NodeGrpcService {
                 .iter()
                 .map(|template| template.as_str().to_string())
                 .collect(),
-            supported_federation_modes: FederationMode::supported()
-                .iter()
-                .map(|mode| mode.to_string())
-                .collect(),
+            supported_federation_modes,
+            smpc_public_key,
+            smpc_key_fingerprint,
+            supported_smpc_protocols,
         }))
     }
 
-    // RunPipeline RPC: Executes ingest -> normalize -> materialize on this hospital node.
     async fn run_pipeline(
         &self,
         request: Request<RunPipelineRequest>,
@@ -159,7 +164,6 @@ impl NodeService for NodeGrpcService {
         };
         let state = self.state.clone();
         let summary = tokio::task::spawn_blocking(move || {
-            config::load_dotenv();
             app::run_pipeline(&state.config.db_path, &state.config.input_dir, max_files)
         })
         .await
@@ -173,7 +177,6 @@ impl NodeService for NodeGrpcService {
         }))
     }
 
-    // SubmitJob RPC: Computes local sufficient statistics and applies the local participation gate.
     async fn submit_job(
         &self,
         request: Request<SubmitJobRequest>,
@@ -181,88 +184,21 @@ impl NodeService for NodeGrpcService {
         let req = request.into_inner();
         let state = self.state.clone();
         let job_id = req.job_id.clone();
+        let config = state.config.clone();
+        let smpc_capability = state.smpc_capability.clone();
 
-        let response = tokio::task::spawn_blocking(move || {
-            config::load_dotenv();
-            let template = QueryTemplate::from_str(&req.template)?;
-            let mode = FederationMode::from_str(&req.federation_mode)?;
-            if mode != FederationMode::Plaintext {
-                return Ok(SubmitJobResponse {
-                    job_id: req.job_id,
-                    accepted: false,
-                    reason: "smpc_additive_sharing is not implemented yet; use plaintext federation mode".to_string(),
-                    template: template.as_str().to_string(),
-                    stats_json: String::new(),
-                    cohort_size: 0,
-                    fingerprint: String::new(),
-                });
-            }
+        let (response, record) =
+            tokio::task::spawn_blocking(move || {
+                federation_jobs::execute_submit_job(&config, smpc_capability, req)
+            })
+                .await
+                .map_err(join_error)?
+                .map_err(status_from_anyhow)?;
 
-            let params: serde_json::Value = serde_json::from_str(&req.params_json)?;
-            let conn = app::open_initialized_connection(&state.config.db_path)?;
-            let stats = query::compute_local_statistics(
-                &conn,
-                template,
-                &params,
-                refinery_protocol::ClipBounds {
-                    min: req.clip_min,
-                    max: req.clip_max,
-                },
-            )?;
-            let privacy_config = config::load_privacy_config()?;
-            let fingerprint = app::fingerprint(template, &params, req.clip_min, req.clip_max);
-            let decision = local_policy::enforce_local_participation(
-                &conn,
-                &req.job_id,
-                &fingerprint,
-                template,
-                stats.cohort_size,
-                &privacy_config,
-            )?;
-
-            if decision.accepted {
-                Ok(SubmitJobResponse {
-                    job_id: req.job_id,
-                    accepted: true,
-                    reason: decision.reason,
-                    template: template.as_str().to_string(),
-                    stats_json: serde_json::to_string(&stats).map_err(status_from_serde_to_anyhow)?,
-                    cohort_size: stats.cohort_size as u64,
-                    fingerprint,
-                })
-            } else {
-                Ok(SubmitJobResponse {
-                    job_id: req.job_id,
-                    accepted: false,
-                    reason: decision.reason,
-                    template: template.as_str().to_string(),
-                    stats_json: String::new(),
-                    cohort_size: stats.cohort_size as u64,
-                    fingerprint,
-                })
-            }
-        })
-        .await
-        .map_err(join_error)?
-        .map_err(status_from_anyhow)?;
-
-        self.state.jobs.lock().await.insert(
-            job_id.clone(),
-            JobRecord {
-                status: if response.accepted {
-                    "completed".to_string()
-                } else {
-                    "rejected".to_string()
-                },
-                accepted: response.accepted,
-                reason: response.reason.clone(),
-            },
-        );
-
+        self.state.jobs.lock().await.insert(job_id, record);
         Ok(Response::new(response))
     }
 
-    // GetJobStatus RPC: Returns the in-memory status of a previously submitted federated job.
     async fn get_job_status(
         &self,
         request: Request<GetJobStatusRequest>,
@@ -279,33 +215,58 @@ impl NodeService for NodeGrpcService {
         }))
     }
 
-    // RunFederationRound RPC: Reserved for future SMPC protocol rounds.
     async fn run_federation_round(
         &self,
-        _request: Request<RunFederationRoundRequest>,
+        request: Request<RunFederationRoundRequest>,
     ) -> Result<Response<RunFederationRoundResponse>, Status> {
-        Err(Status::unimplemented(
-            "SMPC federation rounds are not implemented yet; use plaintext mode",
-        ))
+        let req = request.into_inner();
+        let Some(record) = self.state.jobs.lock().await.get(&req.job_id).cloned() else {
+            return Err(Status::not_found("job not found"));
+        };
+        let state = self.state.clone();
+        let record_for_round = record.clone();
+        let job_id = req.job_id.clone();
+        let config = state.config.clone();
+        let smpc_capability = state.smpc_capability.clone();
+
+        let response = tokio::task::spawn_blocking(move || {
+            federation_jobs::execute_federation_round(
+                &config,
+                smpc_capability,
+                req,
+                record_for_round,
+            )
+        })
+        .await
+        .map_err(join_error)?
+        .map_err(status_from_anyhow)?;
+
+        self.state.jobs.lock().await.insert(
+            job_id,
+            JobRecord {
+                status: if response.accepted {
+                    JOB_STATUS_COMPLETED.to_string()
+                } else {
+                    JOB_STATUS_REJECTED.to_string()
+                },
+                accepted: response.accepted,
+                reason: response.reason.clone(),
+                ..record
+            },
+        );
+
+        Ok(Response::new(response))
     }
 }
 
-// Converts a tokio join error into a gRPC status.
 fn join_error(error: tokio::task::JoinError) -> Status {
     Status::internal(format!("task join error: {error}"))
 }
 
-// Converts an anyhow error into a gRPC status.
 fn status_from_anyhow(error: anyhow::Error) -> Status {
     Status::internal(error.to_string())
 }
 
-// Converts a serde JSON error into a gRPC status.
 fn status_from_serde(error: serde_json::Error) -> Status {
     Status::internal(error.to_string())
-}
-
-// Converts a serde JSON error into anyhow so spawn_blocking can use one error type.
-fn status_from_serde_to_anyhow(error: serde_json::Error) -> anyhow::Error {
-    anyhow::anyhow!(error)
 }

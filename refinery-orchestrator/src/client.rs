@@ -9,7 +9,7 @@ use anyhow::Result;
 use refinery_protocol::grpc::node_service_client::NodeServiceClient;
 use refinery_protocol::grpc::{
     GetCapabilitiesRequest, GetCapabilitiesResponse, HealthCheckRequest, HealthCheckResponse,
-    SubmitJobRequest, SubmitJobResponse,
+    RunFederationRoundRequest, RunFederationRoundResponse, SubmitJobRequest, SubmitJobResponse,
 };
 use tonic::transport::{Certificate, Channel, ClientTlsConfig, Endpoint};
 
@@ -33,6 +33,18 @@ pub async fn submit_job(
     let channel = connect(endpoint, tls).await?;
     let mut client = NodeServiceClient::new(channel);
     let response = client.submit_job(request).await?.into_inner();
+    Ok(response)
+}
+
+// Executes one federation round on a node.
+pub async fn run_federation_round(
+    endpoint: &str,
+    request: RunFederationRoundRequest,
+    tls: &ClientTlsOptions,
+) -> Result<RunFederationRoundResponse> {
+    let channel = connect(endpoint, tls).await?;
+    let mut client = NodeServiceClient::new(channel);
+    let response = client.run_federation_round(request).await?.into_inner();
     Ok(response)
 }
 

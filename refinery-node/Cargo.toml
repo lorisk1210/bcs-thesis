@@ -7,6 +7,7 @@ edition.workspace = true
 anyhow.workspace = true
 chrono.workspace = true
 clap.workspace = true
+crypto_box.workspace = true
 dotenvy.workspace = true
 duckdb.workspace = true
 hex.workspace = true
@@ -18,4 +19,5 @@ sha2.workspace = true
 tokio.workspace = true
 tonic.workspace = true
 walkdir.workspace = true
+zeroize.workspace = true
 refinery-protocol = { path = "../refinery-protocol" }

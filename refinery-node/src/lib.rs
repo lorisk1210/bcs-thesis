@@ -4,6 +4,7 @@
 pub mod app;
 pub mod config;
 pub mod db;
+pub mod federation_jobs;
 pub mod fhir;
 pub mod ingest;
 pub mod local_policy;
@@ -12,3 +13,4 @@ pub mod normalize;
 pub mod privacy;
 pub mod query;
 pub mod server;
+pub mod smpc;

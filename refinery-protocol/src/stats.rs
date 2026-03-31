@@ -1,272 +1,506 @@
 // src/stats.rs
-// Shared sufficient-statistics aggregation and final rendering logic.
+// Canonical sufficient-statistics encoding and aggregation shared by every federation mode.
 
-// Standard library imports
-use std::collections::BTreeMap;
+mod encoding;
+mod grouped;
+mod helpers;
+mod scalar;
 
 // Third-party library imports
 use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value, json};
+use serde_json::Value;
 
 // Local module imports
-use crate::errors::invalid_stats_shape;
 use crate::query::{ClipBounds, QueryResult, QueryTemplate};
+use crate::slot_vector;
 
-// Local statistics computed by one hospital node for one query.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LocalStatistics {
+pub use crate::slot_vector::{decode_slot_bytes, encode_slot_bytes};
+
+// Canonical slot-vector schema for one query request.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct StatisticsSchema {
     pub template: QueryTemplate,
-    pub cohort_size: usize,
-    pub stats: Value,
+    pub schema_id: String,
+    pub slot_labels: Vec<String>,
 }
 
-// Aggregates per-node statistics into one federated statistics payload.
-// @param: template - Query template that defines the expected stats shape
-// @param: items - Local statistics returned by the participating nodes
-// @return: Result<LocalStatistics> - Aggregated statistics for the full federation
+// Canonical sufficient statistics computed by one node for one query.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LocalStatistics {
+    pub template: QueryTemplate,
+    pub schema_id: String,
+    pub slot_labels: Vec<String>,
+    pub slots: Vec<u64>,
+    pub cohort_size: usize,
+}
+
+impl LocalStatistics {
+    // Builds canonical statistics from template-specific JSON stats.
+    pub fn from_stats_value(
+        template: QueryTemplate,
+        params: &Value,
+        stats: Value,
+        cohort_size: usize,
+    ) -> Result<Self> {
+        let schema = schema_for_query(template, params)?;
+        let slots = encode_stats_value(template, &schema.slot_labels, &stats)?;
+        Ok(Self {
+            template,
+            schema_id: schema.schema_id,
+            slot_labels: schema.slot_labels,
+            slots,
+            cohort_size,
+        })
+    }
+
+    // Reconstructs the JSON statistics view used by result rendering.
+    pub fn to_stats_value(&self) -> Result<Value> {
+        decode_stats_value(self.template, &self.slot_labels, &self.slots)
+    }
+
+    // Encodes the canonical slots as little-endian bytes for SMPC transport.
+    pub fn encode_slot_bytes(&self) -> Vec<u8> {
+        encode_slot_bytes(&self.slots)
+    }
+
+    // Reconstructs canonical statistics from encoded slot bytes.
+    pub fn from_slot_bytes(
+        template: QueryTemplate,
+        schema_id: String,
+        slot_labels: Vec<String>,
+        slot_bytes: &[u8],
+        cohort_size: usize,
+    ) -> Result<Self> {
+        Ok(Self {
+            template,
+            schema_id,
+            slot_labels,
+            slots: decode_slot_bytes(slot_bytes)?,
+            cohort_size,
+        })
+    }
+}
+
+// Derives the canonical slot schema for one validated query request.
+pub fn schema_for_query(template: QueryTemplate, params: &Value) -> Result<StatisticsSchema> {
+    if let Some(schema) = scalar::schema_for_query(template) {
+        return Ok(schema);
+    }
+    if let Some(schema) = grouped::schema_for_query(template, params)? {
+        return Ok(schema);
+    }
+
+    Err(anyhow!(
+        "no statistics schema configured for {}",
+        template.as_str()
+    ))
+}
+
+// Aggregates per-node statistics into one canonical aggregate.
 pub fn aggregate_local_statistics(
     template: QueryTemplate,
     items: &[LocalStatistics],
 ) -> Result<LocalStatistics> {
-    if items.is_empty() {
-        return Err(anyhow!("cannot aggregate zero local statistics"));
-    }
+    let first = items
+        .first()
+        .ok_or_else(|| anyhow!("cannot aggregate zero local statistics"))?;
+    validate_aggregate_items(template, &first.schema_id, &first.slot_labels, items)?;
 
-    let cohort_size = items.iter().map(|item| item.cohort_size).sum();
-    let stats = match template {
-        QueryTemplate::CohortFeasibilityCount => json!({
-            "count": items.iter().map(|item| required_u64(&item.stats, "count")).sum::<Result<u64>>()?
-        }),
-        QueryTemplate::ComparativeEffectivenessDelta => json!({
-            "n_exposed": items.iter().map(|item| required_u64(&item.stats, "n_exposed")).sum::<Result<u64>>()?,
-            "n_control": items.iter().map(|item| required_u64(&item.stats, "n_control")).sum::<Result<u64>>()?,
-            "outcome_sum_exposed": items.iter().map(|item| required_f64(&item.stats, "outcome_sum_exposed")).sum::<Result<f64>>()?,
-            "outcome_sum_control": items.iter().map(|item| required_f64(&item.stats, "outcome_sum_control")).sum::<Result<f64>>()?
-        }),
-        QueryTemplate::TimeToEventProxy => json!({
-            "n": items.iter().map(|item| required_u64(&item.stats, "n")).sum::<Result<u64>>()?,
-            "sum_days_to_event": items.iter().map(|item| required_f64(&item.stats, "sum_days_to_event")).sum::<Result<f64>>()?,
-            "max_days": items[0].stats.get("max_days").cloned().unwrap_or_else(|| Value::from(3650)),
-        }),
-        QueryTemplate::SubgroupEffectEstimate => json!({
-            "groups": aggregate_group_sums(items, "subgroup")?
-        }),
-        QueryTemplate::DoseResponseTrend => json!({
-            "groups": aggregate_group_sums(items, "dose_bucket")?
-        }),
-        QueryTemplate::AeIncidenceSignalProxy => json!({
-            "n_exposed": items.iter().map(|item| required_u64(&item.stats, "n_exposed")).sum::<Result<u64>>()?,
-            "n_control": items.iter().map(|item| required_u64(&item.stats, "n_control")).sum::<Result<u64>>()?,
-            "ae_count_exposed": items.iter().map(|item| required_f64(&item.stats, "ae_count_exposed")).sum::<Result<f64>>()?,
-            "ae_count_control": items.iter().map(|item| required_f64(&item.stats, "ae_count_control")).sum::<Result<f64>>()?
-        }),
-        QueryTemplate::DdiSignalProxy => json!({
-            "n_combo": items.iter().map(|item| required_u64(&item.stats, "n_combo")).sum::<Result<u64>>()?,
-            "n_a_only": items.iter().map(|item| required_u64(&item.stats, "n_a_only")).sum::<Result<u64>>()?,
-            "ae_count_combo": items.iter().map(|item| required_f64(&item.stats, "ae_count_combo")).sum::<Result<f64>>()?,
-            "ae_count_a_only": items.iter().map(|item| required_f64(&item.stats, "ae_count_a_only")).sum::<Result<f64>>()?
-        }),
-    };
+    let mut slots =
+        slot_vector::sum_slot_slices(first.slot_labels.len(), items.iter().map(|item| item.slots.as_slice()))
+            .map_err(|_| anyhow!("slot vector length mismatch for {}", template.as_str()))?;
+    if let Some(result) = scalar::normalize_aggregated_slots(template, &mut slots, items.len()) {
+        result?;
+    }
 
     Ok(LocalStatistics {
         template,
+        schema_id: first.schema_id.clone(),
+        slot_labels: first.slot_labels.clone(),
+        slots,
+        cohort_size: items
+            .iter()
+            .try_fold(0usize, |total, item| total.checked_add(item.cohort_size))
+            .ok_or_else(|| anyhow!("cohort size overflow"))?,
+    })
+}
+
+// Aggregates already-encoded vectors, deriving the cohort size from the final slots.
+pub fn aggregate_slot_vectors(
+    template: QueryTemplate,
+    schema_id: &str,
+    slot_labels: &[String],
+    slot_vectors: &[Vec<u64>],
+) -> Result<LocalStatistics> {
+    if slot_vectors.is_empty() {
+        return Err(anyhow!("cannot aggregate zero slot vectors"));
+    }
+
+    let mut slots =
+        slot_vector::sum_slot_slices(slot_labels.len(), slot_vectors.iter().map(|vector| vector.as_slice()))
+        .map_err(|_| anyhow!("slot vector length mismatch for {}", template.as_str()))?;
+    if let Some(result) =
+        scalar::normalize_aggregated_slots(template, &mut slots, slot_vectors.len())
+    {
+        result?;
+    }
+    let cohort_size = cohort_size_from_slots(template, slot_labels, &slots)?;
+    Ok(LocalStatistics {
+        template,
+        schema_id: schema_id.to_string(),
+        slot_labels: slot_labels.to_vec(),
+        slots,
         cohort_size,
-        stats,
     })
 }
 
 // Renders a final query result from aggregated sufficient statistics.
-// @param: aggregated - Aggregated federation statistics
-// @param: clip - Clipping bounds used for bounded metrics
-// @return: Result<QueryResult> - Final rendered result with sensitivity metadata
-pub fn render_query_result(
-    aggregated: &LocalStatistics,
-    clip: ClipBounds,
-) -> Result<QueryResult> {
-    let template = aggregated.template;
-    let raw_result = match template {
-        QueryTemplate::CohortFeasibilityCount => json!({
-            "count": required_u64(&aggregated.stats, "count")?
-        }),
-        QueryTemplate::ComparativeEffectivenessDelta => {
-            let n_exposed = required_u64(&aggregated.stats, "n_exposed")?;
-            let n_control = required_u64(&aggregated.stats, "n_control")?;
-            let sum_exposed = required_f64(&aggregated.stats, "outcome_sum_exposed")?;
-            let sum_control = required_f64(&aggregated.stats, "outcome_sum_control")?;
-            let mean_exposed = safe_mean(sum_exposed, n_exposed);
-            let mean_control = safe_mean(sum_control, n_control);
-            json!({
-                "n_exposed": n_exposed,
-                "n_control": n_control,
-                "mean_outcome_exposed": mean_exposed,
-                "mean_outcome_control": mean_control,
-                "delta": match (mean_exposed, mean_control) {
-                    (Some(exp), Some(ctrl)) => Some(exp - ctrl),
-                    _ => None,
-                }
-            })
-        }
-        QueryTemplate::TimeToEventProxy => {
-            let n = required_u64(&aggregated.stats, "n")?;
-            let sum_days = required_f64(&aggregated.stats, "sum_days_to_event")?;
-            json!({
-                "n": n,
-                "mean_days_to_event": safe_mean(sum_days, n)
-            })
-        }
-        QueryTemplate::SubgroupEffectEstimate => json!({
-            "groups": render_groups(&aggregated.stats, "subgroup")?
-        }),
-        QueryTemplate::DoseResponseTrend => json!({
-            "groups": render_groups(&aggregated.stats, "dose_bucket")?
-        }),
-        QueryTemplate::AeIncidenceSignalProxy => {
-            let n_exposed = required_u64(&aggregated.stats, "n_exposed")?;
-            let n_control = required_u64(&aggregated.stats, "n_control")?;
-            let ae_count_exposed = required_f64(&aggregated.stats, "ae_count_exposed")?;
-            let ae_count_control = required_f64(&aggregated.stats, "ae_count_control")?;
-            json!({
-                "n_exposed": n_exposed,
-                "n_control": n_control,
-                "incidence_exposed": safe_rate(ae_count_exposed, n_exposed),
-                "incidence_control": safe_rate(ae_count_control, n_control)
-            })
-        }
-        QueryTemplate::DdiSignalProxy => {
-            let n_combo = required_u64(&aggregated.stats, "n_combo")?;
-            let n_a_only = required_u64(&aggregated.stats, "n_a_only")?;
-            let ae_count_combo = required_f64(&aggregated.stats, "ae_count_combo")?;
-            let ae_count_a_only = required_f64(&aggregated.stats, "ae_count_a_only")?;
-            json!({
-                "n_combo": n_combo,
-                "n_a_only": n_a_only,
-                "incidence_combo": safe_rate(ae_count_combo, n_combo),
-                "incidence_a_only": safe_rate(ae_count_a_only, n_a_only)
-            })
-        }
+pub fn render_query_result(aggregated: &LocalStatistics, clip: ClipBounds) -> Result<QueryResult> {
+    let stats = aggregated.to_stats_value()?;
+    let raw_result = if let Some(rendered) = scalar::render_result(aggregated.template, &stats) {
+        rendered?
+    } else if let Some(rendered) = grouped::render_result(aggregated.template, &stats) {
+        rendered?
+    } else {
+        return Err(anyhow!(
+            "no renderer configured for {}",
+            aggregated.template.as_str()
+        ));
     };
 
     Ok(QueryResult {
-        template_name: template.as_str().to_string(),
+        template_name: aggregated.template.as_str().to_string(),
         raw_result,
         cohort_size: aggregated.cohort_size,
-        sensitivity: sensitivity_for(template, aggregated, clip),
+        sensitivity: sensitivity_for(aggregated, clip),
     })
 }
 
-// Aggregates grouped statistics such as subgroup and dose-response buckets.
-fn aggregate_group_sums(items: &[LocalStatistics], group_key: &str) -> Result<Value> {
-    let mut combined: BTreeMap<String, (u64, f64)> = BTreeMap::new();
-
+fn validate_aggregate_items(
+    template: QueryTemplate,
+    schema_id: &str,
+    slot_labels: &[String],
+    items: &[LocalStatistics],
+) -> Result<()> {
     for item in items {
-        let groups = item
-            .stats
-            .get("groups")
-            .and_then(Value::as_array)
-            .ok_or_else(|| invalid_stats_shape(group_key))?;
-        for group in groups {
-            let key = group
-                .get(group_key)
-                .and_then(Value::as_str)
-                .ok_or_else(|| invalid_stats_shape(group_key))?
-                .to_string();
-            let entry = combined.entry(key).or_insert((0, 0.0));
-            entry.0 += required_u64(group, "n")?;
-            entry.1 += required_f64(group, "outcome_sum")?;
+        if item.template != template {
+            return Err(anyhow!(
+                "template mismatch: expected {}, received {}",
+                template,
+                item.template
+            ));
+        }
+        if item.schema_id != schema_id || item.slot_labels != slot_labels {
+            return Err(anyhow!("statistics schema mismatch for {}", template.as_str()));
+        }
+    }
+    Ok(())
+}
+
+fn encode_stats_value(template: QueryTemplate, slot_labels: &[String], stats: &Value) -> Result<Vec<u64>> {
+    if let Some(slots) = scalar::encode_stats(template, stats) {
+        return slots;
+    }
+    if let Some(slots) = grouped::encode_stats(template, slot_labels, stats) {
+        return slots;
+    }
+
+    Err(anyhow!(
+        "no statistics encoder configured for {}",
+        template.as_str()
+    ))
+}
+
+fn decode_stats_value(template: QueryTemplate, slot_labels: &[String], slots: &[u64]) -> Result<Value> {
+    validate_slot_layout(template, slot_labels, slots.len())?;
+
+    if let Some(stats) = scalar::decode_stats(template, slots) {
+        return stats;
+    }
+    if let Some(stats) = grouped::decode_stats(template, slot_labels, slots) {
+        return stats;
+    }
+
+    Err(anyhow!(
+        "no statistics decoder configured for {}",
+        template.as_str()
+    ))
+}
+
+fn cohort_size_from_slots(
+    template: QueryTemplate,
+    slot_labels: &[String],
+    slots: &[u64],
+) -> Result<usize> {
+    validate_slot_layout(template, slot_labels, slots.len())?;
+
+    if let Some(size) = scalar::cohort_size_from_slots(template, slots) {
+        return size;
+    }
+    if let Some(size) = grouped::cohort_size_from_slots(template, slot_labels, slots) {
+        return size;
+    }
+
+    Err(anyhow!(
+        "no cohort-size derivation configured for {}",
+        template.as_str()
+    ))
+}
+
+fn validate_slot_layout(
+    template: QueryTemplate,
+    slot_labels: &[String],
+    slot_count: usize,
+) -> Result<()> {
+    if slot_labels.len() != slot_count {
+        return Err(anyhow!("slot label count does not match slot vector length"));
+    }
+
+    if let Some(schema) = scalar::schema_for_query(template) {
+        if schema.slot_labels != slot_labels {
+            return Err(anyhow!(
+                "statistics schema mismatch for {}",
+                template.as_str()
+            ));
         }
     }
 
-    let rendered = combined
-        .into_iter()
-        .map(|(key, (n, outcome_sum))| {
-            let mut map = Map::new();
-            map.insert(group_key.to_string(), Value::String(key));
-            map.insert("n".to_string(), Value::from(n));
-            map.insert("outcome_sum".to_string(), Value::from(outcome_sum));
-            Value::Object(map)
-        })
-        .collect::<Vec<_>>();
-
-    Ok(Value::Array(rendered))
+    Ok(())
 }
 
-// Renders grouped federated statistics into the final response schema.
-fn render_groups(stats: &Value, group_key: &str) -> Result<Value> {
-    let groups = stats
-        .get("groups")
-        .and_then(Value::as_array)
-        .ok_or_else(|| invalid_stats_shape(group_key))?;
+fn sensitivity_for(aggregated: &LocalStatistics, clip: ClipBounds) -> f64 {
+    scalar::sensitivity(
+        aggregated.template,
+        &aggregated.slots,
+        aggregated.cohort_size,
+        clip,
+    )
+    .unwrap_or_else(|| helpers::clipped_mean_sensitivity(clip, aggregated.cohort_size))
+}
 
-    let mut rendered = Vec::with_capacity(groups.len());
-    for group in groups {
-        let mut map = Map::new();
-        let label = group
-            .get(group_key)
-            .and_then(Value::as_str)
-            .ok_or_else(|| invalid_stats_shape(group_key))?;
-        let n = required_u64(group, "n")?;
-        let outcome_sum = required_f64(group, "outcome_sum")?;
-        map.insert(group_key.to_string(), Value::String(label.to_string()));
-        map.insert("n".to_string(), Value::from(n));
-        map.insert("mean_outcome".to_string(), json!(safe_mean(outcome_sum, n)));
-        rendered.push(Value::Object(map));
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn subgroup_gender_schema_is_stable() {
+        let schema = schema_for_query(QueryTemplate::SubgroupEffectEstimate, &json!({}))
+            .expect("schema should build");
+        assert_eq!(schema.schema_id, "subgroup_effect_estimate:gender:v1");
+        assert_eq!(
+            schema.slot_labels,
+            vec![
+                "group:female:n",
+                "group:female:outcome_sum",
+                "group:male:n",
+                "group:male:outcome_sum",
+                "group:other:n",
+                "group:other:outcome_sum",
+                "group:unknown:n",
+                "group:unknown:outcome_sum",
+            ]
+        );
     }
 
-    Ok(Value::Array(rendered))
-}
+    #[test]
+    fn subgroup_age_bucket_schema_preserves_bucket_labels() {
+        let schema = schema_for_query(
+            QueryTemplate::SubgroupEffectEstimate,
+            &json!({"subgroup": "age_bucket", "age_cutoffs": [30, 50]}),
+        )
+        .expect("schema should build");
+        assert_eq!(
+            schema.slot_labels,
+            vec![
+                "group:unknown:n",
+                "group:unknown:outcome_sum",
+                "group:<30:n",
+                "group:<30:outcome_sum",
+                "group:[30,50):n",
+                "group:[30,50):outcome_sum",
+                "group:>=50:n",
+                "group:>=50:outcome_sum",
+            ]
+        );
+    }
 
-// Computes sensitivity for the final rendered query result.
-fn sensitivity_for(template: QueryTemplate, aggregated: &LocalStatistics, clip: ClipBounds) -> f64 {
-    match template {
-        QueryTemplate::CohortFeasibilityCount => 1.0,
-        QueryTemplate::ComparativeEffectivenessDelta
-        | QueryTemplate::SubgroupEffectEstimate
-        | QueryTemplate::DoseResponseTrend => clipped_mean_sensitivity(clip, aggregated.cohort_size),
-        QueryTemplate::TimeToEventProxy => {
-            let max_days = aggregated
-                .stats
-                .get("max_days")
-                .and_then(Value::as_f64)
-                .unwrap_or(3650.0);
-            max_days / aggregated.cohort_size.max(1) as f64
-        }
-        QueryTemplate::AeIncidenceSignalProxy | QueryTemplate::DdiSignalProxy => {
-            inverse_count_sensitivity(aggregated.cohort_size)
+    #[test]
+    fn slot_bytes_round_trip() {
+        let slots = vec![1u64, u64::MAX, 44u64];
+        let encoded = encode_slot_bytes(&slots);
+        let decoded = decode_slot_bytes(&encoded).expect("decode should work");
+        assert_eq!(decoded, slots);
+    }
+
+    #[test]
+    fn local_statistics_round_trip_preserves_rendered_values() {
+        let local = LocalStatistics::from_stats_value(
+            QueryTemplate::ComparativeEffectivenessDelta,
+            &json!({}),
+            json!({
+                "n_exposed": 10,
+                "n_control": 12,
+                "outcome_sum_exposed": 50.25,
+                "outcome_sum_control": 30.5
+            }),
+            22,
+        )
+        .expect("local stats should encode");
+
+        let decoded = local.to_stats_value().expect("stats should decode");
+        assert_eq!(decoded["n_exposed"], json!(10));
+        assert_eq!(decoded["n_control"], json!(12));
+        assert_eq!(decoded["outcome_sum_exposed"], json!(50.25));
+        assert_eq!(decoded["outcome_sum_control"], json!(30.5));
+    }
+
+    #[test]
+    fn aggregate_local_statistics_preserves_time_to_event_max_days() {
+        let items = vec![
+            LocalStatistics::from_stats_value(
+                QueryTemplate::TimeToEventProxy,
+                &json!({"max_days": 90}),
+                json!({
+                    "n": 2,
+                    "sum_days_to_event": 30.0,
+                    "max_days": 90
+                }),
+                2,
+            )
+            .expect("local stats should encode"),
+            LocalStatistics::from_stats_value(
+                QueryTemplate::TimeToEventProxy,
+                &json!({"max_days": 90}),
+                json!({
+                    "n": 3,
+                    "sum_days_to_event": 75.0,
+                    "max_days": 90
+                }),
+                3,
+            )
+            .expect("local stats should encode"),
+        ];
+
+        let aggregated = aggregate_local_statistics(QueryTemplate::TimeToEventProxy, &items)
+            .expect("aggregation should succeed");
+        let decoded = aggregated.to_stats_value().expect("stats should decode");
+
+        assert_eq!(decoded["max_days"], json!(90));
+        let rendered = render_query_result(&aggregated, ClipBounds { min: 0.0, max: 300.0 })
+            .expect("result should render");
+        assert_eq!(rendered.sensitivity, 18.0);
+    }
+
+    #[test]
+    fn canonical_round_trip_supports_all_templates() {
+        let cases = vec![
+            (
+                QueryTemplate::CohortFeasibilityCount,
+                json!({}),
+                json!({"count": 12}),
+                12usize,
+            ),
+            (
+                QueryTemplate::ComparativeEffectivenessDelta,
+                json!({}),
+                json!({
+                    "n_exposed": 3,
+                    "n_control": 5,
+                    "outcome_sum_exposed": 10.75,
+                    "outcome_sum_control": 14.25
+                }),
+                8usize,
+            ),
+            (
+                QueryTemplate::TimeToEventProxy,
+                json!({"max_days": 90}),
+                json!({
+                    "n": 4,
+                    "sum_days_to_event": 120.0,
+                    "max_days": 90
+                }),
+                4usize,
+            ),
+            (
+                QueryTemplate::SubgroupEffectEstimate,
+                json!({"subgroup": "gender"}),
+                json!({
+                    "groups": [
+                        {"subgroup": "female", "n": 2, "outcome_sum": 5.5},
+                        {"subgroup": "male", "n": 1, "outcome_sum": 4.0}
+                    ]
+                }),
+                3usize,
+            ),
+            (
+                QueryTemplate::SubgroupEffectEstimate,
+                json!({"subgroup": "age_bucket", "age_cutoffs": [30, 50]}),
+                json!({
+                    "groups": [
+                        {"subgroup": "<30", "n": 2, "outcome_sum": 6.0},
+                        {"subgroup": "[30,50)", "n": 1, "outcome_sum": 5.0}
+                    ]
+                }),
+                3usize,
+            ),
+            (
+                QueryTemplate::DoseResponseTrend,
+                json!({}),
+                json!({
+                    "groups": [
+                        {"dose_bucket": "low", "n": 2, "outcome_sum": 6.0},
+                        {"dose_bucket": "high", "n": 1, "outcome_sum": 5.0}
+                    ]
+                }),
+                3usize,
+            ),
+            (
+                QueryTemplate::AeIncidenceSignalProxy,
+                json!({}),
+                json!({
+                    "n_exposed": 5,
+                    "n_control": 7,
+                    "ae_count_exposed": 2.0,
+                    "ae_count_control": 1.0
+                }),
+                12usize,
+            ),
+            (
+                QueryTemplate::DdiSignalProxy,
+                json!({}),
+                json!({
+                    "n_combo": 4,
+                    "n_a_only": 6,
+                    "ae_count_combo": 1.0,
+                    "ae_count_a_only": 2.0
+                }),
+                10usize,
+            ),
+        ];
+
+        for (template, params, stats, cohort_size) in cases {
+            let local =
+                LocalStatistics::from_stats_value(template, &params, stats.clone(), cohort_size)
+                    .expect("local statistics should encode");
+            let decoded = local.to_stats_value().expect("local statistics should decode");
+            match template {
+                QueryTemplate::SubgroupEffectEstimate | QueryTemplate::DoseResponseTrend => {
+                    let mut expected_groups = stats["groups"]
+                        .as_array()
+                        .expect("groups should be an array")
+                        .clone();
+                    let mut decoded_groups = decoded["groups"]
+                        .as_array()
+                        .expect("groups should be an array")
+                        .clone();
+                    expected_groups.sort_by(|left, right| left.to_string().cmp(&right.to_string()));
+                    decoded_groups.sort_by(|left, right| left.to_string().cmp(&right.to_string()));
+                    assert_eq!(decoded_groups, expected_groups);
+                }
+                _ => assert_eq!(decoded, stats),
+            }
         }
     }
-}
-
-// Computes clipped mean sensitivity for bounded continuous outcomes.
-fn clipped_mean_sensitivity(clip: ClipBounds, cohort_size: usize) -> f64 {
-    (clip.max - clip.min).abs() / cohort_size.max(1) as f64
-}
-
-// Computes inverse-count sensitivity for count-derived rates.
-fn inverse_count_sensitivity(cohort_size: usize) -> f64 {
-    1.0 / cohort_size.max(1) as f64
-}
-
-// Reads one required unsigned integer field from a statistics payload.
-fn required_u64(value: &Value, key: &str) -> Result<u64> {
-    value.get(key)
-        .and_then(Value::as_u64)
-        .ok_or_else(|| invalid_stats_shape(key))
-}
-
-// Reads one required floating-point field from a statistics payload.
-fn required_f64(value: &Value, key: &str) -> Result<f64> {
-    value.get(key)
-        .and_then(Value::as_f64)
-        .ok_or_else(|| invalid_stats_shape(key))
-}
-
-// Computes a mean only when the denominator is non-zero.
-fn safe_mean(sum: f64, n: u64) -> Option<f64> {
-    (n > 0).then_some(sum / n as f64)
-}
-
-// Computes a rate only when the denominator is non-zero.
-fn safe_rate(count: f64, n: u64) -> Option<f64> {
-    (n > 0).then_some(count / n as f64)
 }
