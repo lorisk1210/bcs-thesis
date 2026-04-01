@@ -4,6 +4,7 @@
 // Third-party library imports
 use anyhow::{Result, anyhow};
 use rand::{Rng, SeedableRng, rngs::StdRng};
+use serde::Serialize;
 
 // Local module imports
 use refinery_protocol::QueryResult;
@@ -12,7 +13,7 @@ use serde_json::Value;
 use crate::config::GlobalPrivacyConfig;
 
 // Result of the global release gate after aggregating node outputs.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct GlobalReleaseResult {
     pub accepted: bool,
     pub reason: String,

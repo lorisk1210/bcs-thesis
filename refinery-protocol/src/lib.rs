@@ -3,14 +3,12 @@
 
 // Protocol modules
 pub mod errors;
-pub mod federation;
 pub mod query;
 pub mod slot_vector;
 pub mod smpc;
 pub mod stats;
 
 // Re-exports for the most common protocol types.
-pub use federation::FederationMode;
 pub use query::{ClipBounds, QueryExecutionRequest, QueryResult, QueryTemplate};
 pub use slot_vector::{decode_slot_bytes, encode_slot_bytes, sum_slot_vectors};
 pub use smpc::{
