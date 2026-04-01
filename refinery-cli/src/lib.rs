@@ -47,72 +47,86 @@ pub fn resolve_output_mode_for_tty(
 const RESET: &str = "\x1b[0m";
 const BOLD: &str = "\x1b[1m";
 const DIM: &str = "\x1b[2m";
+
 const GREEN: &str = "\x1b[32m";
 const RED: &str = "\x1b[31m";
 const YELLOW: &str = "\x1b[33m";
 const CYAN: &str = "\x1b[36m";
+const BLUE: &str = "\x1b[34m";
+const MAGENTA: &str = "\x1b[35m";
+const DARK_GRAY: &str = "\x1b[90m";
 
-fn badge(mode: OutputMode, label: &str, color: &str) -> String {
+const BG_GREEN: &str = "\x1b[42m";
+const BG_RED: &str = "\x1b[41m";
+const BG_YELLOW: &str = "\x1b[43m";
+const BG_DARK_GRAY: &str = "\x1b[100m";
+
+fn badge(mode: OutputMode, label: &str, _fg_color: &str, bg_color: &str) -> String {
     match mode {
-        OutputMode::Pretty => format!("{color}{BOLD}[{label}]{RESET}"),
+        OutputMode::Pretty => format!("{bg_color}\x1b[30m{BOLD} {label} {RESET}"),
         OutputMode::Plain => format!("[{label}]"),
     }
 }
 
 fn title(mode: OutputMode, text: &str) -> String {
     match mode {
-        OutputMode::Pretty => format!("{BOLD}{CYAN}{text}{RESET}"),
+        OutputMode::Pretty => {
+            let line = "─".repeat(60);
+            format!(
+                "{BOLD}{BLUE}◆ Command:{RESET} {BOLD}{text}{RESET}\n{DARK_GRAY}{line}{RESET}\n{BOLD}{CYAN}◇ Result:{RESET}"
+            )
+        }
         OutputMode::Plain => text.to_string(),
     }
 }
 
 fn key_value(mode: OutputMode, key: &str, value: &str) -> String {
     match mode {
-        OutputMode::Pretty => format!("  {DIM}{key}:{RESET} {value}"),
+        OutputMode::Pretty => format!("    {DARK_GRAY}•{RESET} {DIM}{key}:{RESET} {value}"),
         OutputMode::Plain => format!("  {key}: {value}"),
     }
 }
 
 fn section_header(mode: OutputMode, text: &str) -> String {
     match mode {
-        OutputMode::Pretty => format!("\n{BOLD}{text}{RESET}"),
+        OutputMode::Pretty => format!("  {BOLD}{MAGENTA}{text}{RESET}"),
         OutputMode::Plain => format!("\n{text}"),
     }
 }
 
 fn table_row(mode: OutputMode, left: &str, right: &str, left_width: usize) -> String {
     match mode {
-        OutputMode::Pretty => format!("  {DIM}{left:<left_width$}{RESET}  {right}"),
+        OutputMode::Pretty => format!("    {DARK_GRAY}•{RESET} {DIM}{left:<left_width$}{RESET}  {right}"),
         OutputMode::Plain => format!("  {left:<left_width$}  {right}"),
     }
 }
 
 fn status_badge(mode: OutputMode, status: &str) -> String {
-    let (display, color) = match status {
-        "released" => ("RELEASED", GREEN),
-        "rejected" => ("REJECTED", RED),
-        "match" => ("MATCH", GREEN),
-        "mismatch" => ("MISMATCH", RED),
-        "unexpected_distortion" => ("UNEXPECTED DISTORTION", RED),
-        "expected_distortion" => ("EXPECTED DISTORTION", YELLOW),
-        "distortion_possible" => ("DISTORTION POSSIBLE", YELLOW),
-        "inconclusive" => ("INCONCLUSIVE", YELLOW),
-        "skipped" => ("SKIPPED", DIM),
-        "ok" => ("OK", GREEN),
-        other => (other, DIM),
+    let (display, fg, bg) = match status {
+        "released" => ("RELEASED", GREEN, BG_GREEN),
+        "rejected" => ("REJECTED", RED, BG_RED),
+        "match" => ("MATCH", GREEN, BG_GREEN),
+        "mismatch" => ("MISMATCH", RED, BG_RED),
+        "unexpected_distortion" => ("UNEXPECTED DISTORTION", RED, BG_RED),
+        "expected_distortion" => ("EXPECTED DISTORTION", YELLOW, BG_YELLOW),
+        "distortion_possible" => ("DISTORTION POSSIBLE", YELLOW, BG_YELLOW),
+        "inconclusive" => ("INCONCLUSIVE", YELLOW, BG_YELLOW),
+        "skipped" => ("SKIPPED", DIM, BG_DARK_GRAY),
+        "ok" => ("OK", GREEN, BG_GREEN),
+        other => (other, DIM, BG_DARK_GRAY),
     };
-    badge(mode, display, color)
+    badge(mode, display, fg, bg)
 }
 
 fn indent_json(mode: OutputMode, value: &Value) -> String {
     let json_str = serde_json::to_string_pretty(value).unwrap_or_else(|_| "null".to_string());
     let indented: String = json_str
         .lines()
-        .map(|line| format!("    {line}"))
+        .map(|line| format!("      {line}"))
         .collect::<Vec<_>>()
         .join("\n");
     match mode {
-        OutputMode::Pretty => format!("  {DIM}result:{RESET}\n{indented}"),
+        OutputMode::Pretty => format!("    {DARK_GRAY}•{RESET} {DIM}result:{RESET}\n{indented}"),
         OutputMode::Plain => format!("  result:\n{indented}"),
     }
 }
@@ -121,8 +135,8 @@ pub fn render_error(mode: OutputMode, command_name: &str, error: &str) -> String
     match mode {
         OutputMode::Pretty => {
             let t = title(mode, command_name);
-            let badge = badge(mode, "ERROR", RED);
-            format!("{t}\n{badge}\n{}\n", key_value(mode, "message", error))
+            let badge = badge(mode, "ERROR", RED, BG_RED);
+            format!("{t}\n\n  {badge}\n\n{}\n", key_value(mode, "message", error))
         }
         OutputMode::Plain => format!("error: {error}\n"),
     }
@@ -136,7 +150,7 @@ pub fn render_init(mode: OutputMode, db_path: &str) -> String {
             let t = title(mode, "refinery-node init");
             let badge = status_badge(mode, "ok");
             let kv = key_value(mode, "database", db_path);
-            format!("{t}\n{badge} Initialized schema\n{kv}\n")
+            format!("{t}\n\n  {badge} {BOLD}Initialized schema{RESET}\n\n{kv}\n")
         }
         OutputMode::Plain => format!("Initialized schema at {db_path}\n"),
     }
@@ -147,7 +161,7 @@ pub fn render_normalize(mode: OutputMode) -> String {
         OutputMode::Pretty => {
             let t = title(mode, "refinery-node normalize");
             let badge = status_badge(mode, "ok");
-            format!("{t}\n{badge} Normalization complete\n")
+            format!("{t}\n\n  {badge} {BOLD}Normalization complete{RESET}\n")
         }
         OutputMode::Plain => "Normalization complete\n".to_string(),
     }
@@ -158,7 +172,7 @@ pub fn render_materialize(mode: OutputMode) -> String {
         OutputMode::Pretty => {
             let t = title(mode, "refinery-node materialize");
             let badge = status_badge(mode, "ok");
-            format!("{t}\n{badge} Feature materialization complete\n")
+            format!("{t}\n\n  {badge} {BOLD}Feature materialization complete{RESET}\n")
         }
         OutputMode::Plain => "Feature materialization complete\n".to_string(),
     }
@@ -170,7 +184,7 @@ pub fn render_pipeline(mode: OutputMode, ingest: &IngestReportData) -> String {
             let t = title(mode, "refinery-node run-pipeline");
             let badge = status_badge(mode, "ok");
             let ingest_body = render_ingest_body(mode, ingest);
-            format!("{t}\n{ingest_body}{badge} Pipeline run complete\n")
+            format!("{t}\n\n  {badge} {BOLD}Pipeline run complete{RESET}\n\n{ingest_body}")
         }
         OutputMode::Plain => {
             let mut out = render_ingest_body(mode, ingest);
@@ -215,6 +229,7 @@ fn render_ingest_body(mode: OutputMode, r: &IngestReportData) -> String {
     let _ = writeln!(out, "{}", key_value(mode, "errors_logged", &r.errors_logged.to_string()));
 
     if !r.resource_counts.is_empty() {
+        let _ = writeln!(out, "");
         let _ = writeln!(out, "{}", section_header(mode, "Resource counts"));
         let max_key = r.resource_counts.keys().map(|k| k.len()).max().unwrap_or(0);
         for (resource, count) in &r.resource_counts {
@@ -228,8 +243,9 @@ pub fn render_ingest(mode: OutputMode, r: &IngestReportData) -> String {
     match mode {
         OutputMode::Pretty => {
             let t = title(mode, "refinery-node ingest");
+            let badge = status_badge(mode, "ok");
             let body = render_ingest_body(mode, r);
-            format!("{t}\n{body}")
+            format!("{t}\n\n  {badge} {BOLD}Ingest complete{RESET}\n\n{body}")
         }
         OutputMode::Plain => render_ingest_body(mode, r),
     }
@@ -258,7 +274,7 @@ pub fn render_node_query_released(mode: OutputMode, d: &NodeQueryReleasedData) -
         OutputMode::Pretty => {
             let t = title(mode, "refinery-node query");
             let badge = status_badge(mode, "released");
-            let mut out = format!("{t}\n{badge}\n");
+            let mut out = format!("{t}\n\n  {badge}\n\n");
             let _ = writeln!(out, "{}", key_value(mode, "release_id", &d.release_id));
             let _ = writeln!(out, "{}", key_value(mode, "template", &d.template));
             let _ = writeln!(out, "{}", key_value(mode, "cohort_size", &d.cohort_size.to_string()));
@@ -284,7 +300,7 @@ pub fn render_node_query_rejected(mode: OutputMode, d: &NodeQueryRejectedData) -
         OutputMode::Pretty => {
             let t = title(mode, "refinery-node query");
             let badge = status_badge(mode, "rejected");
-            let mut out = format!("{t}\n{badge}\n");
+            let mut out = format!("{t}\n\n  {badge}\n\n");
             let _ = writeln!(out, "{}", key_value(mode, "release_id", &d.release_id));
             let _ = writeln!(out, "{}", key_value(mode, "reason", &d.reason));
             let _ = writeln!(out, "{}", key_value(mode, "budget_spent", &format!("{:.4}", d.budget_spent)));
@@ -312,16 +328,19 @@ pub fn render_inspect(mode: OutputMode, tables: &[InspectTableData]) -> String {
     match mode {
         OutputMode::Pretty => {
             let t = title(mode, "refinery-node inspect");
-            let mut out = format!("{t}\n");
-            for table in tables {
-                let _ = writeln!(out, "{}", section_header(mode, &format!("top_{}", table.table_name)));
+            let mut out = format!("{t}\n\n");
+            for (i, table) in tables.iter().enumerate() {
+                let _ = writeln!(out, "{}", section_header(mode, &format!("Table: {}", table.table_name)));
                 if table.rows.is_empty() {
-                    let _ = writeln!(out, "  (no data)");
-                    continue;
+                    let _ = writeln!(out, "    {DARK_GRAY}(no data){RESET}");
+                } else {
+                    let max_code = table.rows.iter().map(|(c, _)| c.len()).max().unwrap_or(0);
+                    for (code, count) in &table.rows {
+                        let _ = writeln!(out, "{}", table_row(mode, code, &count.to_string(), max_code));
+                    }
                 }
-                let max_code = table.rows.iter().map(|(c, _)| c.len()).max().unwrap_or(0);
-                for (code, count) in &table.rows {
-                    let _ = writeln!(out, "{}", table_row(mode, code, &count.to_string(), max_code));
+                if i < tables.len() - 1 {
+                    let _ = writeln!(out, "");
                 }
             }
             out
@@ -359,7 +378,7 @@ pub fn render_orchestrator_query_released(mode: OutputMode, d: &OrchestratorQuer
         OutputMode::Pretty => {
             let t = title(mode, "refinery-orchestrator query");
             let badge = status_badge(mode, "released");
-            let mut out = format!("{t}\n{badge}\n");
+            let mut out = format!("{t}\n\n  {badge}\n\n");
             let _ = writeln!(out, "{}", key_value(mode, "job_id", &d.job_id));
             let _ = writeln!(out, "{}", key_value(mode, "template", &d.template));
             let _ = writeln!(out, "{}", key_value(mode, "participating_nodes", &d.participating_nodes.to_string()));
@@ -383,7 +402,7 @@ pub fn render_orchestrator_query_rejected(mode: OutputMode, d: &OrchestratorQuer
         OutputMode::Pretty => {
             let t = title(mode, "refinery-orchestrator query");
             let badge = status_badge(mode, "rejected");
-            let mut out = format!("{t}\n{badge}\n");
+            let mut out = format!("{t}\n\n  {badge}\n\n");
             let _ = writeln!(out, "{}", key_value(mode, "job_id", &d.job_id));
             let _ = writeln!(out, "{}", key_value(mode, "reason", &d.reason));
             out
@@ -412,15 +431,19 @@ pub fn render_orchestrator_status(mode: OutputMode, nodes: &[NodeStatusData]) ->
     match mode {
         OutputMode::Pretty => {
             let t = title(mode, "refinery-orchestrator status");
-            let mut out = format!("{t}\n");
-            for node in nodes {
-                let _ = writeln!(out, "{}", section_header(mode, &format!("node: {}", node.endpoint)));
+            let mut out = format!("{t}\n\n");
+            for (i, node) in nodes.iter().enumerate() {
+                let _ = writeln!(out, "{}", section_header(mode, &format!("Node: {}", node.endpoint)));
                 let _ = writeln!(out, "{}", key_value(mode, "status", &node.status));
                 let _ = writeln!(out, "{}", key_value(mode, "node_id", &node.node_id));
                 let _ = writeln!(out, "{}", key_value(mode, "protocol_version", &node.protocol_version));
                 let _ = writeln!(out, "{}", key_value(mode, "supported_templates", &node.supported_templates.join(", ")));
                 let _ = writeln!(out, "{}", key_value(mode, "supported_smpc_protocols", &node.supported_smpc_protocols.join(", ")));
                 let _ = writeln!(out, "{}", key_value(mode, "smpc_key_fingerprint", &node.smpc_key_fingerprint));
+                
+                if i < nodes.len() - 1 {
+                    let _ = writeln!(out, "");
+                }
             }
             out
         }
@@ -462,13 +485,14 @@ pub fn render_partition(mode: OutputMode, d: &PartitionData) -> String {
     match mode {
         OutputMode::Pretty => {
             let t = title(mode, "refinery-organize partition");
-            let mut out = format!("{t}\n");
+            let mut out = format!("{t}\n\n");
             let _ = writeln!(out, "{}", key_value(mode, "source_dir", &d.source_dir));
             let _ = writeln!(out, "{}", key_value(mode, "nodes_dir", &d.nodes_dir));
             let _ = writeln!(out, "{}", key_value(mode, "files_scanned", &d.files_scanned.to_string()));
             let _ = writeln!(out, "{}", key_value(mode, "nodes_created", &d.node_count.to_string()));
 
             if !d.files_per_node.is_empty() {
+                let _ = writeln!(out, "");
                 let _ = writeln!(out, "{}", section_header(mode, "File distribution"));
                 let max_name = d.files_per_node.keys().map(|k| k.len()).max().unwrap_or(0);
                 for (node, count) in &d.files_per_node {
@@ -565,17 +589,19 @@ pub fn render_check_prepare_report(mode: OutputMode, r: &CheckPrepareReportData)
     }
 
     let t = title(mode, "refinery-check prepare");
-    let mut out = format!("{t}\n");
+    let mut out = format!("{t}\n\n");
     let _ = writeln!(out, "{}", key_value(mode, "prepared_dir", &r.prepared_dir));
     let _ = writeln!(out, "{}", key_value(mode, "as_of_date", &r.as_of_date));
 
     if !r.nodes.is_empty() {
+        let _ = writeln!(out, "");
         let _ = writeln!(out, "{}", section_header(mode, "Nodes"));
         for node in &r.nodes {
-            let _ = writeln!(out, "{}", section_header(mode, &format!("  {}", node.node_id)));
-            let _ = writeln!(out, "{}", key_value(mode, "    raw_input_dir", &node.raw_input_dir));
-            let _ = writeln!(out, "{}", key_value(mode, "    coarsened_db", &node.coarsened_db_path));
-            let _ = writeln!(out, "{}", key_value(mode, "    exact_db", &node.exact_db_path));
+            let _ = writeln!(out, "  {BOLD}{}{RESET}", node.node_id);
+            let _ = writeln!(out, "{}", key_value(mode, "raw_input_dir", &node.raw_input_dir));
+            let _ = writeln!(out, "{}", key_value(mode, "coarsened_db", &node.coarsened_db_path));
+            let _ = writeln!(out, "{}", key_value(mode, "exact_db", &node.exact_db_path));
+            let _ = writeln!(out, "");
         }
     }
     out
@@ -614,7 +640,7 @@ pub fn render_check_compare_report(mode: OutputMode, r: &CheckCompareReportData)
     }
 
     let t = title(mode, "refinery-check compare");
-    let mut out = format!("{t}\n");
+    let mut out = format!("{t}\n\n");
     let _ = writeln!(out, "{}", key_value(mode, "template", &r.template));
     let _ = writeln!(out, "{}", key_value(mode, "mode", &r.mode));
     let _ = writeln!(out, "{}", key_value(mode, "as_of_date", &r.as_of_date));
@@ -630,17 +656,19 @@ pub fn render_check_compare_report(mode: OutputMode, r: &CheckCompareReportData)
     }
 
     if !r.nodes.is_empty() {
+        let _ = writeln!(out, "");
         let _ = writeln!(out, "{}", section_header(mode, "Nodes"));
         for node in &r.nodes {
             let _ = writeln!(
                 out,
-                "  {} => {} ({})",
+                "    {DARK_GRAY}•{RESET} {BOLD}{}{RESET} {DIM}=>{RESET} {} {DIM}({}){RESET}",
                 node.node_id, node.endpoint, node.raw_input_dir
             );
         }
     }
 
     for section in &r.sections {
+        let _ = writeln!(out, "");
         out.push_str(&render_check_section(mode, section));
     }
     out
@@ -680,7 +708,9 @@ fn render_check_section(mode: OutputMode, s: &CheckSectionData) -> String {
     let mut out = String::new();
     let _ = writeln!(out, "{}", section_header(mode, &s.name));
     let badge = status_badge(mode, &s.status);
-    let _ = writeln!(out, "  status: {badge}");
+    let _ = writeln!(out, "    {badge}");
+    let _ = writeln!(out, ""); // spacer
+    
     if let Some(ref expectation) = s.expectation {
         let _ = writeln!(out, "{}", key_value(mode, "expectation", expectation));
     }
@@ -693,21 +723,22 @@ fn render_check_section(mode: OutputMode, s: &CheckSectionData) -> String {
         let _ = writeln!(out, "{}", key_value(mode, &s.right_label, &json_str));
     }
     if !s.rejections.is_empty() {
-        let _ = writeln!(out, "{}", section_header(mode, "  rejections"));
+        let _ = writeln!(out, "{}", section_header(mode, "rejections"));
         for r in &s.rejections {
-            let _ = writeln!(out, "    - {} @ {}: {}", r.node_id, r.endpoint, r.reason);
+            let _ = writeln!(out, "    {DARK_GRAY}•{RESET} {} @ {}: {}", r.node_id, r.endpoint, r.reason);
         }
     }
     if !s.diffs.is_empty() {
-        let _ = writeln!(out, "{}", section_header(mode, "  diffs"));
+        let _ = writeln!(out, "{}", section_header(mode, "diffs"));
         for d in &s.diffs {
-            let _ = writeln!(out, "    - {} => left={}, right={}", d.path, d.left, d.right);
+            let _ = writeln!(out, "    {DARK_GRAY}•{RESET} {BOLD}{}{RESET} => left={}, right={}", d.path, d.left, d.right);
         }
     }
     out
 }
 
 // ---------- tests ----------
+
 
 #[cfg(test)]
 mod tests {
