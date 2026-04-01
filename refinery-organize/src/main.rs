@@ -7,6 +7,7 @@ use std::path::PathBuf;
 // Third-party library imports
 use anyhow::Result;
 use clap::{Parser, Subcommand};
+use refinery_cli::{PartitionData, render_partition, resolve_output_mode};
 
 // Local module imports
 use refinery_organize::partition_jsonraw;
@@ -37,17 +38,24 @@ struct Cli {
 // @return: Result<()> - Returns an error if the command fails
 fn main() -> Result<()> {
     let cli = Cli::parse();
+    let mode = resolve_output_mode();
 
     match cli.command {
         Commands::Partition { jsonraw_dir, nodes } => {
             let summary = partition_jsonraw(&jsonraw_dir, nodes)?;
-            println!("jsonraw_dir: {}", summary.source_dir.display());
-            println!("nodes_dir: {}", summary.nodes_dir.display());
-            println!("source_files: {}", summary.files_scanned);
-            println!("nodes_created: {}", summary.node_count);
-            for (node_name, count) in summary.files_per_node {
-                println!("{node_name}: {count}");
-            }
+            print!(
+                "{}",
+                render_partition(
+                    mode,
+                    &PartitionData {
+                        source_dir: summary.source_dir.display().to_string(),
+                        nodes_dir: summary.nodes_dir.display().to_string(),
+                        files_scanned: summary.files_scanned,
+                        node_count: summary.node_count,
+                        files_per_node: summary.files_per_node,
+                    },
+                )
+            );
         }
     }
 

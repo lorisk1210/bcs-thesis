@@ -6,3 +6,4 @@ edition.workspace = true
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true
+refinery-cli = { path = "../refinery-cli" }

@@ -16,4 +16,5 @@ serde_json.workspace = true
 sha2.workspace = true
 tokio.workspace = true
 tonic.workspace = true
+refinery-cli = { path = "../refinery-cli" }
 refinery-protocol = { path = "../refinery-protocol" }

@@ -7,14 +7,18 @@ use std::process;
 // Third-party library imports
 use anyhow::Result;
 use clap::{Parser, Subcommand, ValueEnum};
+use refinery_cli::{
+    CheckCompareReportData, CheckDiffEntry, CheckNodeReport, CheckPrepareReportData,
+    CheckPreparedNodeData, CheckRejectionEntry, CheckSectionData, render_check_compare_report,
+    render_check_prepare_report, resolve_output_mode,
+};
 use refinery_orchestrator::client::ClientTlsOptions;
 use refinery_protocol::{ClipBounds, QueryTemplate};
 
 // Local module imports
 use refinery_check::{
     CompareMode, CompareRequest, PrepareRequest, default_as_of_date, exit_code,
-    parse_raw_node_spec, prepare_baselines, render_text_prepare_report, render_text_report,
-    run_compare,
+    parse_raw_node_spec, prepare_baselines, run_compare,
 };
 use refinery_node::app;
 
@@ -124,7 +128,22 @@ async fn run() -> Result<i32> {
 
             match format {
                 OutputFormat::Text => {
-                    println!("{}", render_text_prepare_report(&report));
+                    let mode = resolve_output_mode();
+                    let data = CheckPrepareReportData {
+                        prepared_dir: report.prepared_dir.clone(),
+                        as_of_date: report.as_of_date.clone(),
+                        nodes: report
+                            .nodes
+                            .iter()
+                            .map(|n| CheckPreparedNodeData {
+                                node_id: n.node_id.clone(),
+                                raw_input_dir: n.raw_input_dir.clone(),
+                                coarsened_db_path: n.coarsened_db_path.clone(),
+                                exact_db_path: n.exact_db_path.clone(),
+                            })
+                            .collect(),
+                    };
+                    print!("{}", render_check_prepare_report(mode, &data));
                 }
                 OutputFormat::Json => {
                     println!("{}", serde_json::to_string_pretty(&report)?);
@@ -202,7 +221,33 @@ async fn run() -> Result<i32> {
 
             match format {
                 OutputFormat::Text => {
-                    println!("{}", render_text_report(&report));
+                    let output_mode = resolve_output_mode();
+                    let sections = vec![
+                        to_section_data("smpc_parity", &report.smpc_parity),
+                        to_section_data("coarsening_distortion", &report.coarsening_distortion),
+                        to_section_data("final_release_utility", &report.final_release_utility),
+                    ];
+                    let data = CheckCompareReportData {
+                        template: report.request.template.clone(),
+                        mode: report.request.mode.clone(),
+                        as_of_date: report.request.as_of_date.clone(),
+                        clip_min: report.request.clip_min,
+                        clip_max: report.request.clip_max,
+                        dp_seed: report.request.dp_seed,
+                        epsilon: report.request.epsilon,
+                        min_cohort: report.request.min_cohort,
+                        nodes: report
+                            .nodes
+                            .iter()
+                            .map(|n| CheckNodeReport {
+                                node_id: n.node_id.clone(),
+                                endpoint: n.endpoint.clone(),
+                                raw_input_dir: n.raw_input_dir.clone(),
+                            })
+                            .collect(),
+                        sections,
+                    };
+                    print!("{}", render_check_compare_report(output_mode, &data));
                 }
                 OutputFormat::Json => {
                     println!("{}", serde_json::to_string_pretty(&report)?);
@@ -212,4 +257,58 @@ async fn run() -> Result<i32> {
             Ok(exit_code(&report))
         }
     }
+}
+
+fn to_section_data(
+    name: &str,
+    section: &refinery_check::ComparisonSection,
+) -> CheckSectionData {
+    CheckSectionData {
+        name: name.to_string(),
+        status: section_status_str(section.status),
+        expectation: section.expectation.map(expectation_str),
+        left_label: section.left_label.clone(),
+        right_label: section.right_label.clone(),
+        left_payload: section.left_payload.clone(),
+        right_payload: section.right_payload.clone(),
+        diffs: section
+            .diffs
+            .iter()
+            .map(|d| CheckDiffEntry {
+                path: d.path.clone(),
+                left: d.left.clone(),
+                right: d.right.clone(),
+            })
+            .collect(),
+        rejections: section
+            .rejections
+            .iter()
+            .map(|r| CheckRejectionEntry {
+                node_id: r.node_id.clone(),
+                endpoint: r.endpoint.clone(),
+                reason: r.reason.clone(),
+            })
+            .collect(),
+    }
+}
+
+fn section_status_str(status: refinery_check::SectionStatus) -> String {
+    match status {
+        refinery_check::SectionStatus::Match => "match",
+        refinery_check::SectionStatus::Mismatch => "mismatch",
+        refinery_check::SectionStatus::Inconclusive => "inconclusive",
+        refinery_check::SectionStatus::ExpectedDistortion => "expected_distortion",
+        refinery_check::SectionStatus::UnexpectedDistortion => "unexpected_distortion",
+        refinery_check::SectionStatus::Skipped => "skipped",
+    }
+    .to_string()
+}
+
+fn expectation_str(e: refinery_check::DistortionExpectation) -> String {
+    match e {
+        refinery_check::DistortionExpectation::ShouldMatch => "should_match",
+        refinery_check::DistortionExpectation::DistortionPossible => "distortion_possible",
+        refinery_check::DistortionExpectation::DistortionExpected => "distortion_expected",
+    }
+    .to_string()
 }

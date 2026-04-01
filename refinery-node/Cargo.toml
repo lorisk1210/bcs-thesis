@@ -20,4 +20,5 @@ tokio.workspace = true
 tonic.workspace = true
 walkdir.workspace = true
 zeroize.workspace = true
+refinery-cli = { path = "../refinery-cli" }
 refinery-protocol = { path = "../refinery-protocol" }
