@@ -10,7 +10,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 use refinery_cli::{
     CheckCompareReportData, CheckDiffEntry, CheckNodeReport, CheckPrepareReportData,
     CheckPreparedNodeData, CheckRejectionEntry, CheckSectionData, render_check_compare_report,
-    render_check_prepare_report, resolve_output_mode,
+    render_check_prepare_report, render_error, resolve_output_mode,
 };
 use refinery_orchestrator::client::ClientTlsOptions;
 use refinery_protocol::{ClipBounds, QueryTemplate};
@@ -94,10 +94,12 @@ struct Cli {
 // Main: Executes the CLI and exits with the report-derived exit code.
 #[tokio::main]
 async fn main() {
+    refinery_node::config::load_dotenv();
+    let mode = resolve_output_mode();
     let code = match run().await {
         Ok(code) => code,
         Err(err) => {
-            eprintln!("error: {err:#}");
+            eprint!("{}", render_error(mode, "refinery-check", &format!("{err:#}")));
             3
         }
     };
@@ -106,7 +108,6 @@ async fn main() {
 
 // Parses CLI inputs, runs the comparison, and prints the selected output format.
 async fn run() -> Result<i32> {
-    refinery_node::config::load_dotenv();
     let cli = Cli::parse();
 
     match cli.command {
