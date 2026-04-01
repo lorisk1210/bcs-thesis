@@ -3,11 +3,12 @@
 
 // Standard library imports
 use std::path::PathBuf;
+use std::process;
 
 // Third-party library imports
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use refinery_cli::{PartitionData, render_partition, resolve_output_mode};
+use refinery_cli::{PartitionData, render_error, render_partition, resolve_output_mode};
 
 // Local module imports
 use refinery_organize::partition_jsonraw;
@@ -33,10 +34,21 @@ struct Cli {
     command: Commands,
 }
 
+fn main() {
+    let mode = resolve_output_mode();
+    if let Err(err) = run() {
+        eprint!(
+            "{}",
+            render_error(mode, "refinery-organize", &format!("{err:#}"))
+        );
+        process::exit(1);
+    }
+}
+
 // Main: Parses the CLI command and dispatches to the organizer helpers.
 // @param: None - No parameters are required
 // @return: Result<()> - Returns an error if the command fails
-fn main() -> Result<()> {
+fn run() -> Result<()> {
     let cli = Cli::parse();
     let mode = resolve_output_mode();
 

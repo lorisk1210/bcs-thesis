@@ -3,12 +3,14 @@
 
 // Standard library imports
 use std::path::{Path, PathBuf};
+use std::process;
 
 // Third-party library imports
 use anyhow::{Result, anyhow};
 use clap::{Parser, Subcommand};
 use refinery_cli::{
     NodeStatusData, OrchestratorQueryRejectedData, OrchestratorQueryReleasedData,
+    render_error,
     render_orchestrator_query_rejected, render_orchestrator_query_released,
     render_orchestrator_status, resolve_output_mode,
 };
@@ -62,8 +64,19 @@ struct Cli {
 
 // Main: Parses the CLI command and dispatches federated workflows.
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() {
     load_dotenv();
+    let mode = resolve_output_mode();
+    if let Err(err) = run().await {
+        eprint!(
+            "{}",
+            render_error(mode, "refinery-orchestrator", &format!("{err:#}"))
+        );
+        process::exit(1);
+    }
+}
+
+async fn run() -> Result<()> {
     let cli = Cli::parse();
     let mode = resolve_output_mode();
 

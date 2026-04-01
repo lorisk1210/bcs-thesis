@@ -55,6 +55,12 @@ Required variables:
 - `REFINERY_MIN_COHORT`
 - `REFINERY_TOTAL_BUDGET`
 
+Optional CLI output variable:
+
+- `REFINERY_CLI_OUTPUT`
+
+CLI output defaults to rich pretty formatting on interactive terminals and plain text when stdout is redirected or piped. Set `REFINERY_CLI_OUTPUT=plain` to force the legacy plain layout, or `REFINERY_CLI_OUTPUT=pretty` to force the styled layout.
+
 ## Run full local pipeline
 
 ```bash

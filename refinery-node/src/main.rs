@@ -3,12 +3,14 @@
 
 // Standard library imports
 use std::path::PathBuf;
+use std::process;
 
 // Third-party library imports
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use refinery_cli::{
     IngestReportData, InspectTableData, NodeQueryRejectedData, NodeQueryReleasedData,
+    render_error,
     render_ingest, render_init, render_inspect, render_materialize, render_node_query_rejected,
     render_node_query_released, render_normalize, render_pipeline, resolve_output_mode,
 };
@@ -96,12 +98,20 @@ struct Cli {
     command: Commands,
 }
 
+#[tokio::main]
+async fn main() {
+    refinery_node::config::load_dotenv();
+    let mode = resolve_output_mode();
+    if let Err(err) = run().await {
+        eprint!("{}", render_error(mode, "refinery-node", &format!("{err:#}")));
+        process::exit(1);
+    }
+}
+
 // Main: Parses the CLI command and dispatches to the shared node application code.
 // @param: None - No parameters are required
 // @return: Result<()> - Returns an error if the command fails
-#[tokio::main]
-async fn main() -> Result<()> {
-    refinery_node::config::load_dotenv();
+async fn run() -> Result<()> {
     let cli = Cli::parse();
     let mode = resolve_output_mode();
 
