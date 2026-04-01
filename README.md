@@ -22,7 +22,7 @@ Rust-first prototype for privacy-aware federated analytics over Synthea FHIR Bun
   - job status lookup.
 - Orchestrator CLI for:
   - node health and capability checks,
-  - plaintext federated aggregation across multiple nodes,
+  - SMPC federated aggregation across multiple nodes,
   - final DP release at the federation boundary.
 - Node-local privacy release gate for single-node CLI queries with:
   - minimum cohort threshold,
@@ -119,7 +119,7 @@ cargo run -p refinery-orchestrator --release -- status \
   --node http://127.0.0.1:50052
 ```
 
-## Run a federated plaintext query
+## Run a federated SMPC query
 
 ```bash
 cargo run -p refinery-orchestrator --release -- query \
@@ -190,7 +190,7 @@ Current behavior:
 - the node decides whether it may participate in the federated job
 - right now that decision is based only on the local minimum cohort rule
 - if `local cohort_size < REFINERY_MIN_COHORT`, the node rejects participation
-- if it passes, the node returns its local statistics to the orchestrator in plaintext mode
+- if it passes, the node returns SMPC share packets and round metadata to the orchestrator
 
 Where this is implemented:
 
@@ -220,6 +220,6 @@ Examples of future rules that would belong in `local_policy.rs`:
 ## Current limitations
 
 - Pharmacovigilance uses proxy event definitions via `Condition` (Synthea export has no `AdverseEvent` resources in this dataset).
-- Federated execution currently supports plaintext aggregation only; SMPC transport and protocol rounds are scaffolded but not implemented.
+- Federated execution is SMPC-only and requires every selected node to advertise SMPC protocol support and key material.
 - Orchestrator-side DP release currently applies final noise and thresholding, but does not yet persist a global budget ledger or durable job store.
 - TLS or mTLS hooks are exposed at the transport layer, but production certificate management is not implemented in this repository.

@@ -5,6 +5,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 // Third-party library imports
 use anyhow::{Context, Result, anyhow};
@@ -15,21 +16,55 @@ use serde_json::{Map, Value, json};
 
 // Local module imports
 use refinery_node::{app, db, ingest::TransformMode, materialize, normalize, query};
-use refinery_orchestrator::aggregate::aggregate_plaintext_responses;
 use refinery_orchestrator::client::{ClientTlsOptions, capabilities};
+use refinery_orchestrator::config::{GlobalPrivacyConfig, load_privacy_config};
+use refinery_orchestrator::dp_release::release_result_with_seed;
 use refinery_orchestrator::jobs::FederatedJob;
-use refinery_orchestrator::protocol_runner::collect_job_responses;
+use refinery_orchestrator::protocol_runner::run_job;
 use refinery_protocol::{
-    ClipBounds, FederationMode, LocalStatistics, QueryResult, QueryTemplate,
-    aggregate_local_statistics, render_query_result,
+    ClipBounds, LocalStatistics, QueryResult, QueryTemplate, aggregate_local_statistics,
+    render_query_result,
 };
+
+static CHECKER_JOB_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 // Supported comparison modes for refinery-check.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CompareMode {
     Full,
-    FederationParity,
-    RawDistortion,
+    SmpcParity,
+    CoarseningDistortion,
+    FinalReleaseUtility,
+}
+
+impl CompareMode {
+    pub fn requires_live_nodes(self) -> bool {
+        matches!(
+            self,
+            CompareMode::Full | CompareMode::SmpcParity | CompareMode::FinalReleaseUtility
+        )
+    }
+
+    fn requires_exact_baseline(self) -> bool {
+        matches!(
+            self,
+            CompareMode::Full
+                | CompareMode::CoarseningDistortion
+                | CompareMode::FinalReleaseUtility
+        )
+    }
+
+    fn includes_smpc_parity(self) -> bool {
+        matches!(self, CompareMode::Full | CompareMode::SmpcParity)
+    }
+
+    fn includes_coarsening_distortion(self) -> bool {
+        matches!(self, CompareMode::Full | CompareMode::CoarseningDistortion)
+    }
+
+    fn includes_final_release_utility(self) -> bool {
+        matches!(self, CompareMode::Full | CompareMode::FinalReleaseUtility)
+    }
 }
 
 // Raw FHIR input mapping for one named node dataset.
@@ -50,6 +85,7 @@ pub struct CompareRequest {
     pub prepared_dir: Option<PathBuf>,
     pub raw_nodes: Vec<RawNodeInput>,
     pub as_of_date: NaiveDate,
+    pub dp_seed: u64,
     pub tls: ClientTlsOptions,
 }
 
@@ -64,7 +100,7 @@ pub struct PrepareRequest {
 // Resolved node metadata after matching live endpoints to raw input directories.
 #[derive(Debug, Clone)]
 struct PreparedNode {
-    endpoint: String,
+    endpoint: Option<String>,
     node_id: String,
     raw_input_dir: PathBuf,
     coarsened_db_path: Option<PathBuf>,
@@ -76,8 +112,9 @@ struct PreparedNode {
 pub struct ComparisonReport {
     pub request: RequestMetadata,
     pub nodes: Vec<NodeReport>,
-    pub federation_parity: ComparisonSection,
-    pub raw_distortion: ComparisonSection,
+    pub smpc_parity: ComparisonSection,
+    pub coarsening_distortion: ComparisonSection,
+    pub final_release_utility: ComparisonSection,
 }
 
 // Output returned after preparing reusable baseline databases.
@@ -97,6 +134,9 @@ pub struct RequestMetadata {
     pub clip_max: f64,
     pub as_of_date: String,
     pub params: Value,
+    pub dp_seed: Option<u64>,
+    pub epsilon: Option<f64>,
+    pub min_cohort: Option<usize>,
 }
 
 // One prepared baseline database pair written to disk.
@@ -123,13 +163,13 @@ pub struct ComparisonSection {
     pub expectation: Option<DistortionExpectation>,
     pub left_label: String,
     pub right_label: String,
-    pub left_result: Option<QueryResult>,
-    pub right_result: Option<QueryResult>,
+    pub left_payload: Option<Value>,
+    pub right_payload: Option<Value>,
     pub diffs: Vec<DiffEntry>,
     pub rejections: Vec<NodeRejection>,
 }
 
-// One path-level difference between two rendered query results.
+// One path-level difference between two serialized payloads.
 #[derive(Debug, Clone, Serialize)]
 pub struct DiffEntry {
     pub path: String,
@@ -185,15 +225,31 @@ struct PreparedNodeMetadata {
 
 // Executes refinery-check end-to-end and returns the structured report.
 // @param: request - Fully resolved comparison request
-// @return: Result<ComparisonReport> - Comparison report with parity/distortion sections
+// @return: Result<ComparisonReport> - Comparison report with parity, distortion, and utility sections
 pub async fn run_compare(request: CompareRequest) -> Result<ComparisonReport> {
+    let privacy_config = if request.mode.requires_live_nodes() {
+        Some(load_privacy_config()?)
+    } else {
+        None
+    };
     let prepared_nodes = match &request.prepared_dir {
         Some(prepared_dir) => {
             let metadata = load_prepared_metadata(prepared_dir)?;
-            prepare_nodes_from_metadata(&request.node_endpoints, &metadata, &request.tls).await?
+            if request.mode.requires_live_nodes() {
+                prepare_nodes_from_metadata(&request.node_endpoints, &metadata, &request.tls).await?
+            } else {
+                load_nodes_from_metadata(&metadata)
+            }
         }
-        None => prepare_nodes(&request.node_endpoints, &request.raw_nodes, &request.tls).await?,
+        None => {
+            if request.mode.requires_live_nodes() {
+                prepare_nodes(&request.node_endpoints, &request.raw_nodes, &request.tls).await?
+            } else {
+                load_nodes_from_raw(&request.raw_nodes)?
+            }
+        }
     };
+
     let request_metadata = RequestMetadata {
         mode: mode_name(request.mode).to_string(),
         template: request.template.as_str().to_string(),
@@ -201,13 +257,18 @@ pub async fn run_compare(request: CompareRequest) -> Result<ComparisonReport> {
         clip_max: request.clip.max,
         as_of_date: request.as_of_date.to_string(),
         params: request.params.clone(),
+        dp_seed: privacy_config.as_ref().map(|_| request.dp_seed),
+        epsilon: privacy_config.as_ref().map(|config| config.epsilon),
+        min_cohort: privacy_config.as_ref().map(|config| config.min_cohort),
     };
     let node_reports = prepared_nodes
         .iter()
-        .map(|node| NodeReport {
-            node_id: node.node_id.clone(),
-            endpoint: node.endpoint.clone(),
-            raw_input_dir: node.raw_input_dir.display().to_string(),
+        .filter_map(|node| {
+            node.endpoint.as_ref().map(|endpoint| NodeReport {
+                node_id: node.node_id.clone(),
+                endpoint: endpoint.clone(),
+                raw_input_dir: node.raw_input_dir.display().to_string(),
+            })
         })
         .collect::<Vec<_>>();
 
@@ -230,7 +291,7 @@ pub async fn run_compare(request: CompareRequest) -> Result<ComparisonReport> {
         )?
     };
 
-    let exact_baseline = if matches!(request.mode, CompareMode::Full | CompareMode::RawDistortion) {
+    let exact_baseline = if request.mode.requires_exact_baseline() {
         Some(if request.prepared_dir.is_some() {
             build_baseline_result_from_prepared(
                 &prepared_nodes,
@@ -253,97 +314,239 @@ pub async fn run_compare(request: CompareRequest) -> Result<ComparisonReport> {
         None
     };
 
-    let federation_parity = if matches!(request.mode, CompareMode::Full | CompareMode::FederationParity) {
-        let responses = collect_job_responses(
-            &FederatedJob {
-                job_id: checker_job_id(),
-                template: request.template,
-                params: request.params.clone(),
-                clip: request.clip,
-                federation_mode: FederationMode::Plaintext,
-                nodes: request.node_endpoints.clone(),
-            },
-            &request.tls,
-        )
-        .await?;
-        let rejections = responses
-            .iter()
-            .zip(prepared_nodes.iter())
-            .filter(|(response, _)| !response.accepted)
-            .map(|(response, node)| NodeRejection {
-                node_id: node.node_id.clone(),
-                endpoint: node.endpoint.clone(),
-                reason: response.reason.clone(),
-            })
-            .collect::<Vec<_>>();
-
-        if !rejections.is_empty() {
-            ComparisonSection {
-                status: SectionStatus::Inconclusive,
-                expectation: None,
-                left_label: "live_federated_pre_dp".to_string(),
-                right_label: "coarsened_baseline".to_string(),
-                left_result: None,
-                right_result: Some(coarsened_baseline.clone()),
-                diffs: Vec::new(),
-                rejections,
-            }
-        } else {
-            let live_result = aggregate_plaintext_responses(request.template, &responses, request.clip)?;
-            let diffs = diff_query_results(&live_result, &coarsened_baseline);
-            ComparisonSection {
-                status: if diffs.is_empty() {
-                    SectionStatus::Match
-                } else {
-                    SectionStatus::Mismatch
-                },
-                expectation: None,
-                left_label: "live_federated_pre_dp".to_string(),
-                right_label: "coarsened_baseline".to_string(),
-                left_result: Some(live_result),
-                right_result: Some(coarsened_baseline.clone()),
-                diffs,
-                rejections,
+    let live_result = if let Some(config) = privacy_config.as_ref() {
+        match run_live_job(&request, config).await {
+            Ok(result) => Some(result),
+            Err(error) => {
+                let reason = error.to_string();
+                return Ok(ComparisonReport {
+                    request: request_metadata,
+                    nodes: node_reports,
+                    smpc_parity: if request.mode.includes_smpc_parity() {
+                        build_inconclusive_section(
+                            "live_smpc_pre_dp",
+                            "coarsened_baseline",
+                            None,
+                            Some(serialize_payload(&coarsened_baseline)?),
+                            &reason,
+                            &request.node_endpoints,
+                        )
+                    } else {
+                        skipped_section("live_smpc_pre_dp", "coarsened_baseline")
+                    },
+                    coarsening_distortion: if request.mode.includes_coarsening_distortion() {
+                        let exact = exact_baseline
+                            .as_ref()
+                            .ok_or_else(|| anyhow!("exact baseline missing for distortion mode"))?;
+                        build_coarsening_distortion_section(
+                            &coarsened_baseline,
+                            exact,
+                            request.template,
+                            &request.params,
+                        )?
+                    } else {
+                        skipped_section("coarsened_baseline", "exact_raw_baseline")
+                    },
+                    final_release_utility: if request.mode.includes_final_release_utility() {
+                        let right_payload = exact_baseline
+                            .as_ref()
+                            .map(|exact| release_result_with_seed(exact, config, request.dp_seed))
+                            .transpose()?
+                            .map(|release| serialize_payload(&release))
+                            .transpose()?;
+                        build_inconclusive_section(
+                            "live_smpc_post_dp_seeded",
+                            "exact_raw_post_dp_seeded",
+                            None,
+                            right_payload,
+                            &reason,
+                            &request.node_endpoints,
+                        )
+                    } else {
+                        skipped_section(
+                            "live_smpc_post_dp_seeded",
+                            "exact_raw_post_dp_seeded",
+                        )
+                    },
+                });
             }
         }
     } else {
-        skipped_section("live_federated_pre_dp", "coarsened_baseline")
+        None
     };
 
-    let raw_distortion = if matches!(request.mode, CompareMode::Full | CompareMode::RawDistortion) {
-        let exact_baseline = exact_baseline
-            .clone()
-            .ok_or_else(|| anyhow!("exact baseline missing for raw distortion mode"))?;
-        let expectation = classify_distortion_expectation(request.template, &request.params);
-        let diffs = diff_query_results(&coarsened_baseline, &exact_baseline);
-        let status = if diffs.is_empty() {
-            SectionStatus::Match
-        } else if expectation == DistortionExpectation::ShouldMatch {
-            SectionStatus::UnexpectedDistortion
-        } else {
-            SectionStatus::ExpectedDistortion
-        };
+    let smpc_parity = if request.mode.includes_smpc_parity() {
+        build_smpc_parity_section(
+            live_result
+                .as_ref()
+                .ok_or_else(|| anyhow!("live SMPC result missing for parity mode"))?,
+            &coarsened_baseline,
+        )?
+    } else {
+        skipped_section("live_smpc_pre_dp", "coarsened_baseline")
+    };
 
-        ComparisonSection {
-            status,
-            expectation: Some(expectation),
-            left_label: "coarsened_baseline".to_string(),
-            right_label: "exact_raw_baseline".to_string(),
-            left_result: Some(coarsened_baseline),
-            right_result: Some(exact_baseline),
-            diffs,
-            rejections: Vec::new(),
-        }
+    let coarsening_distortion = if request.mode.includes_coarsening_distortion() {
+        build_coarsening_distortion_section(
+            &coarsened_baseline,
+            exact_baseline
+                .as_ref()
+                .ok_or_else(|| anyhow!("exact baseline missing for distortion mode"))?,
+            request.template,
+            &request.params,
+        )?
     } else {
         skipped_section("coarsened_baseline", "exact_raw_baseline")
+    };
+
+    let final_release_utility = if request.mode.includes_final_release_utility() {
+        build_final_release_utility_section(
+            live_result
+                .as_ref()
+                .ok_or_else(|| anyhow!("live SMPC result missing for utility mode"))?,
+            exact_baseline
+                .as_ref()
+                .ok_or_else(|| anyhow!("exact baseline missing for utility mode"))?,
+            privacy_config
+                .as_ref()
+                .ok_or_else(|| anyhow!("privacy config missing for utility mode"))?,
+            request.dp_seed,
+        )?
+    } else {
+        skipped_section("live_smpc_post_dp_seeded", "exact_raw_post_dp_seeded")
     };
 
     Ok(ComparisonReport {
         request: request_metadata,
         nodes: node_reports,
-        federation_parity,
-        raw_distortion,
+        smpc_parity,
+        coarsening_distortion,
+        final_release_utility,
     })
+}
+
+async fn run_live_job(
+    request: &CompareRequest,
+    privacy_config: &GlobalPrivacyConfig,
+) -> Result<QueryResult> {
+    let output = run_job(
+        &FederatedJob {
+            job_id: checker_job_id(),
+            template: request.template,
+            params: request.params.clone(),
+            clip: request.clip,
+            nodes: request.node_endpoints.clone(),
+        },
+        &request.tls,
+        privacy_config.min_participating_nodes,
+    )
+    .await?;
+    Ok(output.aggregated)
+}
+
+fn build_smpc_parity_section(
+    live_result: &QueryResult,
+    coarsened_baseline: &QueryResult,
+) -> Result<ComparisonSection> {
+    let left_payload = serialize_payload(live_result)?;
+    let right_payload = serialize_payload(coarsened_baseline)?;
+    let diffs = diff_payloads(&left_payload, &right_payload);
+    Ok(ComparisonSection {
+        status: if diffs.is_empty() {
+            SectionStatus::Match
+        } else {
+            SectionStatus::Mismatch
+        },
+        expectation: None,
+        left_label: "live_smpc_pre_dp".to_string(),
+        right_label: "coarsened_baseline".to_string(),
+        left_payload: Some(left_payload),
+        right_payload: Some(right_payload),
+        diffs,
+        rejections: Vec::new(),
+    })
+}
+
+fn build_coarsening_distortion_section(
+    coarsened_baseline: &QueryResult,
+    exact_baseline: &QueryResult,
+    template: QueryTemplate,
+    params: &Value,
+) -> Result<ComparisonSection> {
+    let expectation = classify_distortion_expectation(template, params);
+    let left_payload = serialize_payload(coarsened_baseline)?;
+    let right_payload = serialize_payload(exact_baseline)?;
+    let diffs = diff_payloads(&left_payload, &right_payload);
+    let status = if diffs.is_empty() {
+        SectionStatus::Match
+    } else if expectation == DistortionExpectation::ShouldMatch {
+        SectionStatus::UnexpectedDistortion
+    } else {
+        SectionStatus::ExpectedDistortion
+    };
+
+    Ok(ComparisonSection {
+        status,
+        expectation: Some(expectation),
+        left_label: "coarsened_baseline".to_string(),
+        right_label: "exact_raw_baseline".to_string(),
+        left_payload: Some(left_payload),
+        right_payload: Some(right_payload),
+        diffs,
+        rejections: Vec::new(),
+    })
+}
+
+fn build_final_release_utility_section(
+    live_result: &QueryResult,
+    exact_baseline: &QueryResult,
+    config: &GlobalPrivacyConfig,
+    dp_seed: u64,
+) -> Result<ComparisonSection> {
+    let live_release = release_result_with_seed(live_result, config, dp_seed)?;
+    let exact_release = release_result_with_seed(exact_baseline, config, dp_seed)?;
+    let left_payload = serialize_payload(&live_release)?;
+    let right_payload = serialize_payload(&exact_release)?;
+    let diffs = diff_payloads(&left_payload, &right_payload);
+
+    Ok(ComparisonSection {
+        status: if diffs.is_empty() {
+            SectionStatus::Match
+        } else {
+            SectionStatus::Mismatch
+        },
+        expectation: None,
+        left_label: "live_smpc_post_dp_seeded".to_string(),
+        right_label: "exact_raw_post_dp_seeded".to_string(),
+        left_payload: Some(left_payload),
+        right_payload: Some(right_payload),
+        diffs,
+        rejections: Vec::new(),
+    })
+}
+
+fn build_inconclusive_section(
+    left_label: &str,
+    right_label: &str,
+    left_payload: Option<Value>,
+    right_payload: Option<Value>,
+    reason: &str,
+    endpoints: &[String],
+) -> ComparisonSection {
+    ComparisonSection {
+        status: SectionStatus::Inconclusive,
+        expectation: None,
+        left_label: left_label.to_string(),
+        right_label: right_label.to_string(),
+        left_payload,
+        right_payload,
+        diffs: Vec::new(),
+        rejections: vec![NodeRejection {
+            node_id: "federation".to_string(),
+            endpoint: endpoints.join(", "),
+            reason: reason.to_string(),
+        }],
+    }
 }
 
 // Prepares reusable coarsened and exact baseline databases on disk.
@@ -476,15 +679,33 @@ pub fn render_text_report(report: &ComparisonReport) -> String {
         report.request.clip_min,
         report.request.clip_max
     ));
-    out.push_str("nodes:\n");
-    for node in &report.nodes {
-        out.push_str(&format!(
-            "  - {} => {} ({})\n",
-            node.node_id, node.endpoint, node.raw_input_dir
-        ));
+    if let Some(dp_seed) = report.request.dp_seed {
+        out.push_str(&format!("dp_seed: {dp_seed}\n"));
     }
-    out.push_str(&render_section("federation_parity", &report.federation_parity));
-    out.push_str(&render_section("raw_distortion", &report.raw_distortion));
+    if let Some(epsilon) = report.request.epsilon {
+        out.push_str(&format!("epsilon: {epsilon:.4}\n"));
+    }
+    if let Some(min_cohort) = report.request.min_cohort {
+        out.push_str(&format!("min_cohort: {min_cohort}\n"));
+    }
+    if !report.nodes.is_empty() {
+        out.push_str("nodes:\n");
+        for node in &report.nodes {
+            out.push_str(&format!(
+                "  - {} => {} ({})\n",
+                node.node_id, node.endpoint, node.raw_input_dir
+            ));
+        }
+    }
+    out.push_str(&render_section("smpc_parity", &report.smpc_parity));
+    out.push_str(&render_section(
+        "coarsening_distortion",
+        &report.coarsening_distortion,
+    ));
+    out.push_str(&render_section(
+        "final_release_utility",
+        &report.final_release_utility,
+    ));
     out
 }
 
@@ -492,7 +713,11 @@ pub fn render_text_report(report: &ComparisonReport) -> String {
 // @param: report - Structured comparison report
 // @return: i32 - Exit code used by the refinery-check CLI
 pub fn exit_code(report: &ComparisonReport) -> i32 {
-    let sections = [&report.federation_parity, &report.raw_distortion];
+    let sections = [
+        &report.smpc_parity,
+        &report.coarsening_distortion,
+        &report.final_release_utility,
+    ];
     if sections.iter().any(|section| {
         matches!(
             section.status,
@@ -539,19 +764,14 @@ fn skipped_section(left_label: &str, right_label: &str) -> ComparisonSection {
         expectation: None,
         left_label: left_label.to_string(),
         right_label: right_label.to_string(),
-        left_result: None,
-        right_result: None,
+        left_payload: None,
+        right_payload: None,
         diffs: Vec::new(),
         rejections: Vec::new(),
     }
 }
 
-// Resolves live node endpoints to raw node directories using node capabilities.
-async fn prepare_nodes(
-    endpoints: &[String],
-    raw_nodes: &[RawNodeInput],
-    tls: &ClientTlsOptions,
-) -> Result<Vec<PreparedNode>> {
+fn load_nodes_from_raw(raw_nodes: &[RawNodeInput]) -> Result<Vec<PreparedNode>> {
     let mut raw_by_node_id = BTreeMap::new();
     for raw_node in raw_nodes {
         if raw_by_node_id
@@ -560,6 +780,46 @@ async fn prepare_nodes(
         {
             return Err(anyhow!("duplicate raw node mapping for {}", raw_node.node_id));
         }
+    }
+
+    Ok(raw_nodes
+        .iter()
+        .map(|raw_node| PreparedNode {
+            endpoint: None,
+            node_id: raw_node.node_id.clone(),
+            raw_input_dir: raw_node.input_dir.clone(),
+            coarsened_db_path: None,
+            exact_db_path: None,
+        })
+        .collect())
+}
+
+fn load_nodes_from_metadata(metadata: &PreparedDirectoryMetadata) -> Vec<PreparedNode> {
+    metadata
+        .nodes
+        .iter()
+        .map(|node| PreparedNode {
+            endpoint: None,
+            node_id: node.node_id.clone(),
+            raw_input_dir: PathBuf::from(&node.raw_input_dir),
+            coarsened_db_path: Some(PathBuf::from(&node.coarsened_db_path)),
+            exact_db_path: Some(PathBuf::from(&node.exact_db_path)),
+        })
+        .collect()
+}
+
+// Resolves live node endpoints to raw node directories using node capabilities.
+async fn prepare_nodes(
+    endpoints: &[String],
+    raw_nodes: &[RawNodeInput],
+    tls: &ClientTlsOptions,
+) -> Result<Vec<PreparedNode>> {
+    let mut raw_by_node_id = raw_nodes
+        .iter()
+        .map(|raw_node| (raw_node.node_id.clone(), raw_node.input_dir.clone()))
+        .collect::<BTreeMap<_, _>>();
+    if raw_by_node_id.len() != raw_nodes.len() {
+        return Err(anyhow!("duplicate raw node mapping provided"));
     }
 
     let mut prepared = Vec::with_capacity(endpoints.len());
@@ -575,7 +835,7 @@ async fn prepare_nodes(
             .remove(&caps.node_id)
             .ok_or_else(|| anyhow!("missing --raw-node mapping for node id {}", caps.node_id))?;
         prepared.push(PreparedNode {
-            endpoint: endpoint.clone(),
+            endpoint: Some(endpoint.clone()),
             node_id: caps.node_id,
             raw_input_dir,
             coarsened_db_path: None,
@@ -616,7 +876,7 @@ async fn prepare_nodes_from_metadata(
             .remove(&caps.node_id)
             .ok_or_else(|| anyhow!("prepared baselines missing node id {}", caps.node_id))?;
         prepared.push(PreparedNode {
-            endpoint: endpoint.clone(),
+            endpoint: Some(endpoint.clone()),
             node_id: node.node_id,
             raw_input_dir: PathBuf::from(node.raw_input_dir),
             coarsened_db_path: Some(PathBuf::from(node.coarsened_db_path)),
@@ -814,14 +1074,20 @@ fn safe_node_file_stem(node_id: &str) -> String {
 fn mode_name(mode: CompareMode) -> &'static str {
     match mode {
         CompareMode::Full => "full",
-        CompareMode::FederationParity => "federation_parity",
-        CompareMode::RawDistortion => "raw_distortion",
+        CompareMode::SmpcParity => "smpc_parity",
+        CompareMode::CoarseningDistortion => "coarsening_distortion",
+        CompareMode::FinalReleaseUtility => "final_release_utility",
     }
 }
 
 // Creates a unique job id for checker-submitted live federation requests.
 fn checker_job_id() -> String {
-    format!("check-{}", Utc::now().timestamp_millis())
+    format!(
+        "check-{}-{}-{}",
+        Utc::now().timestamp_millis(),
+        std::process::id(),
+        CHECKER_JOB_COUNTER.fetch_add(1, Ordering::Relaxed)
+    )
 }
 
 // Renders one section of the text report.
@@ -835,18 +1101,18 @@ fn render_section(name: &str, section: &ComparisonSection) -> String {
             distortion_expectation_name(expectation)
         ));
     }
-    if let Some(left_result) = &section.left_result {
+    if let Some(left_payload) = &section.left_payload {
         out.push_str(&format!(
             "  {}: {}\n",
             section.left_label,
-            serde_json::to_string(left_result).unwrap_or_else(|_| "null".to_string())
+            serde_json::to_string(left_payload).unwrap_or_else(|_| "null".to_string())
         ));
     }
-    if let Some(right_result) = &section.right_result {
+    if let Some(right_payload) = &section.right_payload {
         out.push_str(&format!(
             "  {}: {}\n",
             section.right_label,
-            serde_json::to_string(right_result).unwrap_or_else(|_| "null".to_string())
+            serde_json::to_string(right_payload).unwrap_or_else(|_| "null".to_string())
         ));
     }
     if !section.rejections.is_empty() {
@@ -891,17 +1157,16 @@ fn distortion_expectation_name(expectation: DistortionExpectation) -> &'static s
     }
 }
 
-// Computes path-level diffs for the rendered result payload and cohort size.
-fn diff_query_results(left: &QueryResult, right: &QueryResult) -> Vec<DiffEntry> {
+fn serialize_payload<T>(payload: &T) -> Result<Value>
+where
+    T: Serialize,
+{
+    Ok(serde_json::to_value(payload)?)
+}
+
+fn diff_payloads(left: &Value, right: &Value) -> Vec<DiffEntry> {
     let mut diffs = Vec::new();
-    if left.cohort_size != right.cohort_size {
-        diffs.push(DiffEntry {
-            path: "$.cohort_size".to_string(),
-            left: json!(left.cohort_size),
-            right: json!(right.cohort_size),
-        });
-    }
-    compare_json("$.raw_result", &left.raw_result, &right.raw_result, &mut diffs);
+    compare_json("$", left, right, &mut diffs);
     diffs
 }
 
@@ -995,12 +1260,11 @@ fn numbers_match(left: &serde_json::Number, right: &serde_json::Number) -> bool 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use refinery_protocol::QueryTemplate;
 
     #[test]
     fn raw_node_spec_requires_equals() {
         assert!(parse_raw_node_spec("node-a:/tmp/raw").is_err());
-        let parsed = parse_raw_node_spec("node-a=/tmp/raw").unwrap();
+        let parsed = parse_raw_node_spec("node-a=/tmp/raw").expect("spec should parse");
         assert_eq!(parsed.node_id, "node-a");
         assert_eq!(parsed.input_dir, PathBuf::from("/tmp/raw"));
     }
@@ -1035,35 +1299,80 @@ mod tests {
     }
 
     #[test]
-    fn diff_query_results_flags_cohort_and_numeric_changes() {
-        let left = QueryResult {
-            template_name: "test".to_string(),
-            raw_result: json!({"count": 4, "mean": 2.0}),
-            cohort_size: 4,
-            sensitivity: 0.5,
-        };
-        let right = QueryResult {
-            template_name: "test".to_string(),
-            raw_result: json!({"count": 5, "mean": 2.5}),
-            cohort_size: 5,
-            sensitivity: 0.25,
-        };
-        let diffs = diff_query_results(&left, &right);
+    fn diff_payloads_flags_nested_changes() {
+        let left = json!({
+            "cohort_size": 4,
+            "raw_result": {"count": 4, "mean": 2.0}
+        });
+        let right = json!({
+            "cohort_size": 5,
+            "raw_result": {"count": 5, "mean": 2.5}
+        });
+        let diffs = diff_payloads(&left, &right);
         assert!(diffs.iter().any(|diff| diff.path == "$.cohort_size"));
         assert!(diffs.iter().any(|diff| diff.path == "$.raw_result.count"));
         assert!(diffs.iter().any(|diff| diff.path == "$.raw_result.mean"));
-        assert!(!diffs.iter().any(|diff| diff.path.contains("sensitivity")));
     }
 
     #[test]
-    fn exit_code_distinguishes_failure_and_inconclusive() {
+    fn final_release_utility_matches_for_identical_inputs() {
+        let result = QueryResult {
+            template_name: "test".to_string(),
+            raw_result: json!({"count": 20, "delta": 1.5}),
+            cohort_size: 20,
+            sensitivity: 0.5,
+        };
+        let config = GlobalPrivacyConfig {
+            epsilon: 1.0,
+            min_cohort: 10,
+            total_budget: 10.0,
+            min_participating_nodes: 2,
+            ledger_db_path: PathBuf::from("unused.duckdb"),
+        };
+
+        let section = build_final_release_utility_section(&result, &result, &config, 42)
+            .expect("utility section should build");
+        assert_eq!(section.status, SectionStatus::Match);
+        assert!(section.diffs.is_empty());
+    }
+
+    #[test]
+    fn final_release_utility_detects_distortion() {
+        let live_result = QueryResult {
+            template_name: "test".to_string(),
+            raw_result: json!({"count": 20, "delta": 1.5}),
+            cohort_size: 20,
+            sensitivity: 0.5,
+        };
+        let exact_result = QueryResult {
+            template_name: "test".to_string(),
+            raw_result: json!({"count": 22, "delta": 1.5}),
+            cohort_size: 22,
+            sensitivity: 0.5,
+        };
+        let config = GlobalPrivacyConfig {
+            epsilon: 1.0,
+            min_cohort: 10,
+            total_budget: 10.0,
+            min_participating_nodes: 2,
+            ledger_db_path: PathBuf::from("unused.duckdb"),
+        };
+
+        let section = build_final_release_utility_section(&live_result, &exact_result, &config, 42)
+            .expect("utility section should build");
+        assert_eq!(section.status, SectionStatus::Mismatch);
+        assert!(!section.diffs.is_empty());
+    }
+
+    #[test]
+    fn exit_code_prioritizes_failure_over_inconclusive() {
         let base_section = ComparisonSection {
             status: SectionStatus::Match,
             expectation: None,
             left_label: "a".to_string(),
             right_label: "b".to_string(),
-            left_result: None,
-            right_result: None,
+            left_payload: None,
+            right_payload: None,
             diffs: Vec::new(),
             rejections: Vec::new(),
         };
@@ -1075,17 +1384,41 @@ mod tests {
                 clip_max: 1.0,
                 as_of_date: "2026-01-01".to_string(),
                 params: json!({}),
+                dp_seed: Some(42),
+                epsilon: Some(1.0),
+                min_cohort: Some(5),
             },
             nodes: Vec::new(),
-            federation_parity: base_section.clone(),
-            raw_distortion: base_section.clone(),
+            smpc_parity: base_section.clone(),
+            coarsening_distortion: base_section.clone(),
+            final_release_utility: base_section.clone(),
         };
         assert_eq!(exit_code(&report), 0);
 
-        report.federation_parity.status = SectionStatus::Inconclusive;
+        report.smpc_parity.status = SectionStatus::Inconclusive;
         assert_eq!(exit_code(&report), 2);
 
-        report.raw_distortion.status = SectionStatus::UnexpectedDistortion;
+        report.final_release_utility.status = SectionStatus::Mismatch;
         assert_eq!(exit_code(&report), 1);
+    }
+
+    #[test]
+    fn checker_job_ids_are_namespaced() {
+        let first = checker_job_id();
+        let second = checker_job_id();
+        assert!(first.starts_with("check-"));
+        assert!(second.starts_with("check-"));
+        assert_ne!(first, second);
+    }
+
+    #[test]
+    fn serialize_release_result_preserves_rejection_reason() {
+        let payload = serialize_payload(&refinery_orchestrator::dp_release::GlobalReleaseResult {
+            accepted: false,
+            reason: "below threshold".to_string(),
+            noisy_result: None,
+        })
+        .expect("release payload should serialize");
+        assert_eq!(payload["reason"], "below threshold");
     }
 }
