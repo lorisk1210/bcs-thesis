@@ -1,4 +1,4 @@
-// Shared run output for both plaintext and SMPC federation paths.
+// Shared run output for one SMPC federated execution.
 
 use refinery_protocol::QueryResult;
 

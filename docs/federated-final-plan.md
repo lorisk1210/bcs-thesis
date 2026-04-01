@@ -2,6 +2,8 @@
 
 Date: 2026-03-11
 
+Note: this is a historical planning document. The current implementation is SMPC-only; any plaintext references below describe an earlier milestone and are no longer the live system behavior.
+
 ## 1. Objective
 
 Refinery currently runs as a single-hospital CLI:

@@ -11,8 +11,8 @@ use refinery_protocol::grpc::{
     ParticipantManifestEntry, RunFederationRoundRequest, SubmitJobRequest, SubmitJobResponse,
 };
 use refinery_protocol::{
-    FederationMode, SMPC_AGGREGATE_SHARE_ROUND_NAME, SMPC_PROTOCOL_NAME,
-    SMPC_PROTOCOL_VERSION, compute_job_context_hash,
+    SMPC_AGGREGATE_SHARE_ROUND_NAME, SMPC_PROTOCOL_NAME, SMPC_PROTOCOL_VERSION,
+    compute_job_context_hash,
 };
 
 // Local module imports
@@ -71,7 +71,6 @@ pub async fn run_smpc_job(
                 params_json: params_json.clone(),
                 clip_min: job.clip.min,
                 clip_max: job.clip.max,
-                federation_mode: job.federation_mode.as_str().to_string(),
                 protocol_name: SMPC_PROTOCOL_NAME.to_string(),
                 protocol_version: SMPC_PROTOCOL_VERSION.to_string(),
                 job_context_hash: job_context_hash.clone(),
@@ -146,6 +145,7 @@ async fn load_participants(
     job: &FederatedJob,
     tls: &ClientTlsOptions,
 ) -> Result<Vec<ParticipantTarget>> {
+    let supported_protocol = format!("{}_{}", SMPC_PROTOCOL_NAME, SMPC_PROTOCOL_VERSION);
     let futures = job.nodes.iter().map(|endpoint| async move {
         Ok::<_, anyhow::Error>((endpoint.clone(), capabilities(endpoint, tls).await?))
     });
@@ -161,12 +161,12 @@ async fn load_participants(
             ));
         }
         if !caps
-            .supported_federation_modes
+            .supported_smpc_protocols
             .iter()
-            .any(|mode| mode == FederationMode::SmpcAdditiveSharing.as_str())
+            .any(|protocol| protocol == &supported_protocol)
         {
             return Err(anyhow!(
-                "node {} does not advertise SMPC federation support",
+                "node {} does not advertise SMPC protocol support",
                 caps.node_id
             ));
         }

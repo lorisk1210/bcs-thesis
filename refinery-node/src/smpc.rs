@@ -10,8 +10,8 @@ use refinery_protocol::grpc::{
     RunFederationRoundRequest, RunFederationRoundResponse, SealedSharePacket, SubmitJobRequest,
 };
 use refinery_protocol::{
-    FederationMode, LocalStatistics, PRIVATE_KEY_LENGTH, SMPC_AGGREGATE_SHARE_ROUND_NAME,
-    SMPC_PROTOCOL_NAME, SMPC_PROTOCOL_VERSION, SharePayload, decode_slot_bytes,
+    LocalStatistics, PRIVATE_KEY_LENGTH, SMPC_AGGREGATE_SHARE_ROUND_NAME, SMPC_PROTOCOL_NAME,
+    SMPC_PROTOCOL_VERSION, SharePayload, decode_slot_bytes,
     encode_slot_bytes, encrypt_share_payload, public_key_fingerprint,
     public_key_from_private_key, sealed_packet_hash, slot_vector_hash,
     split_additive_shares, sum_slot_vectors,
@@ -57,14 +57,9 @@ pub fn load_smpc_capability() -> Result<Option<SmpcCapability>> {
 // Returns an explicit reject reason when the SMPC request is unsafe or malformed.
 pub fn smpc_override_rejection_reason(
     request: &SubmitJobRequest,
-    mode: FederationMode,
     node_id: &str,
     smpc_capability: Option<&SmpcCapability>,
 ) -> Option<String> {
-    if mode != FederationMode::SmpcAdditiveSharing {
-        return None;
-    }
-
     let Some(smpc) = smpc_capability else {
         return Some("SMPC capability is not configured on this node".to_string());
     };
@@ -338,7 +333,6 @@ mod tests {
             params_json: "{}".to_string(),
             clip_min: 0.0,
             clip_max: 300.0,
-            federation_mode: FederationMode::SmpcAdditiveSharing.as_str().to_string(),
             protocol_name: SMPC_PROTOCOL_NAME.to_string(),
             protocol_version: SMPC_PROTOCOL_VERSION.to_string(),
             job_context_hash: "hash".to_string(),
@@ -358,13 +352,8 @@ mod tests {
             ],
         };
 
-        let reason = smpc_override_rejection_reason(
-            &request,
-            FederationMode::SmpcAdditiveSharing,
-            "node-a",
-            Some(&capability),
-        )
-        .expect("request should be rejected");
+        let reason = smpc_override_rejection_reason(&request, "node-a", Some(&capability))
+            .expect("request should be rejected");
         assert!(reason.contains("at least 3 participating nodes"));
     }
 

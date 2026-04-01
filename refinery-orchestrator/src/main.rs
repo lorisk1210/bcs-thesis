@@ -13,7 +13,7 @@ use refinery_orchestrator::db::{open_ledger, record_job_finished, record_job_sta
 use refinery_orchestrator::dp_release::release_result;
 use refinery_orchestrator::jobs::FederatedJob;
 use refinery_orchestrator::protocol_runner::run_job;
-use refinery_protocol::{ClipBounds, FederationMode, QueryTemplate};
+use refinery_protocol::{ClipBounds, QueryTemplate};
 use serde_json::Value;
 
 // Defines the available CLI subcommands for the orchestrator binary.
@@ -30,8 +30,6 @@ enum Commands {
         clip_min: f64,
         #[arg(long, default_value_t = 300.0)]
         clip_max: f64,
-        #[arg(long, default_value = "plaintext")]
-        federation_mode: String,
         #[arg(long)]
         ca_cert: Option<PathBuf>,
         #[arg(long)]
@@ -70,7 +68,6 @@ async fn main() -> Result<()> {
             node,
             clip_min,
             clip_max,
-            federation_mode,
             ca_cert,
             tls_domain_name,
         } => {
@@ -80,7 +77,6 @@ async fn main() -> Result<()> {
 
             let privacy_config = load_privacy_config()?;
             let params = load_params_file(&params_file)?;
-            let federation_mode = federation_mode.parse::<FederationMode>()?;
             let job = FederatedJob {
                 job_id: new_job_id(),
                 template,
@@ -89,7 +85,6 @@ async fn main() -> Result<()> {
                     min: clip_min,
                     max: clip_max,
                 },
-                federation_mode,
                 nodes: node,
             };
             let tls = ClientTlsOptions {
@@ -131,7 +126,6 @@ async fn main() -> Result<()> {
                 println!("job_id: {}", job.job_id);
                 println!("status: released");
                 println!("template: {}", job.template.as_str());
-                println!("federation_mode: {}", job.federation_mode.as_str());
                 println!("participating_nodes: {}", run_output.accepted_nodes);
                 println!("cohort_size: {}", run_output.aggregated.cohort_size);
                 println!(
@@ -165,9 +159,10 @@ async fn main() -> Result<()> {
                 println!("  protocol_version: {}", caps.protocol_version);
                 println!("  supported_templates: {}", caps.supported_templates.join(", "));
                 println!(
-                    "  supported_federation_modes: {}",
-                    caps.supported_federation_modes.join(", ")
+                    "  supported_smpc_protocols: {}",
+                    caps.supported_smpc_protocols.join(", ")
                 );
+                println!("  smpc_key_fingerprint: {}", caps.smpc_key_fingerprint);
             }
         }
     }
