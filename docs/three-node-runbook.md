@@ -97,7 +97,9 @@ rm -rf data/check-baselines
 
 ## 6. Rebuild the three node databases
 
-Run these commands in order:
+After splitting the raw data, build one DuckDB database per node with `run-pipeline`.
+
+Run these three commands in order:
 
 ```bash
 cargo run -p refinery-node --release -- run-pipeline \
@@ -116,6 +118,12 @@ cargo run -p refinery-node --release -- run-pipeline \
   --db data/node-c.duckdb \
   --input-dir jsonraw/nodes/node-c
 ```
+
+At the end of this step, you should have:
+
+- `data/node-a.duckdb`
+- `data/node-b.duckdb`
+- `data/node-c.duckdb`
 
 ## 7. Optional: inspect codes before running queries
 
