@@ -6,7 +6,7 @@ use anyhow::{Result, anyhow};
 use refinery_protocol::grpc::{
     RunFederationRoundRequest, RunFederationRoundResponse, SubmitJobRequest, SubmitJobResponse,
 };
-use refinery_protocol::{FederationMode, QueryTemplate, slot_vector_hash};
+use refinery_protocol::QueryTemplate;
 use std::str::FromStr;
 
 // Local module imports
@@ -28,7 +28,6 @@ pub(crate) struct JobRecord {
     pub status: String,
     pub accepted: bool,
     pub reason: String,
-    pub federation_mode: FederationMode,
     pub smpc_state: Option<SmpcJobState>,
 }
 
@@ -39,7 +38,6 @@ pub(crate) fn execute_submit_job(
     req: SubmitJobRequest,
 ) -> Result<(SubmitJobResponse, JobRecord)> {
     let template = QueryTemplate::from_str(&req.template)?;
-    let mode = FederationMode::from_str(&req.federation_mode)?;
     let params: serde_json::Value = serde_json::from_str(&req.params_json)?;
     let conn = app::open_initialized_connection(&config.db_path)?;
     let stats = query::compute_local_statistics(
@@ -54,7 +52,7 @@ pub(crate) fn execute_submit_job(
     let privacy_config = config::load_privacy_config()?;
     let fingerprint = app::fingerprint(template, &params, req.clip_min, req.clip_max);
     let override_rejection =
-        smpc::smpc_override_rejection_reason(&req, mode, &config.node_id, smpc_capability.as_ref());
+        smpc::smpc_override_rejection_reason(&req, &config.node_id, smpc_capability.as_ref());
     let decision = local_policy::enforce_local_participation(
         &conn,
         &req.job_id,
@@ -65,20 +63,15 @@ pub(crate) fn execute_submit_job(
         override_rejection.as_deref(),
     )?;
 
-    match mode {
-        FederationMode::Plaintext => {
-            build_plaintext_submit_outcome(&req, &config.node_id, template, stats, fingerprint, decision)
-        }
-        FederationMode::SmpcAdditiveSharing => build_smpc_submit_outcome(
-            &req,
-            &config.node_id,
-            template,
-            stats,
-            fingerprint,
-            decision,
-            smpc_capability,
-        ),
-    }
+    build_smpc_submit_outcome(
+        &req,
+        &config.node_id,
+        template,
+        stats,
+        fingerprint,
+        decision,
+        smpc_capability,
+    )
 }
 
 // Executes round-2 share aggregation handling for one accepted SMPC job.
@@ -88,7 +81,7 @@ pub(crate) fn execute_federation_round(
     req: RunFederationRoundRequest,
     record: JobRecord,
 ) -> Result<RunFederationRoundResponse> {
-    if !record.accepted || record.federation_mode != FederationMode::SmpcAdditiveSharing {
+    if !record.accepted {
         return Ok(smpc::rejected_round_response(
             &config.node_id,
             &req,
@@ -138,66 +131,6 @@ pub(crate) fn execute_federation_round(
     })
 }
 
-fn build_plaintext_submit_outcome(
-    req: &SubmitJobRequest,
-    node_id: &str,
-    template: QueryTemplate,
-    stats: refinery_protocol::LocalStatistics,
-    fingerprint: String,
-    decision: local_policy::LocalPolicyDecision,
-) -> Result<(SubmitJobResponse, JobRecord)> {
-    if !decision.accepted {
-        return Ok((
-            rejected_submit_response(
-                req,
-                node_id,
-                template,
-                decision.reason.clone(),
-                stats.cohort_size as u64,
-                fingerprint,
-            ),
-            build_job_record(
-                JOB_STATUS_REJECTED,
-                false,
-                decision.reason,
-                FederationMode::Plaintext,
-                None,
-            ),
-        ));
-    }
-
-    let stats_json = serde_json::to_string(&stats).map_err(|error| anyhow!(error))?;
-    let canonical_slots = stats.encode_slot_bytes();
-    let response = SubmitJobResponse {
-        job_id: req.job_id.clone(),
-        accepted: true,
-        reason: decision.reason.clone(),
-        template: template.as_str().to_string(),
-        stats_json,
-        cohort_size: stats.cohort_size as u64,
-        fingerprint,
-        node_id: node_id.to_string(),
-        schema_id: stats.schema_id.clone(),
-        slot_labels: stats.slot_labels.clone(),
-        canonical_slots: canonical_slots.clone(),
-        share_packets: Vec::new(),
-        vector_hash: slot_vector_hash(&canonical_slots),
-        protocol_name: String::new(),
-        protocol_version: String::new(),
-        job_context_hash: String::new(),
-    };
-    Ok((
-        response,
-        build_job_record(
-            JOB_STATUS_COMPLETED,
-            true,
-            decision.reason,
-            FederationMode::Plaintext,
-            None,
-        ),
-    ))
-}
-
 fn build_smpc_submit_outcome(
     req: &SubmitJobRequest,
     node_id: &str,
@@ -221,7 +154,6 @@ fn build_smpc_submit_outcome(
                 JOB_STATUS_REJECTED,
                 false,
                 decision.reason,
-                FederationMode::SmpcAdditiveSharing,
                 None,
             ),
         ));
@@ -247,7 +179,6 @@ fn build_smpc_submit_outcome(
         accepted: true,
         reason: decision.reason.clone(),
         template: template.as_str().to_string(),
-        stats_json: String::new(),
         cohort_size: 0,
         fingerprint,
         node_id: node_id.to_string(),
@@ -266,7 +197,6 @@ fn build_smpc_submit_outcome(
             JOB_STATUS_ROUND1_READY,
             true,
             decision.reason,
-            FederationMode::SmpcAdditiveSharing,
             Some(smpc_state),
         ),
     ))
@@ -306,16 +236,15 @@ mod tests {
     }
 
     #[test]
-    fn round_execution_rejects_non_smpc_jobs() {
+    fn round_execution_rejects_unaccepted_jobs() {
         let response = execute_federation_round(
             &test_config(),
             None,
             test_round_request(),
             JobRecord {
-                status: JOB_STATUS_COMPLETED.to_string(),
-                accepted: true,
-                reason: "accepted".to_string(),
-                federation_mode: FederationMode::Plaintext,
+                status: JOB_STATUS_REJECTED.to_string(),
+                accepted: false,
+                reason: "rejected".to_string(),
                 smpc_state: None,
             },
         )
@@ -335,7 +264,6 @@ mod tests {
                 status: JOB_STATUS_ROUND1_READY.to_string(),
                 accepted: true,
                 reason: "accepted".to_string(),
-                federation_mode: FederationMode::SmpcAdditiveSharing,
                 smpc_state: None,
             },
         )
@@ -355,7 +283,6 @@ mod tests {
                 status: JOB_STATUS_ROUND1_READY.to_string(),
                 accepted: true,
                 reason: "accepted".to_string(),
-                federation_mode: FederationMode::SmpcAdditiveSharing,
                 smpc_state: Some(SmpcJobState {
                     job_context_hash: "hash".to_string(),
                     schema_id: "schema".to_string(),
@@ -380,14 +307,12 @@ fn build_job_record(
     status: &str,
     accepted: bool,
     reason: String,
-    federation_mode: FederationMode,
     smpc_state: Option<SmpcJobState>,
 ) -> JobRecord {
     JobRecord {
         status: status.to_string(),
         accepted,
         reason,
-        federation_mode,
         smpc_state,
     }
 }
@@ -405,7 +330,6 @@ fn rejected_submit_response(
         accepted: false,
         reason,
         template: template.as_str().to_string(),
-        stats_json: String::new(),
         cohort_size,
         fingerprint,
         node_id: node_id.to_string(),

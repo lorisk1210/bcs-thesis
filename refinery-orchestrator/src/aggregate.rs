@@ -5,29 +5,11 @@
 use anyhow::{Result, anyhow};
 
 // Local module imports
-use refinery_protocol::grpc::{RunFederationRoundResponse, SubmitJobResponse};
+use refinery_protocol::grpc::RunFederationRoundResponse;
 use refinery_protocol::{
-    ClipBounds, LocalStatistics, QueryResult, QueryTemplate, aggregate_local_statistics,
-    aggregate_slot_vectors, decode_slot_bytes, render_query_result, slot_vector_hash,
+    ClipBounds, QueryResult, QueryTemplate, aggregate_slot_vectors, decode_slot_bytes,
+    render_query_result, slot_vector_hash,
 };
-
-// Aggregates plaintext node responses and renders the final query result.
-// @param: template - Query template used by every node
-// @param: responses - Successful node responses containing serialized local statistics
-// @param: clip - Clipping bounds shared across the federated job
-// @return: Result<QueryResult> - Final aggregated query result
-pub fn aggregate_plaintext_responses(
-    template: QueryTemplate,
-    responses: &[SubmitJobResponse],
-    clip: ClipBounds,
-) -> Result<QueryResult> {
-    let stats = responses
-        .iter()
-        .map(|response| serde_json::from_str::<LocalStatistics>(&response.stats_json))
-        .collect::<Result<Vec<_>, _>>()?;
-    let aggregated = aggregate_local_statistics(template, &stats)?;
-    render_query_result(&aggregated, clip)
-}
 
 // Aggregates SMPC round-2 aggregate shares and renders the final query result.
 pub fn aggregate_smpc_round_responses(
@@ -88,10 +70,9 @@ fn validate_round_response(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use refinery_protocol::grpc::{RunFederationRoundResponse, SubmitJobResponse};
     use refinery_protocol::{
-        LocalStatistics, SMPC_PROTOCOL_NAME, SMPC_PROTOCOL_VERSION, encode_slot_bytes,
-        split_additive_shares,
+        LocalStatistics, SMPC_PROTOCOL_NAME, SMPC_PROTOCOL_VERSION, aggregate_local_statistics,
+        encode_slot_bytes, split_additive_shares,
     };
     use serde_json::json;
 
@@ -134,7 +115,7 @@ mod tests {
     }
 
     #[test]
-    fn smpc_and_plaintext_parity_match_for_three_nodes() {
+    fn smpc_matches_protocol_aggregation_for_three_nodes() {
         let locals = vec![
             LocalStatistics::from_stats_value(
                 QueryTemplate::ComparativeEffectivenessDelta,
@@ -173,35 +154,14 @@ mod tests {
             )
             .expect("local stats"),
         ];
-        let plaintext = locals
-            .iter()
-            .map(|local| SubmitJobResponse {
-                job_id: "job".to_string(),
-                accepted: true,
-                reason: "accepted".to_string(),
-                template: QueryTemplate::ComparativeEffectivenessDelta.as_str().to_string(),
-                stats_json: serde_json::to_string(local).expect("serialize"),
-                cohort_size: local.cohort_size as u64,
-                fingerprint: String::new(),
-                node_id: String::new(),
-                schema_id: local.schema_id.clone(),
-                slot_labels: local.slot_labels.clone(),
-                canonical_slots: local.encode_slot_bytes(),
-                share_packets: Vec::new(),
-                vector_hash: String::new(),
-                protocol_name: String::new(),
-                protocol_version: String::new(),
-                job_context_hash: String::new(),
-            })
-            .collect::<Vec<_>>();
         let round_two = build_round_two_responses(&locals);
 
-        let plaintext_result = aggregate_plaintext_responses(
-            QueryTemplate::ComparativeEffectivenessDelta,
-            &plaintext,
+        let baseline_result = render_query_result(
+            &aggregate_local_statistics(QueryTemplate::ComparativeEffectivenessDelta, &locals)
+                .expect("local aggregation should succeed"),
             ClipBounds { min: 0.0, max: 300.0 },
         )
-        .expect("plaintext aggregation should succeed");
+        .expect("baseline render should succeed");
         let smpc_result = aggregate_smpc_round_responses(
             QueryTemplate::ComparativeEffectivenessDelta,
             &locals[0].schema_id,
@@ -214,12 +174,12 @@ mod tests {
         )
         .expect("smpc aggregation should succeed");
 
-        assert_eq!(plaintext_result.raw_result, smpc_result.raw_result);
-        assert_eq!(plaintext_result.cohort_size, smpc_result.cohort_size);
+        assert_eq!(baseline_result.raw_result, smpc_result.raw_result);
+        assert_eq!(baseline_result.cohort_size, smpc_result.cohort_size);
     }
 
     #[test]
-    fn smpc_and_plaintext_parity_match_for_four_nodes_grouped_template() {
+    fn smpc_matches_protocol_aggregation_for_four_nodes_grouped_template() {
         let locals = vec![
             LocalStatistics::from_stats_value(
                 QueryTemplate::DoseResponseTrend,
@@ -250,35 +210,14 @@ mod tests {
             )
             .expect("local stats"),
         ];
-        let plaintext = locals
-            .iter()
-            .map(|local| SubmitJobResponse {
-                job_id: "job".to_string(),
-                accepted: true,
-                reason: "accepted".to_string(),
-                template: QueryTemplate::DoseResponseTrend.as_str().to_string(),
-                stats_json: serde_json::to_string(local).expect("serialize"),
-                cohort_size: local.cohort_size as u64,
-                fingerprint: String::new(),
-                node_id: String::new(),
-                schema_id: local.schema_id.clone(),
-                slot_labels: local.slot_labels.clone(),
-                canonical_slots: local.encode_slot_bytes(),
-                share_packets: Vec::new(),
-                vector_hash: String::new(),
-                protocol_name: String::new(),
-                protocol_version: String::new(),
-                job_context_hash: String::new(),
-            })
-            .collect::<Vec<_>>();
         let round_two = build_round_two_responses(&locals);
 
-        let plaintext_result = aggregate_plaintext_responses(
-            QueryTemplate::DoseResponseTrend,
-            &plaintext,
+        let baseline_result = render_query_result(
+            &aggregate_local_statistics(QueryTemplate::DoseResponseTrend, &locals)
+                .expect("local aggregation should succeed"),
             ClipBounds { min: 0.0, max: 300.0 },
         )
-        .expect("plaintext aggregation should succeed");
+        .expect("baseline render should succeed");
         let smpc_result = aggregate_smpc_round_responses(
             QueryTemplate::DoseResponseTrend,
             &locals[0].schema_id,
@@ -291,8 +230,8 @@ mod tests {
         )
         .expect("smpc aggregation should succeed");
 
-        assert_eq!(plaintext_result.raw_result, smpc_result.raw_result);
-        assert_eq!(plaintext_result.cohort_size, smpc_result.cohort_size);
+        assert_eq!(baseline_result.raw_result, smpc_result.raw_result);
+        assert_eq!(baseline_result.cohort_size, smpc_result.cohort_size);
     }
 
     #[test]

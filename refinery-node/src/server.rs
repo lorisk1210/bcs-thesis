@@ -15,7 +15,7 @@ use refinery_protocol::grpc::{
     HealthCheckRequest, HealthCheckResponse, RunFederationRoundRequest, RunFederationRoundResponse,
     RunPipelineRequest, RunPipelineResponse, SubmitJobRequest, SubmitJobResponse,
 };
-use refinery_protocol::{FederationMode, QueryTemplate};
+use refinery_protocol::QueryTemplate;
 use tokio::sync::Mutex;
 use tonic::transport::{Certificate, Identity, Server, ServerTlsConfig};
 use tonic::{Request, Response, Status};
@@ -121,15 +121,11 @@ impl NodeService for NodeGrpcService {
         &self,
         _request: Request<GetCapabilitiesRequest>,
     ) -> Result<Response<GetCapabilitiesResponse>, Status> {
-        let mut supported_federation_modes =
-            vec![FederationMode::Plaintext.as_str().to_string()];
         let mut smpc_public_key = Vec::new();
         let mut smpc_key_fingerprint = String::new();
         let mut supported_smpc_protocols = Vec::new();
 
         if let Some(smpc_capability) = self.state.smpc_capability.as_ref() {
-            supported_federation_modes
-                .push(FederationMode::SmpcAdditiveSharing.as_str().to_string());
             smpc_public_key = smpc_capability.public_key.clone();
             smpc_key_fingerprint = smpc_capability.fingerprint.clone();
             supported_smpc_protocols.push(format!(
@@ -147,7 +143,6 @@ impl NodeService for NodeGrpcService {
                 .iter()
                 .map(|template| template.as_str().to_string())
                 .collect(),
-            supported_federation_modes,
             smpc_public_key,
             smpc_key_fingerprint,
             supported_smpc_protocols,

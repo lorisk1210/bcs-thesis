@@ -22,8 +22,9 @@ use refinery_node::app;
 #[derive(Debug, Clone, Copy, ValueEnum)]
 enum CliMode {
     Full,
-    FederationParity,
-    RawDistortion,
+    SmpcParity,
+    CoarseningDistortion,
+    FinalReleaseUtility,
 }
 
 // Output formats supported by the CLI.
@@ -51,7 +52,7 @@ enum Commands {
         template: QueryTemplate,
         #[arg(long)]
         params_file: std::path::PathBuf,
-        #[arg(long, required = true)]
+        #[arg(long)]
         node: Vec<String>,
         #[arg(long)]
         prepared_dir: Option<std::path::PathBuf>,
@@ -65,6 +66,8 @@ enum Commands {
         mode: CliMode,
         #[arg(long)]
         as_of_date: Option<chrono::NaiveDate>,
+        #[arg(long, default_value_t = 42)]
+        dp_seed: u64,
         #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
         format: OutputFormat,
         #[arg(long)]
@@ -140,6 +143,7 @@ async fn run() -> Result<i32> {
             clip_max,
             mode,
             as_of_date,
+            dp_seed,
             format,
             ca_cert,
             tls_domain_name,
@@ -154,17 +158,30 @@ async fn run() -> Result<i32> {
                     "compare requires either --prepared-dir or at least one --raw-node"
                 ));
             }
+            let compare_mode = match mode {
+                CliMode::Full => CompareMode::Full,
+                CliMode::SmpcParity => CompareMode::SmpcParity,
+                CliMode::CoarseningDistortion => CompareMode::CoarseningDistortion,
+                CliMode::FinalReleaseUtility => CompareMode::FinalReleaseUtility,
+            };
+            if compare_mode.requires_live_nodes() && node.is_empty() {
+                let mode_name = match compare_mode {
+                    CompareMode::Full => "full",
+                    CompareMode::SmpcParity => "smpc_parity",
+                    CompareMode::CoarseningDistortion => "coarsening_distortion",
+                    CompareMode::FinalReleaseUtility => "final_release_utility",
+                };
+                return Err(anyhow::anyhow!(
+                    "mode {mode_name} requires at least one --node endpoint"
+                ));
+            }
             let params = app::load_params_file(&params_file)?;
             let raw_nodes = raw_node
                 .iter()
                 .map(|spec| parse_raw_node_spec(spec))
                 .collect::<Result<Vec<_>>>()?;
             let report = run_compare(CompareRequest {
-                mode: match mode {
-                    CliMode::Full => CompareMode::Full,
-                    CliMode::FederationParity => CompareMode::FederationParity,
-                    CliMode::RawDistortion => CompareMode::RawDistortion,
-                },
+                mode: compare_mode,
                 template,
                 params,
                 clip: ClipBounds {
@@ -175,6 +192,7 @@ async fn run() -> Result<i32> {
                 prepared_dir,
                 raw_nodes,
                 as_of_date: as_of_date.unwrap_or_else(default_as_of_date),
+                dp_seed,
                 tls: ClientTlsOptions {
                     ca_cert_path: ca_cert,
                     domain_name: tls_domain_name,
