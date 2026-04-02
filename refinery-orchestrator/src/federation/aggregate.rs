@@ -1,17 +1,10 @@
-// src/aggregate.rs
-// Aggregates accepted node responses into one federated query result.
-
-// Third-party library imports
 use anyhow::{Result, anyhow};
-
-// Local module imports
 use refinery_protocol::grpc::RunFederationRoundResponse;
 use refinery_protocol::{
     ClipBounds, QueryResult, QueryTemplate, aggregate_slot_vectors, decode_slot_bytes,
     render_query_result, slot_vector_hash,
 };
 
-// Aggregates SMPC round-2 aggregate shares and renders the final query result.
 pub fn aggregate_smpc_round_responses(
     template: QueryTemplate,
     schema_id: &str,
@@ -69,12 +62,13 @@ fn validate_round_response(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use refinery_protocol::{
         LocalStatistics, SMPC_PROTOCOL_NAME, SMPC_PROTOCOL_VERSION, aggregate_local_statistics,
         encode_slot_bytes, split_additive_shares,
     };
     use serde_json::json;
+
+    use super::*;
 
     fn build_round_two_responses(stats: &[LocalStatistics]) -> Vec<RunFederationRoundResponse> {
         let share_count = stats.len();
@@ -267,8 +261,6 @@ mod tests {
         )
         .expect_err("aggregation should reject bad metadata");
 
-        assert!(error
-            .to_string()
-            .contains("job context hash mismatch"));
+        assert!(error.to_string().contains("job context hash mismatch"));
     }
 }
