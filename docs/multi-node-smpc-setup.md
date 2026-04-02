@@ -52,27 +52,15 @@ So if you ask "where is the public key saved?", the answer is:
 - derived from the private key at runtime
 - sent over the capability API when the orchestrator queries the node
 
-## Generating three different SMPC private keys
+## Three SMPC private key examples from `.env.example`
 
-You need one 32-byte hex key per node.
-
-Example:
-
-```bash
-openssl rand -hex 32
-openssl rand -hex 32
-openssl rand -hex 32
-```
-
-Example placeholders:
+Use one 32-byte hex key per node:
 
 ```text
-NODE_A_KEY=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-NODE_B_KEY=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
-NODE_C_KEY=cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+NODE_A_KEY=af717e5dc57e048a45d733447b3c78383594c86bb4f42ece4926c781a93eeaa6
+NODE_B_KEY=eaaf1b46b4a42c495b198ad4ee6b0890fd618ac4b05c04956cb393686a239b58
+NODE_C_KEY=df6a8fbb6e9630f4df5ec9c92a11daec093f35bb4385b7eb26f123a39ea0c906
 ```
-
-Use real random values, not the placeholders above.
 
 ## Recommended setup
 
@@ -96,7 +84,7 @@ Run each node in a separate terminal.
 ### Node A
 
 ```bash
-env REFINERY_SMPC_PRIVATE_KEY_HEX="$NODE_A_KEY" \
+env REFINERY_SMPC_PRIVATE_KEY_HEX="af717e5dc57e048a45d733447b3c78383594c86bb4f42ece4926c781a93eeaa6" \
 cargo run -p refinery-node --release -- serve \
   --db data/node-a.duckdb \
   --input-dir input/nodes/node-a \
@@ -107,7 +95,7 @@ cargo run -p refinery-node --release -- serve \
 ### Node B
 
 ```bash
-env REFINERY_SMPC_PRIVATE_KEY_HEX="$NODE_B_KEY" \
+env REFINERY_SMPC_PRIVATE_KEY_HEX="eaaf1b46b4a42c495b198ad4ee6b0890fd618ac4b05c04956cb393686a239b58" \
 cargo run -p refinery-node --release -- serve \
   --db data/node-b.duckdb \
   --input-dir input/nodes/node-b \
@@ -118,7 +106,7 @@ cargo run -p refinery-node --release -- serve \
 ### Node C
 
 ```bash
-env REFINERY_SMPC_PRIVATE_KEY_HEX="$NODE_C_KEY" \
+env REFINERY_SMPC_PRIVATE_KEY_HEX="df6a8fbb6e9630f4df5ec9c92a11daec093f35bb4385b7eb26f123a39ea0c906" \
 cargo run -p refinery-node --release -- serve \
   --db data/node-c.duckdb \
   --input-dir input/nodes/node-c \
