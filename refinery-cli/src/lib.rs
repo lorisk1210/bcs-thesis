@@ -60,6 +60,8 @@ const BG_GREEN: &str = "\x1b[42m";
 const BG_RED: &str = "\x1b[41m";
 const BG_YELLOW: &str = "\x1b[43m";
 const BG_DARK_GRAY: &str = "\x1b[100m";
+const DEFAULT_FRAME_WIDTH: usize = 100;
+const MIN_FRAME_WIDTH: usize = 32;
 
 fn display_len_ignore_ansi(s: &str) -> usize {
     let mut count = 0;
@@ -81,6 +83,144 @@ fn display_len_ignore_ansi(s: &str) -> usize {
     count
 }
 
+fn terminal_columns() -> usize {
+    env::var("COLUMNS")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .filter(|&n| n >= MIN_FRAME_WIDTH)
+        .unwrap_or(DEFAULT_FRAME_WIDTH)
+}
+
+fn wrap_lines_for_frame(lines: &[&str], max_width: usize) -> Vec<String> {
+    let mut wrapped = Vec::new();
+    for line in lines {
+        if line.contains("__SEPARATOR__") {
+            wrapped.push("__SEPARATOR__".to_string());
+        } else {
+            wrapped.extend(wrap_ansi_line(line, max_width));
+        }
+    }
+    wrapped
+}
+
+fn recompute_last_space(line: &str) -> Option<(usize, usize)> {
+    line.char_indices()
+        .filter(|(_, c)| c.is_whitespace())
+        .map(|(idx, _)| {
+            let end = idx
+                + line[idx..]
+                    .chars()
+                    .next()
+                    .map(|c| c.len_utf8())
+                    .unwrap_or(0);
+            (end, display_len_ignore_ansi(&line[..end]))
+        })
+        .last()
+}
+
+fn wrap_ansi_line(line: &str, max_width: usize) -> Vec<String> {
+    if max_width == 0 {
+        return vec![String::new()];
+    }
+    if line.is_empty() {
+        return vec![String::new()];
+    }
+
+    let indent_len = line
+        .chars()
+        .take_while(|c| c.is_ascii_whitespace())
+        .count()
+        .min(max_width.saturating_sub(1));
+    let indent = " ".repeat(indent_len);
+
+    let mut out = Vec::new();
+    let mut current = String::new();
+    let mut visible = 0usize;
+    let mut last_space: Option<(usize, usize)> = None;
+    let bytes = line.as_bytes();
+    let mut i = 0usize;
+
+    while i < bytes.len() {
+        if bytes[i] == b'\x1b' && i + 1 < bytes.len() && bytes[i + 1] == b'[' {
+            let start = i;
+            i += 2;
+            while i < bytes.len() {
+                let b = bytes[i];
+                i += 1;
+                if (0x40..=0x7e).contains(&b) {
+                    break;
+                }
+            }
+            current.push_str(&line[start..i]);
+            continue;
+        }
+
+        let ch = line[i..].chars().next().unwrap_or_default();
+        let ch_len = ch.len_utf8();
+        current.push(ch);
+        visible += 1;
+        if ch.is_whitespace() {
+            last_space = Some((current.len(), visible));
+        }
+        i += ch_len;
+
+        if visible > max_width {
+            if let Some((split_byte, _)) = last_space {
+                let head = current[..split_byte].trim_end().to_string();
+                out.push(head);
+
+                let tail = current[split_byte..].trim_start().to_string();
+                current = if tail.is_empty() {
+                    indent.clone()
+                } else {
+                    format!("{indent}{tail}")
+                };
+                visible = display_len_ignore_ansi(&current);
+                last_space = recompute_last_space(&current);
+            } else {
+                let mut split_byte = current.len();
+                let mut visible_count = 0usize;
+                for (idx, ch2) in current.char_indices() {
+                    if ch2 == '\x1b' {
+                        continue;
+                    }
+                    visible_count += 1;
+                    if visible_count > max_width {
+                        split_byte = idx;
+                        break;
+                    }
+                }
+
+                out.push(current[..split_byte].to_string());
+                current = format!("{indent}{}", &current[split_byte..]);
+                visible = display_len_ignore_ansi(&current);
+                last_space = recompute_last_space(&current);
+            }
+        }
+    }
+
+    while display_len_ignore_ansi(&current) > max_width {
+        let mut split_byte = current.len();
+        let mut visible_count = 0usize;
+        for (idx, ch) in current.char_indices() {
+            if ch == '\x1b' {
+                continue;
+            }
+            visible_count += 1;
+            if visible_count > max_width {
+                split_byte = idx;
+                break;
+            }
+        }
+
+        out.push(current[..split_byte].to_string());
+        current = format!("{indent}{}", &current[split_byte..]);
+    }
+
+    out.push(current);
+    out
+}
+
 fn frame_cli_output(mode: OutputMode, inner: String) -> String {
     let trimmed = inner.trim_end_matches('\n');
     let lines: Vec<&str> = trimmed.lines().collect();
@@ -91,25 +231,34 @@ fn frame_cli_output(mode: OutputMode, inner: String) -> String {
         };
     }
 
-    let max_w = lines
+    let max_content_width = terminal_columns()
+        .saturating_sub(4)
+        .max(MIN_FRAME_WIDTH.saturating_sub(4));
+    let wrapped_lines = wrap_lines_for_frame(&lines, max_content_width);
+    let max_w = wrapped_lines
         .iter()
+        .filter(|l| !l.contains("__SEPARATOR__"))
         .map(|l| display_len_ignore_ansi(l))
         .max()
         .unwrap_or(0);
-    let rule_len = max_w + 4;
+    let rule_len = max_w + 2;
 
     match mode {
         OutputMode::Pretty => {
             let horiz = "─".repeat(rule_len);
             let mut s = String::new();
             let _ = writeln!(s, "{DARK_GRAY}┌{horiz}┐{RESET}");
-            for line in &lines {
-                let pad = max_w.saturating_sub(display_len_ignore_ansi(line));
-                let _ = writeln!(
-                    s,
-                    "{DARK_GRAY}│{RESET} {line}{}{DARK_GRAY} │{RESET}",
-                    " ".repeat(pad),
-                );
+            for line in &wrapped_lines {
+                if line.contains("__SEPARATOR__") {
+                    let _ = writeln!(s, "{DARK_GRAY}├{horiz}┤{RESET}");
+                } else {
+                    let pad = max_w.saturating_sub(display_len_ignore_ansi(line));
+                    let _ = writeln!(
+                        s,
+                        "{DARK_GRAY}│{RESET} {line}{}{DARK_GRAY} │{RESET}",
+                        " ".repeat(pad),
+                    );
+                }
             }
             let _ = writeln!(s, "{DARK_GRAY}└{horiz}┘{RESET}");
             s
@@ -118,9 +267,13 @@ fn frame_cli_output(mode: OutputMode, inner: String) -> String {
             let horiz = "-".repeat(rule_len);
             let mut s = String::new();
             let _ = writeln!(s, "+{horiz}+");
-            for line in &lines {
-                let pad = max_w.saturating_sub(display_len_ignore_ansi(line));
-                let _ = writeln!(s, "| {}{} |", line, " ".repeat(pad));
+            for line in &wrapped_lines {
+                if line.contains("__SEPARATOR__") {
+                    let _ = writeln!(s, "+{horiz}+");
+                } else {
+                    let pad = max_w.saturating_sub(display_len_ignore_ansi(line));
+                    let _ = writeln!(s, "| {}{} |", line, " ".repeat(pad));
+                }
             }
             let _ = writeln!(s, "+{horiz}+");
             s
@@ -138,12 +291,11 @@ fn badge(mode: OutputMode, label: &str, _fg_color: &str, bg_color: &str) -> Stri
 fn title(mode: OutputMode, text: &str) -> String {
     match mode {
         OutputMode::Pretty => {
-            let line = "─".repeat(60);
             format!(
-                "{BOLD}{BLUE}◆ Command:{RESET} {BOLD}{text}{RESET}\n{DARK_GRAY}{line}{RESET}\n{BOLD}{CYAN}◇ Result:{RESET}"
+                "{BOLD}{BLUE}◆ Command:{RESET} {BOLD}{text}{RESET}\n__SEPARATOR__\n{BOLD}{CYAN}◇ Result:{RESET}"
             )
         }
-        OutputMode::Plain => text.to_string(),
+        OutputMode::Plain => format!("{text}\n__SEPARATOR__"),
     }
 }
 
@@ -849,7 +1001,8 @@ mod tests {
     #[test]
     fn plain_init_contains_key_fields() {
         let out = render_init(OutputMode::Plain, "/tmp/test.duckdb");
-        assert!(out.contains("Initialized schema at /tmp/test.duckdb"));
+        assert!(out.contains("Initialized schema at"));
+        assert!(out.contains("/tmp/test.duckdb"));
         assert!(out.starts_with('+'));
         assert!(out.contains('|'));
     }
@@ -1041,5 +1194,30 @@ mod tests {
         let out = render_error(OutputMode::Plain, "refinery-node", "boom");
         assert!(out.contains("error: boom"));
         assert!(out.starts_with('+'));
+    }
+
+    #[test]
+    fn wraps_long_lines_inside_requested_width() {
+        let wrapped = wrap_ansi_line("this is a very long line that should wrap cleanly", 12);
+        assert!(wrapped.len() > 1);
+        assert!(wrapped.iter().all(|line| display_len_ignore_ansi(line) <= 12));
+    }
+
+    #[test]
+    fn framed_output_respects_terminal_columns() {
+        let previous = env::var("COLUMNS").ok();
+        unsafe { env::set_var("COLUMNS", "40") };
+        let out = render_init(
+            OutputMode::Pretty,
+            "/a/very/long/path/that/should/not/blow/out/the/right/border.duckdb",
+        );
+        if let Some(v) = previous {
+            unsafe { env::set_var("COLUMNS", v) };
+        } else {
+            unsafe { env::remove_var("COLUMNS") };
+        }
+
+        let visible_widths: Vec<usize> = out.lines().map(display_len_ignore_ansi).collect();
+        assert!(visible_widths.iter().all(|&w| w <= 40));
     }
 }
