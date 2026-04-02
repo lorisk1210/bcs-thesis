@@ -210,7 +210,7 @@ cargo run -p refinery-orchestrator --release -- query \
   --node http://127.0.0.1:50052 \
   --node http://127.0.0.1:50053 \
   --template cohort-feasibility-count \
-  --params-file examples/queries/cohort_any.json
+  --params-file examples/queries/cohort_feasibility_count/01_all_patients.json
 ```
 
 ## 12. Run the full `proof-check` comparison
@@ -220,7 +220,7 @@ If you ran `prepare`, use the prepared baseline directory:
 ```bash
 cargo run -p proof-check --release -- compare \
   --template cohort-feasibility-count \
-  --params-file examples/queries/cohort_any.json \
+  --params-file examples/queries/cohort_feasibility_count/01_all_patients.json \
   --node http://127.0.0.1:50051 \
   --node http://127.0.0.1:50052 \
   --node http://127.0.0.1:50053 \
@@ -234,7 +234,7 @@ If you did not run `prepare`, compare directly against the raw split folders:
 ```bash
 cargo run -p proof-check --release -- compare \
   --template cohort-feasibility-count \
-  --params-file examples/queries/cohort_any.json \
+  --params-file examples/queries/cohort_feasibility_count/01_all_patients.json \
   --node http://127.0.0.1:50051 \
   --node http://127.0.0.1:50052 \
   --node http://127.0.0.1:50053 \

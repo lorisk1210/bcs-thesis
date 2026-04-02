@@ -1,0 +1,11 @@
+{
+  "exposed_medication_code": "106892",
+  "control_medication_code": "314076",
+  "outcome_observation_code": "29463-7",
+  "min_age": 20,
+  "max_age": 84,
+  "gender": "female",
+  "condition_codes": [
+    "314529007"
+  ]
+}
