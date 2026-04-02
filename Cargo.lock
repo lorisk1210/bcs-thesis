@@ -587,6 +587,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3a822ea5bc7590f9d40f1ba12c0dc3c2760f3482c6984db1573ad11031420831"
 
 [[package]]
+name = "cli-render"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+]
+
+[[package]]
 name = "colorchoice"
 version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1688,6 +1695,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c08d65885ee38876c4f86fa503fb49d7b507c2b62552df7c70b2fce627e06381"
 
 [[package]]
+name = "organize"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "cli-render",
+]
+
+[[package]]
 name = "percent-encoding"
 version = "2.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1802,6 +1818,23 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8fd00f0bb2e90d81d1044c2b32617f68fcb9fa3bb7640c23e9c748e53fb30934"
 dependencies = [
  "unicode-ident",
+]
+
+[[package]]
+name = "proof-check"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "clap",
+ "cli-render",
+ "duckdb",
+ "refinery-node",
+ "refinery-orchestrator",
+ "refinery-protocol",
+ "serde",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]
@@ -2085,43 +2118,19 @@ dependencies = [
 ]
 
 [[package]]
-name = "refinery-check"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "chrono",
- "clap",
- "duckdb",
- "refinery-cli",
- "refinery-node",
- "refinery-orchestrator",
- "refinery-protocol",
- "serde",
- "serde_json",
- "tokio",
-]
-
-[[package]]
-name = "refinery-cli"
-version = "0.1.0"
-dependencies = [
- "serde_json",
-]
-
-[[package]]
 name = "refinery-node"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "chrono",
  "clap",
+ "cli-render",
  "crypto_box",
  "dotenvy",
  "duckdb",
  "hex",
  "hmac",
  "rand 0.8.5",
- "refinery-cli",
  "refinery-protocol",
  "serde",
  "serde_json",
@@ -2139,26 +2148,17 @@ dependencies = [
  "anyhow",
  "chrono",
  "clap",
+ "cli-render",
  "dotenvy",
  "duckdb",
  "futures",
  "rand 0.8.5",
- "refinery-cli",
  "refinery-protocol",
  "serde",
  "serde_json",
  "sha2",
  "tokio",
  "tonic",
-]
-
-[[package]]
-name = "refinery-organize"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap",
- "refinery-cli",
 ]
 
 [[package]]

@@ -1,0 +1,9 @@
+[package]
+name = "organize"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+cli-render = { path = "../cli-render" }
