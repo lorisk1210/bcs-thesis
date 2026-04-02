@@ -1,0 +1,8 @@
+{
+  "medication_code": "314076",
+  "outcome_observation_code": "39156-5",
+  "subgroup": "gender",
+  "condition_codes": [
+    "314529007"
+  ]
+}

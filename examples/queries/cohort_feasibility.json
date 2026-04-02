@@ -1,7 +1,0 @@
-{
-  "min_age": 18,
-  "max_age": 85,
-  "gender": "male",
-  "condition_codes": ["44054006"],
-  "medication_codes": ["856987"]
-}

@@ -1,0 +1,10 @@
+{
+  "medication_code": "351137",
+  "outcome_observation_code": "6299-2",
+  "subgroup": "age_bucket",
+  "age_cutoffs": [
+    30,
+    50,
+    70
+  ]
+}

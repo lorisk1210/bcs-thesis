@@ -1,0 +1,11 @@
+{
+  "exposed_medication_code": "310798",
+  "control_medication_code": "308136",
+  "outcome_observation_code": "9279-1",
+  "min_age": 40,
+  "gender": "male",
+  "condition_codes": [
+    "160903007",
+    "160904001"
+  ]
+}
