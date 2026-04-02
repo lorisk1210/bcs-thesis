@@ -1,7 +1,0 @@
-[package]
-name = "refinery-cli"
-version.workspace = true
-edition.workspace = true
-
-[dependencies]
-serde_json.workspace = true

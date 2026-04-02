@@ -99,7 +99,7 @@ Run each node in a separate terminal.
 env REFINERY_SMPC_PRIVATE_KEY_HEX="$NODE_A_KEY" \
 cargo run -p refinery-node --release -- serve \
   --db data/node-a.duckdb \
-  --input-dir jsonraw/nodes/node-a \
+  --input-dir input/nodes/node-a \
   --bind 127.0.0.1:50051 \
   --node-id node-a
 ```
@@ -110,7 +110,7 @@ cargo run -p refinery-node --release -- serve \
 env REFINERY_SMPC_PRIVATE_KEY_HEX="$NODE_B_KEY" \
 cargo run -p refinery-node --release -- serve \
   --db data/node-b.duckdb \
-  --input-dir jsonraw/nodes/node-b \
+  --input-dir input/nodes/node-b \
   --bind 127.0.0.1:50052 \
   --node-id node-b
 ```
@@ -121,7 +121,7 @@ cargo run -p refinery-node --release -- serve \
 env REFINERY_SMPC_PRIVATE_KEY_HEX="$NODE_C_KEY" \
 cargo run -p refinery-node --release -- serve \
   --db data/node-c.duckdb \
-  --input-dir jsonraw/nodes/node-c \
+  --input-dir input/nodes/node-c \
   --bind 127.0.0.1:50053 \
   --node-id node-c
 ```
@@ -151,7 +151,7 @@ source .env.node-a
 set +a
 cargo run -p refinery-node --release -- serve \
   --db data/node-a.duckdb \
-  --input-dir jsonraw/nodes/node-a \
+  --input-dir input/nodes/node-a \
   --bind 127.0.0.1:50051 \
   --node-id node-a
 ```
@@ -192,4 +192,3 @@ If you want cleaner ergonomics later, the next code change would be adding expli
 
 - `refinery-node --env-file .env.node-a ...`
 - or dedicated flags for `--smpc-private-key-hex`
-
