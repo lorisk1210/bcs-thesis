@@ -118,6 +118,48 @@ fn recompute_last_space(line: &str) -> Option<(usize, usize)> {
         .last()
 }
 
+fn split_byte_at_visible_width(line: &str, max_width: usize) -> usize {
+    if max_width == 0 {
+        return 0;
+    }
+
+    let bytes = line.as_bytes();
+    let mut i = 0usize;
+    let mut visible = 0usize;
+
+    while i < bytes.len() {
+        if bytes[i] == b'\x1b' && i + 1 < bytes.len() && bytes[i + 1] == b'[' {
+            i += 2;
+            while i < bytes.len() {
+                let b = bytes[i];
+                i += 1;
+                if (0x40..=0x7e).contains(&b) {
+                    break;
+                }
+            }
+            continue;
+        }
+
+        let ch = line[i..].chars().next().unwrap_or_default();
+        let ch_len = ch.len_utf8();
+        visible += 1;
+        if visible > max_width {
+            return i;
+        }
+        i += ch_len;
+    }
+
+    line.len()
+}
+
+fn ensure_nonempty_visible_split(line: &str, split_byte: usize) -> usize {
+    if display_len_ignore_ansi(&line[..split_byte]) > 0 {
+        return split_byte;
+    }
+
+    split_byte_at_visible_width(line, 1)
+}
+
 fn wrap_ansi_line(line: &str, max_width: usize) -> Vec<String> {
     if max_width == 0 {
         return vec![String::new()];
@@ -167,7 +209,9 @@ fn wrap_ansi_line(line: &str, max_width: usize) -> Vec<String> {
         if visible > max_width {
             if let Some((split_byte, _)) = last_space {
                 let head = current[..split_byte].trim_end().to_string();
-                out.push(head);
+                if display_len_ignore_ansi(&head) > 0 {
+                    out.push(head);
+                }
 
                 let tail = current[split_byte..].trim_start().to_string();
                 current = if tail.is_empty() {
@@ -178,19 +222,10 @@ fn wrap_ansi_line(line: &str, max_width: usize) -> Vec<String> {
                 visible = display_len_ignore_ansi(&current);
                 last_space = recompute_last_space(&current);
             } else {
-                let mut split_byte = current.len();
-                let mut visible_count = 0usize;
-                for (idx, ch2) in current.char_indices() {
-                    if ch2 == '\x1b' {
-                        continue;
-                    }
-                    visible_count += 1;
-                    if visible_count > max_width {
-                        split_byte = idx;
-                        break;
-                    }
-                }
-
+                let split_byte = ensure_nonempty_visible_split(
+                    &current,
+                    split_byte_at_visible_width(&current, max_width),
+                );
                 out.push(current[..split_byte].to_string());
                 current = format!("{indent}{}", &current[split_byte..]);
                 visible = display_len_ignore_ansi(&current);
@@ -200,19 +235,10 @@ fn wrap_ansi_line(line: &str, max_width: usize) -> Vec<String> {
     }
 
     while display_len_ignore_ansi(&current) > max_width {
-        let mut split_byte = current.len();
-        let mut visible_count = 0usize;
-        for (idx, ch) in current.char_indices() {
-            if ch == '\x1b' {
-                continue;
-            }
-            visible_count += 1;
-            if visible_count > max_width {
-                split_byte = idx;
-                break;
-            }
-        }
-
+        let split_byte = ensure_nonempty_visible_split(
+            &current,
+            split_byte_at_visible_width(&current, max_width),
+        );
         out.push(current[..split_byte].to_string());
         current = format!("{indent}{}", &current[split_byte..]);
     }
@@ -1182,6 +1208,15 @@ mod tests {
         let wrapped = wrap_ansi_line("this is a very long line that should wrap cleanly", 12);
         assert!(wrapped.len() > 1);
         assert!(wrapped.iter().all(|line| display_len_ignore_ansi(line) <= 12));
+    }
+
+    #[test]
+    fn wraps_ansi_prefixed_unbroken_lines_without_blank_output() {
+        let line = key_value(OutputMode::Pretty, "payload", &"x".repeat(120));
+        let wrapped = wrap_lines_for_frame(&[&line], 20);
+        assert!(wrapped.len() > 1);
+        assert!(wrapped.iter().all(|line| display_len_ignore_ansi(line) > 0));
+        assert!(wrapped.iter().all(|line| display_len_ignore_ansi(line) <= 20));
     }
 
     #[test]
