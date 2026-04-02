@@ -1,0 +1,10 @@
+{
+  "exposed_medication_code": "1664463",
+  "control_medication_code": "314231",
+  "outcome_observation_code": "93025-5",
+  "min_age": 30,
+  "max_age": 79,
+  "condition_codes": [
+    "73595000"
+  ]
+}

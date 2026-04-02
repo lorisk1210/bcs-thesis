@@ -12,7 +12,7 @@ use crate::node::{
 use crate::orchestrator::{
     NodeStatusData, OrchestratorQueryRejectedData, OrchestratorQueryReleasedData,
 };
-use crate::organize::PartitionData;
+use crate::organize::{OrganizeQueryCreatedData, OrganizeQueryTemplatesData, PartitionData};
 use crate::*;
 
 #[test]
@@ -173,6 +173,34 @@ fn plain_partition() {
     assert!(out.contains("input_dir: /data/input"));
     assert!(out.contains("nodes_created: 3"));
     assert!(out.contains("node_0"));
+}
+
+#[test]
+fn plain_organize_query_created() {
+    let data = OrganizeQueryCreatedData {
+        template: "cohort_feasibility_count".to_string(),
+        output_dir: "examples/queries/cohort_feasibility_count".to_string(),
+        file_path: "examples/queries/cohort_feasibility_count/example.json".to_string(),
+        file_name: "example.json".to_string(),
+        param_count: 5,
+    };
+    let out = render_organize_query_created(OutputMode::Plain, &data);
+    assert!(out.contains("template: cohort_feasibility_count"));
+    assert!(out.contains("file_name: example.json"));
+    assert!(out.contains("params_written: 5"));
+}
+
+#[test]
+fn plain_organize_query_templates() {
+    let data = OrganizeQueryTemplatesData {
+        templates: vec![
+            "cohort_feasibility_count".to_string(),
+            "ddi_signal_proxy".to_string(),
+        ],
+    };
+    let out = render_organize_query_templates(OutputMode::Plain, &data);
+    assert!(out.contains("cohort_feasibility_count"));
+    assert!(out.contains("ddi_signal_proxy"));
 }
 
 #[test]
