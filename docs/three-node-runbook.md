@@ -50,24 +50,17 @@ Important:
 - do not use one shared `REFINERY_SMPC_PRIVATE_KEY_HEX` in `.env` when running multiple nodes on one machine
 - each node must get its own `REFINERY_SMPC_PRIVATE_KEY_HEX` override at process start
 
-## 3. Generate three different SMPC private keys
+## 3. Use the three SMPC example keys from `.env.example`
 
-You need one 32-byte hex key per node.
-
-Generate them:
+Use one 32-byte hex key per node (same examples as in `.env.example`):
 
 ```bash
-openssl rand -hex 32
-openssl rand -hex 32
-openssl rand -hex 32
-```
-
-Export them in your shell:
-
-```bash
-export NODE_A_KEY="replace-with-first-64-char-hex-key"
-export NODE_B_KEY="replace-with-second-64-char-hex-key"
-export NODE_C_KEY="replace-with-third-64-char-hex-key"
+# node-a
+af717e5dc57e048a45d733447b3c78383594c86bb4f42ece4926c781a93eeaa6
+# node-b
+eaaf1b46b4a42c495b198ad4ee6b0890fd618ac4b05c04956cb393686a239b58
+# node-c
+df6a8fbb6e9630f4df5ec9c92a11daec093f35bb4385b7eb26f123a39ea0c906
 ```
 
 ## 4. Recreate the split node datasets
@@ -160,7 +153,7 @@ Start each node in its own terminal.
 ### Terminal 1: node-a
 
 ```bash
-env REFINERY_SMPC_PRIVATE_KEY_HEX="$NODE_A_KEY" \
+env REFINERY_SMPC_PRIVATE_KEY_HEX="af717e5dc57e048a45d733447b3c78383594c86bb4f42ece4926c781a93eeaa6" \
 cargo run -p refinery-node --release -- serve \
   --db data/node-a.duckdb \
   --input-dir input/nodes/node-a \
@@ -171,7 +164,7 @@ cargo run -p refinery-node --release -- serve \
 ### Terminal 2: node-b
 
 ```bash
-env REFINERY_SMPC_PRIVATE_KEY_HEX="$NODE_B_KEY" \
+env REFINERY_SMPC_PRIVATE_KEY_HEX="eaaf1b46b4a42c495b198ad4ee6b0890fd618ac4b05c04956cb393686a239b58" \
 cargo run -p refinery-node --release -- serve \
   --db data/node-b.duckdb \
   --input-dir input/nodes/node-b \
@@ -182,7 +175,7 @@ cargo run -p refinery-node --release -- serve \
 ### Terminal 3: node-c
 
 ```bash
-env REFINERY_SMPC_PRIVATE_KEY_HEX="$NODE_C_KEY" \
+env REFINERY_SMPC_PRIVATE_KEY_HEX="df6a8fbb6e9630f4df5ec9c92a11daec093f35bb4385b7eb26f123a39ea0c906" \
 cargo run -p refinery-node --release -- serve \
   --db data/node-c.duckdb \
   --input-dir input/nodes/node-c \
