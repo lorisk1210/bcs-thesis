@@ -47,130 +47,349 @@ pub fn resolve_output_mode_for_tty(
 const RESET: &str = "\x1b[0m";
 const BOLD: &str = "\x1b[1m";
 const DIM: &str = "\x1b[2m";
+
 const GREEN: &str = "\x1b[32m";
 const RED: &str = "\x1b[31m";
 const YELLOW: &str = "\x1b[33m";
 const CYAN: &str = "\x1b[36m";
+const BLUE: &str = "\x1b[34m";
+const MAGENTA: &str = "\x1b[35m";
+const DARK_GRAY: &str = "\x1b[90m";
 
-fn badge(mode: OutputMode, label: &str, color: &str) -> String {
+const BG_GREEN: &str = "\x1b[42m";
+const BG_RED: &str = "\x1b[41m";
+const BG_YELLOW: &str = "\x1b[43m";
+const BG_DARK_GRAY: &str = "\x1b[100m";
+const DEFAULT_FRAME_WIDTH: usize = 100;
+const MIN_FRAME_WIDTH: usize = 32;
+
+fn display_len_ignore_ansi(s: &str) -> usize {
+    let mut count = 0;
+    let mut it = s.chars().peekable();
+    while let Some(c) = it.next() {
+        if c == '\x1b' {
+            if it.peek() == Some(&'[') {
+                it.next();
+                while let Some(cc) = it.next() {
+                    if matches!(cc, '\x40'..='\x7e') {
+                        break;
+                    }
+                }
+                continue;
+            }
+        }
+        count += 1;
+    }
+    count
+}
+
+fn terminal_columns() -> usize {
+    env::var("COLUMNS")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .filter(|&n| n >= MIN_FRAME_WIDTH)
+        .unwrap_or(DEFAULT_FRAME_WIDTH)
+}
+
+fn wrap_lines_for_frame(lines: &[&str], max_width: usize) -> Vec<String> {
+    let mut wrapped = Vec::new();
+    for line in lines {
+        if line.contains("__SEPARATOR__") {
+            wrapped.push("__SEPARATOR__".to_string());
+        } else {
+            wrapped.extend(wrap_ansi_line(line, max_width));
+        }
+    }
+    wrapped
+}
+
+fn recompute_last_space(line: &str) -> Option<(usize, usize)> {
+    line.char_indices()
+        .filter(|(_, c)| c.is_whitespace())
+        .map(|(idx, _)| {
+            let end = idx
+                + line[idx..]
+                    .chars()
+                    .next()
+                    .map(|c| c.len_utf8())
+                    .unwrap_or(0);
+            (end, display_len_ignore_ansi(&line[..end]))
+        })
+        .last()
+}
+
+fn wrap_ansi_line(line: &str, max_width: usize) -> Vec<String> {
+    if max_width == 0 {
+        return vec![String::new()];
+    }
+    if line.is_empty() {
+        return vec![String::new()];
+    }
+
+    let indent_len = line
+        .chars()
+        .take_while(|c| c.is_ascii_whitespace())
+        .count()
+        .min(max_width.saturating_sub(1));
+    let indent = " ".repeat(indent_len);
+
+    let mut out = Vec::new();
+    let mut current = String::new();
+    let mut visible = 0usize;
+    let mut last_space: Option<(usize, usize)> = None;
+    let bytes = line.as_bytes();
+    let mut i = 0usize;
+
+    while i < bytes.len() {
+        if bytes[i] == b'\x1b' && i + 1 < bytes.len() && bytes[i + 1] == b'[' {
+            let start = i;
+            i += 2;
+            while i < bytes.len() {
+                let b = bytes[i];
+                i += 1;
+                if (0x40..=0x7e).contains(&b) {
+                    break;
+                }
+            }
+            current.push_str(&line[start..i]);
+            continue;
+        }
+
+        let ch = line[i..].chars().next().unwrap_or_default();
+        let ch_len = ch.len_utf8();
+        current.push(ch);
+        visible += 1;
+        if ch.is_whitespace() {
+            last_space = Some((current.len(), visible));
+        }
+        i += ch_len;
+
+        if visible > max_width {
+            if let Some((split_byte, _)) = last_space {
+                let head = current[..split_byte].trim_end().to_string();
+                out.push(head);
+
+                let tail = current[split_byte..].trim_start().to_string();
+                current = if tail.is_empty() {
+                    indent.clone()
+                } else {
+                    format!("{indent}{tail}")
+                };
+                visible = display_len_ignore_ansi(&current);
+                last_space = recompute_last_space(&current);
+            } else {
+                let mut split_byte = current.len();
+                let mut visible_count = 0usize;
+                for (idx, ch2) in current.char_indices() {
+                    if ch2 == '\x1b' {
+                        continue;
+                    }
+                    visible_count += 1;
+                    if visible_count > max_width {
+                        split_byte = idx;
+                        break;
+                    }
+                }
+
+                out.push(current[..split_byte].to_string());
+                current = format!("{indent}{}", &current[split_byte..]);
+                visible = display_len_ignore_ansi(&current);
+                last_space = recompute_last_space(&current);
+            }
+        }
+    }
+
+    while display_len_ignore_ansi(&current) > max_width {
+        let mut split_byte = current.len();
+        let mut visible_count = 0usize;
+        for (idx, ch) in current.char_indices() {
+            if ch == '\x1b' {
+                continue;
+            }
+            visible_count += 1;
+            if visible_count > max_width {
+                split_byte = idx;
+                break;
+            }
+        }
+
+        out.push(current[..split_byte].to_string());
+        current = format!("{indent}{}", &current[split_byte..]);
+    }
+
+    out.push(current);
+    out
+}
+
+fn frame_cli_output(mode: OutputMode, inner: String) -> String {
+    if mode == OutputMode::Plain {
+        return inner;
+    }
+
+    let trimmed = inner.trim_end_matches('\n');
+    let lines: Vec<&str> = trimmed.lines().collect();
+    if lines.is_empty() {
+        return format!("{DARK_GRAY}┌──┐{RESET}\n{DARK_GRAY}│  │{RESET}\n{DARK_GRAY}└──┘{RESET}\n");
+    }
+
+    let max_content_width = terminal_columns()
+        .saturating_sub(4)
+        .max(MIN_FRAME_WIDTH.saturating_sub(4));
+    let wrapped_lines = wrap_lines_for_frame(&lines, max_content_width);
+    let max_w = wrapped_lines
+        .iter()
+        .filter(|l| !l.contains("__SEPARATOR__"))
+        .map(|l| display_len_ignore_ansi(l))
+        .max()
+        .unwrap_or(0);
+    let rule_len = max_w + 2;
+
+    let horiz = "─".repeat(rule_len);
+    let mut s = String::new();
+    let _ = writeln!(s, "{DARK_GRAY}┌{horiz}┐{RESET}");
+    for line in &wrapped_lines {
+        if line.contains("__SEPARATOR__") {
+            let _ = writeln!(s, "{DARK_GRAY}├{horiz}┤{RESET}");
+        } else {
+            let pad = max_w.saturating_sub(display_len_ignore_ansi(line));
+            let _ = writeln!(
+                s,
+                "{DARK_GRAY}│{RESET} {line}{}{DARK_GRAY} │{RESET}",
+                " ".repeat(pad),
+            );
+        }
+    }
+    let _ = writeln!(s, "{DARK_GRAY}└{horiz}┘{RESET}");
+    s
+}
+
+fn badge(mode: OutputMode, label: &str, _fg_color: &str, bg_color: &str) -> String {
     match mode {
-        OutputMode::Pretty => format!("{color}{BOLD}[{label}]{RESET}"),
+        OutputMode::Pretty => format!("{bg_color}\x1b[30m{BOLD} {label} {RESET}"),
         OutputMode::Plain => format!("[{label}]"),
     }
 }
 
 fn title(mode: OutputMode, text: &str) -> String {
     match mode {
-        OutputMode::Pretty => format!("{BOLD}{CYAN}{text}{RESET}"),
-        OutputMode::Plain => text.to_string(),
+        OutputMode::Pretty => {
+            format!(
+                "{BOLD}{BLUE}◆ Command:{RESET} {BOLD}{text}{RESET}\n__SEPARATOR__\n{BOLD}{CYAN}◇ Result:{RESET}"
+            )
+        }
+        OutputMode::Plain => format!("{text}\n__SEPARATOR__"),
     }
 }
 
 fn key_value(mode: OutputMode, key: &str, value: &str) -> String {
     match mode {
-        OutputMode::Pretty => format!("  {DIM}{key}:{RESET} {value}"),
+        OutputMode::Pretty => format!("    {DARK_GRAY}•{RESET} {DIM}{key}:{RESET} {value}"),
         OutputMode::Plain => format!("  {key}: {value}"),
     }
 }
 
 fn section_header(mode: OutputMode, text: &str) -> String {
     match mode {
-        OutputMode::Pretty => format!("\n{BOLD}{text}{RESET}"),
+        OutputMode::Pretty => format!("  {BOLD}{MAGENTA}{text}{RESET}"),
         OutputMode::Plain => format!("\n{text}"),
     }
 }
 
 fn table_row(mode: OutputMode, left: &str, right: &str, left_width: usize) -> String {
     match mode {
-        OutputMode::Pretty => format!("  {DIM}{left:<left_width$}{RESET}  {right}"),
+        OutputMode::Pretty => format!("    {DARK_GRAY}•{RESET} {DIM}{left:<left_width$}{RESET}  {right}"),
         OutputMode::Plain => format!("  {left:<left_width$}  {right}"),
     }
 }
 
 fn status_badge(mode: OutputMode, status: &str) -> String {
-    let (display, color) = match status {
-        "released" => ("RELEASED", GREEN),
-        "rejected" => ("REJECTED", RED),
-        "match" => ("MATCH", GREEN),
-        "mismatch" => ("MISMATCH", RED),
-        "unexpected_distortion" => ("UNEXPECTED DISTORTION", RED),
-        "expected_distortion" => ("EXPECTED DISTORTION", YELLOW),
-        "distortion_possible" => ("DISTORTION POSSIBLE", YELLOW),
-        "inconclusive" => ("INCONCLUSIVE", YELLOW),
-        "skipped" => ("SKIPPED", DIM),
-        "ok" => ("OK", GREEN),
-        other => (other, DIM),
+    let (display, fg, bg) = match status {
+        "released" => ("RELEASED", GREEN, BG_GREEN),
+        "rejected" => ("REJECTED", RED, BG_RED),
+        "match" => ("MATCH", GREEN, BG_GREEN),
+        "mismatch" => ("MISMATCH", RED, BG_RED),
+        "unexpected_distortion" => ("UNEXPECTED DISTORTION", RED, BG_RED),
+        "expected_distortion" => ("EXPECTED DISTORTION", YELLOW, BG_YELLOW),
+        "distortion_possible" => ("DISTORTION POSSIBLE", YELLOW, BG_YELLOW),
+        "inconclusive" => ("INCONCLUSIVE", YELLOW, BG_YELLOW),
+        "skipped" => ("SKIPPED", DIM, BG_DARK_GRAY),
+        "ok" => ("OK", GREEN, BG_GREEN),
+        other => (other, DIM, BG_DARK_GRAY),
     };
-    badge(mode, display, color)
+    badge(mode, display, fg, bg)
 }
 
 fn indent_json(mode: OutputMode, value: &Value) -> String {
     let json_str = serde_json::to_string_pretty(value).unwrap_or_else(|_| "null".to_string());
     let indented: String = json_str
         .lines()
-        .map(|line| format!("    {line}"))
+        .map(|line| format!("      {line}"))
         .collect::<Vec<_>>()
         .join("\n");
     match mode {
-        OutputMode::Pretty => format!("  {DIM}result:{RESET}\n{indented}"),
+        OutputMode::Pretty => format!("    {DARK_GRAY}•{RESET} {DIM}result:{RESET}\n{indented}"),
         OutputMode::Plain => format!("  result:\n{indented}"),
     }
 }
 
 pub fn render_error(mode: OutputMode, command_name: &str, error: &str) -> String {
-    match mode {
+    let inner = match mode {
         OutputMode::Pretty => {
             let t = title(mode, command_name);
-            let badge = badge(mode, "ERROR", RED);
-            format!("{t}\n{badge}\n{}\n", key_value(mode, "message", error))
+            let badge = badge(mode, "ERROR", RED, BG_RED);
+            format!("{t}\n\n  {badge}\n\n{}\n", key_value(mode, "message", error))
         }
         OutputMode::Plain => format!("error: {error}\n"),
-    }
+    };
+    frame_cli_output(mode, inner)
 }
 
 // ---------- node: init / normalize / materialize / run-pipeline ----------
 
 pub fn render_init(mode: OutputMode, db_path: &str) -> String {
-    match mode {
+    let inner = match mode {
         OutputMode::Pretty => {
             let t = title(mode, "refinery-node init");
             let badge = status_badge(mode, "ok");
             let kv = key_value(mode, "database", db_path);
-            format!("{t}\n{badge} Initialized schema\n{kv}\n")
+            format!("{t}\n\n  {badge} {BOLD}Initialized schema{RESET}\n\n{kv}\n")
         }
         OutputMode::Plain => format!("Initialized schema at {db_path}\n"),
-    }
+    };
+    frame_cli_output(mode, inner)
 }
 
 pub fn render_normalize(mode: OutputMode) -> String {
-    match mode {
+    let inner = match mode {
         OutputMode::Pretty => {
             let t = title(mode, "refinery-node normalize");
             let badge = status_badge(mode, "ok");
-            format!("{t}\n{badge} Normalization complete\n")
+            format!("{t}\n\n  {badge} {BOLD}Normalization complete{RESET}\n")
         }
         OutputMode::Plain => "Normalization complete\n".to_string(),
-    }
+    };
+    frame_cli_output(mode, inner)
 }
 
 pub fn render_materialize(mode: OutputMode) -> String {
-    match mode {
+    let inner = match mode {
         OutputMode::Pretty => {
             let t = title(mode, "refinery-node materialize");
             let badge = status_badge(mode, "ok");
-            format!("{t}\n{badge} Feature materialization complete\n")
+            format!("{t}\n\n  {badge} {BOLD}Feature materialization complete{RESET}\n")
         }
         OutputMode::Plain => "Feature materialization complete\n".to_string(),
-    }
+    };
+    frame_cli_output(mode, inner)
 }
 
 pub fn render_pipeline(mode: OutputMode, ingest: &IngestReportData) -> String {
-    match mode {
+    let inner = match mode {
         OutputMode::Pretty => {
             let t = title(mode, "refinery-node run-pipeline");
             let badge = status_badge(mode, "ok");
             let ingest_body = render_ingest_body(mode, ingest);
-            format!("{t}\n{ingest_body}{badge} Pipeline run complete\n")
+            format!("{t}\n\n  {badge} {BOLD}Pipeline run complete{RESET}\n\n{ingest_body}")
         }
         OutputMode::Plain => {
             let mut out = render_ingest_body(mode, ingest);
@@ -179,7 +398,8 @@ pub fn render_pipeline(mode: OutputMode, ingest: &IngestReportData) -> String {
             out.push_str("Pipeline run complete\n");
             out
         }
-    }
+    };
+    frame_cli_output(mode, inner)
 }
 
 // ---------- node: ingest ----------
@@ -215,6 +435,7 @@ fn render_ingest_body(mode: OutputMode, r: &IngestReportData) -> String {
     let _ = writeln!(out, "{}", key_value(mode, "errors_logged", &r.errors_logged.to_string()));
 
     if !r.resource_counts.is_empty() {
+        let _ = writeln!(out, "");
         let _ = writeln!(out, "{}", section_header(mode, "Resource counts"));
         let max_key = r.resource_counts.keys().map(|k| k.len()).max().unwrap_or(0);
         for (resource, count) in &r.resource_counts {
@@ -225,14 +446,16 @@ fn render_ingest_body(mode: OutputMode, r: &IngestReportData) -> String {
 }
 
 pub fn render_ingest(mode: OutputMode, r: &IngestReportData) -> String {
-    match mode {
+    let inner = match mode {
         OutputMode::Pretty => {
             let t = title(mode, "refinery-node ingest");
+            let badge = status_badge(mode, "ok");
             let body = render_ingest_body(mode, r);
-            format!("{t}\n{body}")
+            format!("{t}\n\n  {badge} {BOLD}Ingest complete{RESET}\n\n{body}")
         }
         OutputMode::Plain => render_ingest_body(mode, r),
-    }
+    };
+    frame_cli_output(mode, inner)
 }
 
 // ---------- node: query ----------
@@ -254,11 +477,11 @@ pub struct NodeQueryRejectedData {
 }
 
 pub fn render_node_query_released(mode: OutputMode, d: &NodeQueryReleasedData) -> String {
-    match mode {
+    let inner = match mode {
         OutputMode::Pretty => {
             let t = title(mode, "refinery-node query");
             let badge = status_badge(mode, "released");
-            let mut out = format!("{t}\n{badge}\n");
+            let mut out = format!("{t}\n\n  {badge}\n\n");
             let _ = writeln!(out, "{}", key_value(mode, "release_id", &d.release_id));
             let _ = writeln!(out, "{}", key_value(mode, "template", &d.template));
             let _ = writeln!(out, "{}", key_value(mode, "cohort_size", &d.cohort_size.to_string()));
@@ -276,15 +499,16 @@ pub fn render_node_query_released(mode: OutputMode, d: &NodeQueryReleasedData) -
             d.budget_remaining,
             d.noisy_result
         ),
-    }
+    };
+    frame_cli_output(mode, inner)
 }
 
 pub fn render_node_query_rejected(mode: OutputMode, d: &NodeQueryRejectedData) -> String {
-    match mode {
+    let inner = match mode {
         OutputMode::Pretty => {
             let t = title(mode, "refinery-node query");
             let badge = status_badge(mode, "rejected");
-            let mut out = format!("{t}\n{badge}\n");
+            let mut out = format!("{t}\n\n  {badge}\n\n");
             let _ = writeln!(out, "{}", key_value(mode, "release_id", &d.release_id));
             let _ = writeln!(out, "{}", key_value(mode, "reason", &d.reason));
             let _ = writeln!(out, "{}", key_value(mode, "budget_spent", &format!("{:.4}", d.budget_spent)));
@@ -298,7 +522,8 @@ pub fn render_node_query_rejected(mode: OutputMode, d: &NodeQueryRejectedData) -
             d.budget_spent,
             d.budget_remaining
         ),
-    }
+    };
+    frame_cli_output(mode, inner)
 }
 
 // ---------- node: inspect ----------
@@ -309,19 +534,22 @@ pub struct InspectTableData {
 }
 
 pub fn render_inspect(mode: OutputMode, tables: &[InspectTableData]) -> String {
-    match mode {
+    let inner = match mode {
         OutputMode::Pretty => {
             let t = title(mode, "refinery-node inspect");
-            let mut out = format!("{t}\n");
-            for table in tables {
-                let _ = writeln!(out, "{}", section_header(mode, &format!("top_{}", table.table_name)));
+            let mut out = format!("{t}\n\n");
+            for (i, table) in tables.iter().enumerate() {
+                let _ = writeln!(out, "{}", section_header(mode, &format!("Table: {}", table.table_name)));
                 if table.rows.is_empty() {
-                    let _ = writeln!(out, "  (no data)");
-                    continue;
+                    let _ = writeln!(out, "    {DARK_GRAY}(no data){RESET}");
+                } else {
+                    let max_code = table.rows.iter().map(|(c, _)| c.len()).max().unwrap_or(0);
+                    for (code, count) in &table.rows {
+                        let _ = writeln!(out, "{}", table_row(mode, code, &count.to_string(), max_code));
+                    }
                 }
-                let max_code = table.rows.iter().map(|(c, _)| c.len()).max().unwrap_or(0);
-                for (code, count) in &table.rows {
-                    let _ = writeln!(out, "{}", table_row(mode, code, &count.to_string(), max_code));
+                if i < tables.len() - 1 {
+                    let _ = writeln!(out, "");
                 }
             }
             out
@@ -336,7 +564,8 @@ pub fn render_inspect(mode: OutputMode, tables: &[InspectTableData]) -> String {
             }
             out
         }
-    }
+    };
+    frame_cli_output(mode, inner)
 }
 
 // ---------- orchestrator: query ----------
@@ -355,11 +584,11 @@ pub struct OrchestratorQueryRejectedData {
 }
 
 pub fn render_orchestrator_query_released(mode: OutputMode, d: &OrchestratorQueryReleasedData) -> String {
-    match mode {
+    let inner = match mode {
         OutputMode::Pretty => {
             let t = title(mode, "refinery-orchestrator query");
             let badge = status_badge(mode, "released");
-            let mut out = format!("{t}\n{badge}\n");
+            let mut out = format!("{t}\n\n  {badge}\n\n");
             let _ = writeln!(out, "{}", key_value(mode, "job_id", &d.job_id));
             let _ = writeln!(out, "{}", key_value(mode, "template", &d.template));
             let _ = writeln!(out, "{}", key_value(mode, "participating_nodes", &d.participating_nodes.to_string()));
@@ -375,15 +604,16 @@ pub fn render_orchestrator_query_released(mode: OutputMode, d: &OrchestratorQuer
             d.cohort_size,
             d.noisy_result
         ),
-    }
+    };
+    frame_cli_output(mode, inner)
 }
 
 pub fn render_orchestrator_query_rejected(mode: OutputMode, d: &OrchestratorQueryRejectedData) -> String {
-    match mode {
+    let inner = match mode {
         OutputMode::Pretty => {
             let t = title(mode, "refinery-orchestrator query");
             let badge = status_badge(mode, "rejected");
-            let mut out = format!("{t}\n{badge}\n");
+            let mut out = format!("{t}\n\n  {badge}\n\n");
             let _ = writeln!(out, "{}", key_value(mode, "job_id", &d.job_id));
             let _ = writeln!(out, "{}", key_value(mode, "reason", &d.reason));
             out
@@ -393,7 +623,8 @@ pub fn render_orchestrator_query_rejected(mode: OutputMode, d: &OrchestratorQuer
             d.job_id,
             d.reason
         ),
-    }
+    };
+    frame_cli_output(mode, inner)
 }
 
 // ---------- orchestrator: status ----------
@@ -409,18 +640,22 @@ pub struct NodeStatusData {
 }
 
 pub fn render_orchestrator_status(mode: OutputMode, nodes: &[NodeStatusData]) -> String {
-    match mode {
+    let inner = match mode {
         OutputMode::Pretty => {
             let t = title(mode, "refinery-orchestrator status");
-            let mut out = format!("{t}\n");
-            for node in nodes {
-                let _ = writeln!(out, "{}", section_header(mode, &format!("node: {}", node.endpoint)));
+            let mut out = format!("{t}\n\n");
+            for (i, node) in nodes.iter().enumerate() {
+                let _ = writeln!(out, "{}", section_header(mode, &format!("Node: {}", node.endpoint)));
                 let _ = writeln!(out, "{}", key_value(mode, "status", &node.status));
                 let _ = writeln!(out, "{}", key_value(mode, "node_id", &node.node_id));
                 let _ = writeln!(out, "{}", key_value(mode, "protocol_version", &node.protocol_version));
                 let _ = writeln!(out, "{}", key_value(mode, "supported_templates", &node.supported_templates.join(", ")));
                 let _ = writeln!(out, "{}", key_value(mode, "supported_smpc_protocols", &node.supported_smpc_protocols.join(", ")));
                 let _ = writeln!(out, "{}", key_value(mode, "smpc_key_fingerprint", &node.smpc_key_fingerprint));
+                
+                if i < nodes.len() - 1 {
+                    let _ = writeln!(out, "");
+                }
             }
             out
         }
@@ -445,7 +680,8 @@ pub fn render_orchestrator_status(mode: OutputMode, nodes: &[NodeStatusData]) ->
             }
             out
         }
-    }
+    };
+    frame_cli_output(mode, inner)
 }
 
 // ---------- organize: partition ----------
@@ -459,16 +695,17 @@ pub struct PartitionData {
 }
 
 pub fn render_partition(mode: OutputMode, d: &PartitionData) -> String {
-    match mode {
+    let inner = match mode {
         OutputMode::Pretty => {
             let t = title(mode, "refinery-organize partition");
-            let mut out = format!("{t}\n");
+            let mut out = format!("{t}\n\n");
             let _ = writeln!(out, "{}", key_value(mode, "source_dir", &d.source_dir));
             let _ = writeln!(out, "{}", key_value(mode, "nodes_dir", &d.nodes_dir));
             let _ = writeln!(out, "{}", key_value(mode, "files_scanned", &d.files_scanned.to_string()));
             let _ = writeln!(out, "{}", key_value(mode, "nodes_created", &d.node_count.to_string()));
 
             if !d.files_per_node.is_empty() {
+                let _ = writeln!(out, "");
                 let _ = writeln!(out, "{}", section_header(mode, "File distribution"));
                 let max_name = d.files_per_node.keys().map(|k| k.len()).max().unwrap_or(0);
                 for (node, count) in &d.files_per_node {
@@ -488,7 +725,8 @@ pub fn render_partition(mode: OutputMode, d: &PartitionData) -> String {
             }
             out
         }
-    }
+    };
+    frame_cli_output(mode, inner)
 }
 
 // ---------- check: text reports ----------
@@ -550,7 +788,7 @@ pub struct CheckNodeReport {
 }
 
 pub fn render_check_prepare_report(mode: OutputMode, r: &CheckPrepareReportData) -> String {
-    if mode == OutputMode::Plain {
+    let inner = if mode == OutputMode::Plain {
         let mut out = String::new();
         let _ = writeln!(out, "prepared_dir: {}", r.prepared_dir);
         let _ = writeln!(out, "as_of_date: {}", r.as_of_date);
@@ -561,28 +799,31 @@ pub fn render_check_prepare_report(mode: OutputMode, r: &CheckPrepareReportData)
             let _ = writeln!(out, "    coarsened_db: {}", node.coarsened_db_path);
             let _ = writeln!(out, "    exact_db: {}", node.exact_db_path);
         }
-        return out;
-    }
+        out
+    } else {
+        let t = title(mode, "refinery-check prepare");
+        let mut out = format!("{t}\n\n");
+        let _ = writeln!(out, "{}", key_value(mode, "prepared_dir", &r.prepared_dir));
+        let _ = writeln!(out, "{}", key_value(mode, "as_of_date", &r.as_of_date));
 
-    let t = title(mode, "refinery-check prepare");
-    let mut out = format!("{t}\n");
-    let _ = writeln!(out, "{}", key_value(mode, "prepared_dir", &r.prepared_dir));
-    let _ = writeln!(out, "{}", key_value(mode, "as_of_date", &r.as_of_date));
-
-    if !r.nodes.is_empty() {
-        let _ = writeln!(out, "{}", section_header(mode, "Nodes"));
-        for node in &r.nodes {
-            let _ = writeln!(out, "{}", section_header(mode, &format!("  {}", node.node_id)));
-            let _ = writeln!(out, "{}", key_value(mode, "    raw_input_dir", &node.raw_input_dir));
-            let _ = writeln!(out, "{}", key_value(mode, "    coarsened_db", &node.coarsened_db_path));
-            let _ = writeln!(out, "{}", key_value(mode, "    exact_db", &node.exact_db_path));
+        if !r.nodes.is_empty() {
+            let _ = writeln!(out, "");
+            let _ = writeln!(out, "{}", section_header(mode, "Nodes"));
+            for node in &r.nodes {
+                let _ = writeln!(out, "  {BOLD}{}{RESET}", node.node_id);
+                let _ = writeln!(out, "{}", key_value(mode, "raw_input_dir", &node.raw_input_dir));
+                let _ = writeln!(out, "{}", key_value(mode, "coarsened_db", &node.coarsened_db_path));
+                let _ = writeln!(out, "{}", key_value(mode, "exact_db", &node.exact_db_path));
+                let _ = writeln!(out, "");
+            }
         }
-    }
-    out
+        out
+    };
+    frame_cli_output(mode, inner)
 }
 
 pub fn render_check_compare_report(mode: OutputMode, r: &CheckCompareReportData) -> String {
-    if mode == OutputMode::Plain {
+    let inner = if mode == OutputMode::Plain {
         let mut out = String::new();
         let _ = writeln!(out, "template: {}", r.template);
         let _ = writeln!(out, "mode: {}", r.mode);
@@ -610,40 +851,43 @@ pub fn render_check_compare_report(mode: OutputMode, r: &CheckCompareReportData)
         for section in &r.sections {
             out.push_str(&render_check_section(mode, section));
         }
-        return out;
-    }
-
-    let t = title(mode, "refinery-check compare");
-    let mut out = format!("{t}\n");
-    let _ = writeln!(out, "{}", key_value(mode, "template", &r.template));
-    let _ = writeln!(out, "{}", key_value(mode, "mode", &r.mode));
-    let _ = writeln!(out, "{}", key_value(mode, "as_of_date", &r.as_of_date));
-    let _ = writeln!(out, "{}", key_value(mode, "clip", &format!("[{:.4}, {:.4}]", r.clip_min, r.clip_max)));
-    if let Some(dp_seed) = r.dp_seed {
-        let _ = writeln!(out, "{}", key_value(mode, "dp_seed", &dp_seed.to_string()));
-    }
-    if let Some(epsilon) = r.epsilon {
-        let _ = writeln!(out, "{}", key_value(mode, "epsilon", &format!("{epsilon:.4}")));
-    }
-    if let Some(min_cohort) = r.min_cohort {
-        let _ = writeln!(out, "{}", key_value(mode, "min_cohort", &min_cohort.to_string()));
-    }
-
-    if !r.nodes.is_empty() {
-        let _ = writeln!(out, "{}", section_header(mode, "Nodes"));
-        for node in &r.nodes {
-            let _ = writeln!(
-                out,
-                "  {} => {} ({})",
-                node.node_id, node.endpoint, node.raw_input_dir
-            );
+        out
+    } else {
+        let t = title(mode, "refinery-check compare");
+        let mut out = format!("{t}\n\n");
+        let _ = writeln!(out, "{}", key_value(mode, "template", &r.template));
+        let _ = writeln!(out, "{}", key_value(mode, "mode", &r.mode));
+        let _ = writeln!(out, "{}", key_value(mode, "as_of_date", &r.as_of_date));
+        let _ = writeln!(out, "{}", key_value(mode, "clip", &format!("[{:.4}, {:.4}]", r.clip_min, r.clip_max)));
+        if let Some(dp_seed) = r.dp_seed {
+            let _ = writeln!(out, "{}", key_value(mode, "dp_seed", &dp_seed.to_string()));
         }
-    }
+        if let Some(epsilon) = r.epsilon {
+            let _ = writeln!(out, "{}", key_value(mode, "epsilon", &format!("{epsilon:.4}")));
+        }
+        if let Some(min_cohort) = r.min_cohort {
+            let _ = writeln!(out, "{}", key_value(mode, "min_cohort", &min_cohort.to_string()));
+        }
 
-    for section in &r.sections {
-        out.push_str(&render_check_section(mode, section));
-    }
-    out
+        if !r.nodes.is_empty() {
+            let _ = writeln!(out, "");
+            let _ = writeln!(out, "{}", section_header(mode, "Nodes"));
+            for node in &r.nodes {
+                let _ = writeln!(
+                    out,
+                    "    {DARK_GRAY}•{RESET} {BOLD}{}{RESET} {DIM}=>{RESET} {} {DIM}({}){RESET}",
+                    node.node_id, node.endpoint, node.raw_input_dir
+                );
+            }
+        }
+
+        for section in &r.sections {
+            let _ = writeln!(out, "");
+            out.push_str(&render_check_section(mode, section));
+        }
+        out
+    };
+    frame_cli_output(mode, inner)
 }
 
 fn render_check_section(mode: OutputMode, s: &CheckSectionData) -> String {
@@ -680,7 +924,9 @@ fn render_check_section(mode: OutputMode, s: &CheckSectionData) -> String {
     let mut out = String::new();
     let _ = writeln!(out, "{}", section_header(mode, &s.name));
     let badge = status_badge(mode, &s.status);
-    let _ = writeln!(out, "  status: {badge}");
+    let _ = writeln!(out, "    {badge}");
+    let _ = writeln!(out, ""); // spacer
+    
     if let Some(ref expectation) = s.expectation {
         let _ = writeln!(out, "{}", key_value(mode, "expectation", expectation));
     }
@@ -693,21 +939,22 @@ fn render_check_section(mode: OutputMode, s: &CheckSectionData) -> String {
         let _ = writeln!(out, "{}", key_value(mode, &s.right_label, &json_str));
     }
     if !s.rejections.is_empty() {
-        let _ = writeln!(out, "{}", section_header(mode, "  rejections"));
+        let _ = writeln!(out, "{}", section_header(mode, "rejections"));
         for r in &s.rejections {
-            let _ = writeln!(out, "    - {} @ {}: {}", r.node_id, r.endpoint, r.reason);
+            let _ = writeln!(out, "    {DARK_GRAY}•{RESET} {} @ {}: {}", r.node_id, r.endpoint, r.reason);
         }
     }
     if !s.diffs.is_empty() {
-        let _ = writeln!(out, "{}", section_header(mode, "  diffs"));
+        let _ = writeln!(out, "{}", section_header(mode, "diffs"));
         for d in &s.diffs {
-            let _ = writeln!(out, "    - {} => left={}, right={}", d.path, d.left, d.right);
+            let _ = writeln!(out, "    {DARK_GRAY}•{RESET} {BOLD}{}{RESET} => left={}, right={}", d.path, d.left, d.right);
         }
     }
     out
 }
 
 // ---------- tests ----------
+
 
 #[cfg(test)]
 mod tests {
@@ -736,13 +983,18 @@ mod tests {
     #[test]
     fn plain_init_contains_key_fields() {
         let out = render_init(OutputMode::Plain, "/tmp/test.duckdb");
-        assert_eq!(out, "Initialized schema at /tmp/test.duckdb\n");
+        assert!(out.contains("Initialized schema at"));
+        assert!(out.contains("/tmp/test.duckdb"));
+        assert!(!out.starts_with('+'));
+        assert!(!out.contains("│"));
     }
 
     #[test]
     fn pretty_init_contains_ansi() {
         let out = render_init(OutputMode::Pretty, "/tmp/test.duckdb");
         assert!(out.contains("\x1b["));
+        assert!(out.contains('┌'));
+        assert!(out.contains('└'));
     }
 
     #[test]
@@ -923,5 +1175,30 @@ mod tests {
     fn plain_error_matches_legacy_style() {
         let out = render_error(OutputMode::Plain, "refinery-node", "boom");
         assert_eq!(out, "error: boom\n");
+    }
+
+    #[test]
+    fn wraps_long_lines_inside_requested_width() {
+        let wrapped = wrap_ansi_line("this is a very long line that should wrap cleanly", 12);
+        assert!(wrapped.len() > 1);
+        assert!(wrapped.iter().all(|line| display_len_ignore_ansi(line) <= 12));
+    }
+
+    #[test]
+    fn framed_output_respects_terminal_columns() {
+        let previous = env::var("COLUMNS").ok();
+        unsafe { env::set_var("COLUMNS", "40") };
+        let out = render_init(
+            OutputMode::Pretty,
+            "/a/very/long/path/that/should/not/blow/out/the/right/border.duckdb",
+        );
+        if let Some(v) = previous {
+            unsafe { env::set_var("COLUMNS", v) };
+        } else {
+            unsafe { env::remove_var("COLUMNS") };
+        }
+
+        let visible_widths: Vec<usize> = out.lines().map(display_len_ignore_ansi).collect();
+        assert!(visible_widths.iter().all(|&w| w <= 40));
     }
 }
