@@ -1,20 +1,13 @@
-// src/db.rs
-// Durable orchestrator ledger for federated job metadata and releases.
-
-// Standard library imports
 use std::fs;
 use std::path::Path;
 
-// Third-party library imports
 use anyhow::Result;
 use duckdb::{Connection, params};
-
-// Local module imports
-use crate::dp_release::GlobalReleaseResult;
-use crate::jobs::FederatedJob;
 use refinery_protocol::QueryResult;
 
-// Opens the orchestrator ledger database and initializes the schema.
+use crate::dp_release::GlobalReleaseResult;
+use crate::jobs::FederatedJob;
+
 pub fn open_ledger(path: &Path) -> Result<Connection> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
@@ -108,7 +101,6 @@ fn migrate_legacy_job_ledger(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-// Records the start of a federated job before network execution begins.
 pub fn record_job_started(
     conn: &Connection,
     job: &FederatedJob,
@@ -129,6 +121,65 @@ pub fn record_job_started(
             job_context_hash.unwrap_or(""),
         ],
     )?;
+    Ok(())
+}
+
+pub fn record_job_finished(
+    conn: &Connection,
+    job_id: &str,
+    status: &str,
+    accepted_nodes: usize,
+    reason: &str,
+    aggregated_result: Option<&QueryResult>,
+    release: Option<&GlobalReleaseResult>,
+) -> Result<()> {
+    let aggregated_result_json = aggregated_result.map(serde_json::to_string).transpose()?;
+    let noisy_result_json = release
+        .and_then(|release| release.noisy_result.as_ref())
+        .map(serde_json::to_string)
+        .transpose()?;
+    let cohort_size = aggregated_result.map(|result| result.cohort_size as i64).unwrap_or(0);
+
+    conn.execute(
+        r#"
+        UPDATE federated_job_ledger
+        SET status = ?2,
+            accepted_nodes = ?3,
+            reason = ?4,
+            aggregated_result_json = ?5,
+            noisy_result_json = ?6,
+            cohort_size = ?7,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE job_id = ?1
+        "#,
+        params![
+            job_id,
+            status,
+            accepted_nodes as i64,
+            reason,
+            aggregated_result_json,
+            noisy_result_json,
+            cohort_size,
+        ],
+    )?;
+
+    if let Some(release) = release {
+        conn.execute(
+            r#"
+            INSERT INTO federated_release_ledger (
+                job_id, accepted, reason, noisy_result_json, cohort_size
+            ) VALUES (?1, ?2, ?3, ?4, ?5)
+            "#,
+            params![
+                job_id,
+                release.accepted,
+                release.reason,
+                noisy_result_json,
+                cohort_size,
+            ],
+        )?;
+    }
+
     Ok(())
 }
 
@@ -195,64 +246,4 @@ mod tests {
         drop(conn);
         let _ = fs::remove_file(&db_path);
     }
-}
-
-// Records the terminal state of a federated job and optionally its release.
-pub fn record_job_finished(
-    conn: &Connection,
-    job_id: &str,
-    status: &str,
-    accepted_nodes: usize,
-    reason: &str,
-    aggregated_result: Option<&QueryResult>,
-    release: Option<&GlobalReleaseResult>,
-) -> Result<()> {
-    let aggregated_result_json = aggregated_result.map(serde_json::to_string).transpose()?;
-    let noisy_result_json = release
-        .and_then(|release| release.noisy_result.as_ref())
-        .map(serde_json::to_string)
-        .transpose()?;
-    let cohort_size = aggregated_result.map(|result| result.cohort_size as i64).unwrap_or(0);
-
-    conn.execute(
-        r#"
-        UPDATE federated_job_ledger
-        SET status = ?2,
-            accepted_nodes = ?3,
-            reason = ?4,
-            aggregated_result_json = ?5,
-            noisy_result_json = ?6,
-            cohort_size = ?7,
-            updated_at = CURRENT_TIMESTAMP
-        WHERE job_id = ?1
-        "#,
-        params![
-            job_id,
-            status,
-            accepted_nodes as i64,
-            reason,
-            aggregated_result_json,
-            noisy_result_json,
-            cohort_size,
-        ],
-    )?;
-
-    if let Some(release) = release {
-        conn.execute(
-            r#"
-            INSERT INTO federated_release_ledger (
-                job_id, accepted, reason, noisy_result_json, cohort_size
-            ) VALUES (?1, ?2, ?3, ?4, ?5)
-            "#,
-            params![
-                job_id,
-                release.accepted,
-                release.reason,
-                noisy_result_json,
-                cohort_size,
-            ],
-        )?;
-    }
-
-    Ok(())
 }
