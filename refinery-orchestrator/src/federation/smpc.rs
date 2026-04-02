@@ -1,10 +1,5 @@
-// src/smpc.rs
-// Orchestrator-side helpers for SMPC participant discovery and round coordination.
-
-// Standard library imports
 use std::collections::BTreeSet;
 
-// Third-party library imports
 use anyhow::{Result, anyhow};
 use futures::future::try_join_all;
 use refinery_protocol::grpc::{
@@ -15,11 +10,10 @@ use refinery_protocol::{
     compute_job_context_hash,
 };
 
-// Local module imports
-use crate::aggregate::aggregate_smpc_round_responses;
-use crate::client::{ClientTlsOptions, capabilities, run_federation_round, submit_job};
-use crate::jobs::FederatedJob;
-use crate::run_output::FederatedRunOutput;
+use super::aggregate::aggregate_smpc_round_responses;
+use super::client::{ClientTlsOptions, capabilities, run_federation_round, submit_job};
+use super::jobs::FederatedJob;
+use super::run_output::FederatedRunOutput;
 
 #[derive(Debug, Clone)]
 struct ParticipantTarget {
@@ -27,7 +21,6 @@ struct ParticipantTarget {
     manifest: ParticipantManifestEntry,
 }
 
-// Runs the full SMPC federation path after the job has been validated locally.
 pub async fn run_smpc_job(
     job: &FederatedJob,
     tls: &ClientTlsOptions,

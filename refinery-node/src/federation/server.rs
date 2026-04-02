@@ -1,33 +1,24 @@
-// src/server.rs
-// gRPC server that exposes the hospital node as a network service.
-
-// Standard library imports
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-// Third-party library imports
 use anyhow::{Context, Result};
+use refinery_protocol::QueryTemplate;
 use refinery_protocol::grpc::node_service_server::{NodeService, NodeServiceServer};
 use refinery_protocol::grpc::{
     GetCapabilitiesRequest, GetCapabilitiesResponse, GetJobStatusRequest, GetJobStatusResponse,
     HealthCheckRequest, HealthCheckResponse, RunFederationRoundRequest, RunFederationRoundResponse,
     RunPipelineRequest, RunPipelineResponse, SubmitJobRequest, SubmitJobResponse,
 };
-use refinery_protocol::QueryTemplate;
 use tokio::sync::Mutex;
 use tonic::transport::{Certificate, Identity, Server, ServerTlsConfig};
 use tonic::{Request, Response, Status};
 
-// Local module imports
+use super::jobs::{self, JobRecord, JOB_STATUS_COMPLETED, JOB_STATUS_REJECTED};
+use super::smpc;
 use crate::app;
-use crate::federation_jobs::{
-    self, JobRecord, JOB_STATUS_COMPLETED, JOB_STATUS_REJECTED,
-};
-use crate::smpc;
 
-// Optional TLS settings for the node server.
 #[derive(Debug, Clone)]
 pub struct TlsConfig {
     pub cert_path: Option<PathBuf>,
@@ -35,7 +26,6 @@ pub struct TlsConfig {
     pub client_ca_cert_path: Option<PathBuf>,
 }
 
-// Runtime configuration for one hospital node service instance.
 #[derive(Debug, Clone)]
 pub struct NodeServerConfig {
     pub node_id: String,
@@ -45,7 +35,6 @@ pub struct NodeServerConfig {
     pub tls: TlsConfig,
 }
 
-// Shared server state across gRPC handlers.
 #[derive(Clone)]
 struct NodeState {
     config: NodeServerConfig,
@@ -53,13 +42,11 @@ struct NodeState {
     jobs: Arc<Mutex<HashMap<String, JobRecord>>>,
 }
 
-// gRPC service implementation for the hospital node.
 #[derive(Clone)]
 struct NodeGrpcService {
     state: NodeState,
 }
 
-// Starts the node gRPC server.
 pub async fn serve(config: NodeServerConfig) -> Result<()> {
     let addr: SocketAddr = config
         .bind_addr
@@ -182,13 +169,12 @@ impl NodeService for NodeGrpcService {
         let config = state.config.clone();
         let smpc_capability = state.smpc_capability.clone();
 
-        let (response, record) =
-            tokio::task::spawn_blocking(move || {
-                federation_jobs::execute_submit_job(&config, smpc_capability, req)
-            })
-                .await
-                .map_err(join_error)?
-                .map_err(status_from_anyhow)?;
+        let (response, record) = tokio::task::spawn_blocking(move || {
+            jobs::execute_submit_job(&config, smpc_capability, req)
+        })
+        .await
+        .map_err(join_error)?
+        .map_err(status_from_anyhow)?;
 
         self.state.jobs.lock().await.insert(job_id, record);
         Ok(Response::new(response))
@@ -200,7 +186,9 @@ impl NodeService for NodeGrpcService {
     ) -> Result<Response<GetJobStatusResponse>, Status> {
         let job_id = request.into_inner().job_id;
         let jobs = self.state.jobs.lock().await;
-        let record = jobs.get(&job_id).ok_or_else(|| Status::not_found("job not found"))?;
+        let record = jobs
+            .get(&job_id)
+            .ok_or_else(|| Status::not_found("job not found"))?;
 
         Ok(Response::new(GetJobStatusResponse {
             job_id,
@@ -225,12 +213,7 @@ impl NodeService for NodeGrpcService {
         let smpc_capability = state.smpc_capability.clone();
 
         let response = tokio::task::spawn_blocking(move || {
-            federation_jobs::execute_federation_round(
-                &config,
-                smpc_capability,
-                req,
-                record_for_round,
-            )
+            jobs::execute_federation_round(&config, smpc_capability, req, record_for_round)
         })
         .await
         .map_err(join_error)?
