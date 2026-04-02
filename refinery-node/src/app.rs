@@ -108,6 +108,34 @@ pub fn run_pipeline_with_options(
     })
 }
 
+// Runs one shared fresh-build ingest pass that produces both coarsened and exact databases.
+pub fn run_dual_pipeline_with_options(
+    coarsened_db_path: &Path,
+    exact_db_path: &Path,
+    input_dir: &Path,
+    max_files: Option<usize>,
+    as_of_date: NaiveDate,
+) -> Result<()> {
+    let node_secret = config::load_node_secret()?;
+    let mut coarsened_conn = open_initialized_connection(coarsened_db_path)?;
+    let mut exact_conn = open_initialized_connection(exact_db_path)?;
+
+    ingest::run_dual_ingest(
+        &mut coarsened_conn,
+        &mut exact_conn,
+        input_dir,
+        &node_secret,
+        max_files,
+    )?;
+
+    normalize::run_normalize(&coarsened_conn)?;
+    normalize::run_normalize(&exact_conn)?;
+    materialize::run_materialize_as_of(&coarsened_conn, as_of_date)?;
+    materialize::run_materialize_as_of(&exact_conn, as_of_date)?;
+
+    Ok(())
+}
+
 // Loads a JSON params file used by query execution.
 // @param: params_file - Path to the JSON parameter file
 // @return: Result<Value> - Parsed JSON parameter payload
