@@ -2177,7 +2177,6 @@ dependencies = [
  "sha2",
  "tonic",
  "tonic-build",
- "zeroize",
 ]
 
 [[package]]
