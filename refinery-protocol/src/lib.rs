@@ -2,6 +2,7 @@
 // Shared protocol surface used by both the hospital node and the orchestrator.
 
 // Protocol modules
+pub mod dp;
 pub mod errors;
 pub mod query;
 pub mod slot_vector;
