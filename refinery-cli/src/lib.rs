@@ -222,13 +222,14 @@ fn wrap_ansi_line(line: &str, max_width: usize) -> Vec<String> {
 }
 
 fn frame_cli_output(mode: OutputMode, inner: String) -> String {
+    if mode == OutputMode::Plain {
+        return inner;
+    }
+
     let trimmed = inner.trim_end_matches('\n');
     let lines: Vec<&str> = trimmed.lines().collect();
     if lines.is_empty() {
-        return match mode {
-            OutputMode::Pretty => format!("{DARK_GRAY}┌──┐{RESET}\n{DARK_GRAY}│  │{RESET}\n{DARK_GRAY}└──┘{RESET}\n"),
-            OutputMode::Plain => "+--+\n|  |\n+--+\n".to_string(),
-        };
+        return format!("{DARK_GRAY}┌──┐{RESET}\n{DARK_GRAY}│  │{RESET}\n{DARK_GRAY}└──┘{RESET}\n");
     }
 
     let max_content_width = terminal_columns()
@@ -243,42 +244,23 @@ fn frame_cli_output(mode: OutputMode, inner: String) -> String {
         .unwrap_or(0);
     let rule_len = max_w + 2;
 
-    match mode {
-        OutputMode::Pretty => {
-            let horiz = "─".repeat(rule_len);
-            let mut s = String::new();
-            let _ = writeln!(s, "{DARK_GRAY}┌{horiz}┐{RESET}");
-            for line in &wrapped_lines {
-                if line.contains("__SEPARATOR__") {
-                    let _ = writeln!(s, "{DARK_GRAY}├{horiz}┤{RESET}");
-                } else {
-                    let pad = max_w.saturating_sub(display_len_ignore_ansi(line));
-                    let _ = writeln!(
-                        s,
-                        "{DARK_GRAY}│{RESET} {line}{}{DARK_GRAY} │{RESET}",
-                        " ".repeat(pad),
-                    );
-                }
-            }
-            let _ = writeln!(s, "{DARK_GRAY}└{horiz}┘{RESET}");
-            s
-        }
-        OutputMode::Plain => {
-            let horiz = "-".repeat(rule_len);
-            let mut s = String::new();
-            let _ = writeln!(s, "+{horiz}+");
-            for line in &wrapped_lines {
-                if line.contains("__SEPARATOR__") {
-                    let _ = writeln!(s, "+{horiz}+");
-                } else {
-                    let pad = max_w.saturating_sub(display_len_ignore_ansi(line));
-                    let _ = writeln!(s, "| {}{} |", line, " ".repeat(pad));
-                }
-            }
-            let _ = writeln!(s, "+{horiz}+");
-            s
+    let horiz = "─".repeat(rule_len);
+    let mut s = String::new();
+    let _ = writeln!(s, "{DARK_GRAY}┌{horiz}┐{RESET}");
+    for line in &wrapped_lines {
+        if line.contains("__SEPARATOR__") {
+            let _ = writeln!(s, "{DARK_GRAY}├{horiz}┤{RESET}");
+        } else {
+            let pad = max_w.saturating_sub(display_len_ignore_ansi(line));
+            let _ = writeln!(
+                s,
+                "{DARK_GRAY}│{RESET} {line}{}{DARK_GRAY} │{RESET}",
+                " ".repeat(pad),
+            );
         }
     }
+    let _ = writeln!(s, "{DARK_GRAY}└{horiz}┘{RESET}");
+    s
 }
 
 fn badge(mode: OutputMode, label: &str, _fg_color: &str, bg_color: &str) -> String {
@@ -1003,8 +985,8 @@ mod tests {
         let out = render_init(OutputMode::Plain, "/tmp/test.duckdb");
         assert!(out.contains("Initialized schema at"));
         assert!(out.contains("/tmp/test.duckdb"));
-        assert!(out.starts_with('+'));
-        assert!(out.contains('|'));
+        assert!(!out.starts_with('+'));
+        assert!(!out.contains("│"));
     }
 
     #[test]
@@ -1192,8 +1174,7 @@ mod tests {
     #[test]
     fn plain_error_matches_legacy_style() {
         let out = render_error(OutputMode::Plain, "refinery-node", "boom");
-        assert!(out.contains("error: boom"));
-        assert!(out.starts_with('+'));
+        assert_eq!(out, "error: boom\n");
     }
 
     #[test]
