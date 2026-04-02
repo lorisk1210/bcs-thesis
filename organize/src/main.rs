@@ -8,10 +8,15 @@ use std::process;
 // Third-party library imports
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use cli_render::{PartitionData, render_error, render_partition, resolve_output_mode};
+use cli_render::{
+    OrganizeQueryCreatedData, OrganizeQueryTemplatesData, PartitionData, render_error,
+    render_organize_query_created, render_organize_query_templates, render_partition,
+    resolve_output_mode,
+};
+use refinery_protocol::QueryTemplate;
 
 // Local module imports
-use organize::partition_input;
+use organize::{create_query_file, list_template_specs, partition_input};
 
 // Defines the available CLI subcommands for the organizer binary.
 #[derive(Debug, Subcommand)]
@@ -22,6 +27,23 @@ enum Commands {
         #[arg(long)]
         nodes: usize,
     },
+    Query {
+        #[command(subcommand)]
+        command: QueryCommands,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum QueryCommands {
+    New {
+        #[arg(long)]
+        template: Option<QueryTemplate>,
+        #[arg(long)]
+        name: Option<String>,
+        #[arg(long)]
+        output_dir: Option<PathBuf>,
+    },
+    ListTemplates,
 }
 
 // CLI definition
@@ -69,6 +91,41 @@ fn run() -> Result<()> {
                 )
             );
         }
+        Commands::Query { command } => match command {
+            QueryCommands::New {
+                template,
+                name,
+                output_dir,
+            } => {
+                let summary = create_query_file(template, name, output_dir)?;
+                print!(
+                    "{}",
+                    render_organize_query_created(
+                        mode,
+                        &OrganizeQueryCreatedData {
+                            template: summary.template,
+                            output_dir: summary.output_dir.display().to_string(),
+                            file_path: summary.file_path.display().to_string(),
+                            file_name: summary.file_name,
+                            param_count: summary.param_count,
+                        },
+                    )
+                );
+            }
+            QueryCommands::ListTemplates => {
+                let templates = list_template_specs()
+                    .iter()
+                    .map(|spec| spec.template.as_str().to_string())
+                    .collect::<Vec<_>>();
+                print!(
+                    "{}",
+                    render_organize_query_templates(
+                        mode,
+                        &OrganizeQueryTemplatesData { templates },
+                    )
+                );
+            }
+        },
     }
 
     Ok(())

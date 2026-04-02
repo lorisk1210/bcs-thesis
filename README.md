@@ -79,6 +79,22 @@ cargo run -p organize --release -- partition --nodes 3
 
 This recreates `input/nodes/` from scratch and distributes the top-level `input/*.json` files into `node-a`, `node-b`, `node-c`, ... folders.
 
+To create a query parameter file interactively, run:
+
+```bash
+cargo run -p organize --release -- query new
+```
+
+You can also skip template selection and provide a name up front:
+
+```bash
+cargo run -p organize --release -- query new \
+  --template cohort-feasibility-count \
+  --name baseline_run
+```
+
+By default, generated query files are written to `examples/queries/<template>/`.
+
 Each `refinery-node` instance is one isolated hospital node. For multi-hospital runs, launch separate node processes with different `--db` and `--input-dir` values that point at one generated node folder.
 
 Optional subset mode for faster tests:
@@ -96,22 +112,22 @@ Example: cohort feasibility
 
 ```bash
 cargo run -p refinery-node --release -- query \
-  --db data/node0.duckdb \
+  --db data/node-a.duckdb \
   --template cohort-feasibility-count \
-  --params-file examples/queries/cohort_feasibility.json
+  --params-file examples/queries/cohort_feasibility_count/04_female_common_condition.json
 ```
 
 Inspect top available codes for parameter selection:
 
 ```bash
-cargo run -p refinery-node --release -- inspect --db data/node0.duckdb --top 10
+cargo run -p refinery-node --release -- inspect --db data/node-a.duckdb --top 10
 ```
 
 ## Run a hospital node service
 
 ```bash
 cargo run -p refinery-node --release -- serve \
-  --db data/node0.duckdb \
+  --db data/node-a.duckdb \
   --input-dir input/nodes/node-a \
   --bind 127.0.0.1:50051 \
   --node-id node-a
@@ -132,7 +148,7 @@ cargo run -p refinery-orchestrator --release -- query \
   --node http://127.0.0.1:50051 \
   --node http://127.0.0.1:50052 \
   --template cohort-feasibility-count \
-  --params-file examples/queries/cohort_any.json
+  --params-file examples/queries/cohort_feasibility_count/01_all_patients.json
 ```
 
 ## Query templates
@@ -145,7 +161,7 @@ cargo run -p refinery-orchestrator --release -- query \
 - `ae-incidence-signal-proxy`
 - `ddi-signal-proxy`
 
-See sample parameter files in `examples/queries/`.
+See `examples/queries/<template>/` for 10 varied sample parameter files per template.
 
 ## Privacy notes
 

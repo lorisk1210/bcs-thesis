@@ -1701,6 +1701,9 @@ dependencies = [
  "anyhow",
  "clap",
  "cli-render",
+ "rand 0.8.5",
+ "refinery-protocol",
+ "serde_json",
 ]
 
 [[package]]
