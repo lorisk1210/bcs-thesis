@@ -1,24 +1,17 @@
-// src/smpc.rs
-// Node-local helpers for SMPC capability discovery, share generation, and round validation.
-
-// Standard library imports
 use std::collections::{BTreeMap, BTreeSet};
 
-// Third-party library imports
 use anyhow::{Result, anyhow};
 use refinery_protocol::grpc::{
     RunFederationRoundRequest, RunFederationRoundResponse, SealedSharePacket, SubmitJobRequest,
 };
 use refinery_protocol::{
     LocalStatistics, PRIVATE_KEY_LENGTH, SMPC_AGGREGATE_SHARE_ROUND_NAME, SMPC_PROTOCOL_NAME,
-    SMPC_PROTOCOL_VERSION, SharePayload, decode_slot_bytes,
-    encode_slot_bytes, encrypt_share_payload, public_key_fingerprint,
-    public_key_from_private_key, sealed_packet_hash, slot_vector_hash,
-    split_additive_shares, sum_slot_vectors,
+    SMPC_PROTOCOL_VERSION, SharePayload, decode_slot_bytes, encode_slot_bytes,
+    encrypt_share_payload, public_key_fingerprint, public_key_from_private_key,
+    sealed_packet_hash, slot_vector_hash, split_additive_shares, sum_slot_vectors,
 };
 use zeroize::Zeroize;
 
-// Node-local SMPC capability loaded from configuration.
 #[derive(Debug, Clone)]
 pub struct SmpcCapability {
     pub private_key_bytes: [u8; PRIVATE_KEY_LENGTH],
@@ -27,7 +20,6 @@ pub struct SmpcCapability {
     pub min_participating_nodes: usize,
 }
 
-// Approved SMPC metadata stored for one accepted job.
 #[derive(Debug, Clone)]
 pub struct SmpcJobState {
     pub job_context_hash: String,
@@ -38,7 +30,6 @@ pub struct SmpcJobState {
     pub participant_keys: BTreeMap<String, Vec<u8>>,
 }
 
-// Loads the node's SMPC capability from environment-driven configuration.
 pub fn load_smpc_capability() -> Result<Option<SmpcCapability>> {
     let config = crate::config::load_smpc_config()?;
     let Some(private_key_bytes) = config.private_key_bytes else {
@@ -54,7 +45,6 @@ pub fn load_smpc_capability() -> Result<Option<SmpcCapability>> {
     }))
 }
 
-// Returns an explicit reject reason when the SMPC request is unsafe or malformed.
 pub fn smpc_override_rejection_reason(
     request: &SubmitJobRequest,
     node_id: &str,
@@ -89,7 +79,6 @@ pub fn smpc_override_rejection_reason(
     None
 }
 
-// Builds the encrypted share packets returned by round 1 of the protocol.
 pub fn build_share_packets(
     request: &SubmitJobRequest,
     node_id: &str,
@@ -111,11 +100,8 @@ pub fn build_share_packets(
             slot_labels: stats.slot_labels.clone(),
             slot_bytes: encode_slot_bytes(&share_vector),
         };
-        let (nonce, ciphertext) = encrypt_share_payload(
-            &smpc.private_key_bytes,
-            &participant.smpc_public_key,
-            &payload,
-        )?;
+        let (nonce, ciphertext) =
+            encrypt_share_payload(&smpc.private_key_bytes, &participant.smpc_public_key, &payload)?;
         let mut packet = SealedSharePacket {
             job_id: request.job_id.clone(),
             job_context_hash: request.job_context_hash.clone(),
@@ -136,7 +122,6 @@ pub fn build_share_packets(
     Ok(share_packets)
 }
 
-// Validates the typed round request against the stored job metadata.
 pub fn validate_round_request(
     request: &RunFederationRoundRequest,
     state: &SmpcJobState,
@@ -174,7 +159,6 @@ pub fn validate_round_request(
     None
 }
 
-// Decrypts all inbound share packets and returns this node's aggregate share.
 pub fn aggregate_inbound_share_packets(
     request: &RunFederationRoundRequest,
     state: &SmpcJobState,
@@ -191,9 +175,7 @@ pub fn aggregate_inbound_share_packets(
             return Err(anyhow!("share packet hash mismatch"));
         }
         let Some(sender_public_key) = state.participant_keys.get(&packet.sender_node_id) else {
-            return Err(anyhow!(
-                "sender node is not part of the approved manifest"
-            ));
+            return Err(anyhow!("sender node is not part of the approved manifest"));
         };
         let mut payload = refinery_protocol::decrypt_share_payload(
             &capability.private_key_bytes,
@@ -220,7 +202,6 @@ pub fn aggregate_inbound_share_packets(
     Ok((aggregate_share_bytes, vector_hash))
 }
 
-// Builds a rejected round response without leaking any share material.
 pub fn rejected_round_response(
     node_id: &str,
     request: &RunFederationRoundRequest,
@@ -316,8 +297,8 @@ fn validate_share_context(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use refinery_protocol::grpc::ParticipantManifestEntry;
     use refinery_protocol::QueryTemplate;
+    use refinery_protocol::grpc::ParticipantManifestEntry;
 
     #[test]
     fn smpc_override_rejection_requires_minimum_participants() {

@@ -5,7 +5,7 @@
 use anyhow::{Result, anyhow};
 use chrono::Utc;
 use duckdb::{Connection, Transaction, params};
-use rand::Rng;
+use refinery_protocol::dp::{apply_noise, count_noised_metrics};
 use refinery_protocol::QueryResult;
 use serde_json::Value;
 
@@ -114,7 +114,7 @@ pub fn enforce_and_release(
     }
 
     let mut noisy_result = query_result.raw_result.clone();
-    let noised_metric_count = count_noised_metrics(&noisy_result, None).max(1);
+    let noised_metric_count = count_noised_metrics(&noisy_result).max(1);
     let epsilon_per_metric = config.epsilon / noised_metric_count as f64;
 
     let value_scale = if query_result.sensitivity <= 0.0 {
@@ -123,7 +123,8 @@ pub fn enforce_and_release(
         query_result.sensitivity / epsilon_per_metric
     };
     let count_scale = 1.0 / epsilon_per_metric;
-    add_noise_to_json(&mut noisy_result, value_scale, count_scale);
+    let mut rng = rand::thread_rng();
+    apply_noise(&mut noisy_result, value_scale, count_scale, &mut rng);
 
     tx.execute(
         r#"
@@ -205,126 +206,4 @@ fn write_rejection(
         ],
     )?;
     Ok(())
-}
-
-// Adds noise to the JSON value
-// @param: value - The JSON value
-// @param: value_scale - The scale for the value
-// @param: count_scale - The scale for the count
-// @return: void
-fn add_noise_to_json(value: &mut Value, value_scale: f64, count_scale: f64) {
-    add_noise_with_key(value, value_scale, count_scale, None);
-}
-
-// Adds noise to the JSON value with a key
-// @param: value - The JSON value
-// @param: value_scale - The scale for the value
-// @param: count_scale - The scale for the count
-// @param: key - The key for the value
-// @return: void
-fn add_noise_with_key(value: &mut Value, value_scale: f64, count_scale: f64, key: Option<&str>) {
-    match value {
-        Value::Number(num) => {
-            let Some(metric_key) = key else {
-                return;
-            };
-            if !should_noise_key(metric_key) {
-                return;
-            }
-            if let Some(base) = num.as_f64() {
-                let local_scale = if is_count_like_key(metric_key) {
-                    count_scale
-                } else {
-                    value_scale
-                };
-                let mut noisy = base + sample_laplace(local_scale);
-                if is_count_like_key(metric_key) {
-                    noisy = noisy.max(0.0);
-                }
-                *value = Value::from(noisy);
-            }
-        }
-        Value::Array(items) => {
-            for item in items {
-                let inherited_key = if matches!(item, Value::Number(_)) {
-                    key
-                } else {
-                    None
-                };
-                add_noise_with_key(item, value_scale, count_scale, inherited_key);
-            }
-        }
-        Value::Object(map) => {
-            for (child_key, item) in map.iter_mut() {
-                add_noise_with_key(item, value_scale, count_scale, Some(child_key.as_str()));
-            }
-        }
-        _ => {}
-    }
-}
-
-// Checks if the key is a count like key
-// @param: key - The key to check
-// @return: bool - Returns true if the key is a count like key
-fn is_count_like_key(key: &str) -> bool {
-    key == "count"
-        || key == "n"
-        || key.starts_with("n_")
-        || key.ends_with("_count")
-}
-
-// Checks if the key should be noised
-// @param: key - The key to check
-// @return: bool - Returns true if the key should be noised
-fn should_noise_key(key: &str) -> bool {
-    is_count_like_key(key)
-        || key == "delta"
-        || key.starts_with("mean_")
-        || key.starts_with("incidence_")
-}
-
-// Counts the noised metrics
-// @param: value - The JSON value
-// @param: key - The key for the value
-// @return: usize - Returns the number of noised metrics
-fn count_noised_metrics(value: &Value, key: Option<&str>) -> usize {
-    match value {
-        Value::Number(_) => {
-            if key.is_some_and(should_noise_key) {
-                1
-            } else {
-                0
-            }
-        }
-        Value::Array(items) => items
-            .iter()
-            .map(|item| {
-                let inherited_key = if matches!(item, Value::Number(_)) {
-                    key
-                } else {
-                    None
-                };
-                count_noised_metrics(item, inherited_key)
-            })
-            .sum(),
-        Value::Object(map) => map
-            .iter()
-            .map(|(child_key, item)| count_noised_metrics(item, Some(child_key.as_str())))
-            .sum(),
-        _ => 0,
-    }
-}
-
-// Samples the Laplace distribution
-// @param: scale - The scale for the Laplace distribution
-// @return: f64 - Returns the sampled value
-fn sample_laplace(scale: f64) -> f64 {
-    if scale <= 0.0 {
-        return 0.0;
-    }
-    let mut rng = rand::thread_rng();
-    let uniform_u: f64 = rng.gen_range(f64::EPSILON..(1.0 - f64::EPSILON));
-    let centered = uniform_u - 0.5;
-    let sign = if centered >= 0.0 { 1.0 } else { -1.0 };
-    -scale * sign * (1.0 - 2.0 * centered.abs()).ln()
 }
