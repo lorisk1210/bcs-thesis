@@ -2092,12 +2092,20 @@ dependencies = [
  "chrono",
  "clap",
  "duckdb",
+ "refinery-cli",
  "refinery-node",
  "refinery-orchestrator",
  "refinery-protocol",
  "serde",
  "serde_json",
  "tokio",
+]
+
+[[package]]
+name = "refinery-cli"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
 ]
 
 [[package]]
@@ -2113,6 +2121,7 @@ dependencies = [
  "hex",
  "hmac",
  "rand 0.8.5",
+ "refinery-cli",
  "refinery-protocol",
  "serde",
  "serde_json",
@@ -2134,6 +2143,7 @@ dependencies = [
  "duckdb",
  "futures",
  "rand 0.8.5",
+ "refinery-cli",
  "refinery-protocol",
  "serde",
  "serde_json",
@@ -2148,6 +2158,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "refinery-cli",
 ]
 
 [[package]]

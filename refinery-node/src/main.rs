@@ -3,10 +3,17 @@
 
 // Standard library imports
 use std::path::PathBuf;
+use std::process;
 
 // Third-party library imports
 use anyhow::Result;
 use clap::{Parser, Subcommand};
+use refinery_cli::{
+    IngestReportData, InspectTableData, NodeQueryRejectedData, NodeQueryReleasedData,
+    render_error,
+    render_ingest, render_init, render_inspect, render_materialize, render_node_query_rejected,
+    render_node_query_released, render_normalize, render_pipeline, resolve_output_mode,
+};
 use refinery_node::app;
 use refinery_node::privacy;
 use refinery_node::query;
@@ -91,18 +98,27 @@ struct Cli {
     command: Commands,
 }
 
+#[tokio::main]
+async fn main() {
+    refinery_node::config::load_dotenv();
+    let mode = resolve_output_mode();
+    if let Err(err) = run().await {
+        eprint!("{}", render_error(mode, "refinery-node", &format!("{err:#}")));
+        process::exit(1);
+    }
+}
+
 // Main: Parses the CLI command and dispatches to the shared node application code.
 // @param: None - No parameters are required
 // @return: Result<()> - Returns an error if the command fails
-#[tokio::main]
-async fn main() -> Result<()> {
-    refinery_node::config::load_dotenv();
+async fn run() -> Result<()> {
     let cli = Cli::parse();
+    let mode = resolve_output_mode();
 
     match cli.command {
         Commands::Init { db } => {
             let _conn = app::open_initialized_connection(&db)?;
-            println!("Initialized schema at {}", db.display());
+            print!("{}", render_init(mode, &db.display().to_string()));
         }
         Commands::Ingest {
             db,
@@ -111,17 +127,17 @@ async fn main() -> Result<()> {
         } => {
             let mut conn = app::open_initialized_connection(&db)?;
             let report = app::run_ingest(&mut conn, input_dir, max_files)?;
-            print_ingest_report(&report);
+            print!("{}", render_ingest(mode, &to_ingest_data(&report)));
         }
         Commands::Normalize { db } => {
             let conn = app::open_initialized_connection(&db)?;
             refinery_node::normalize::run_normalize(&conn)?;
-            println!("Normalization complete");
+            print!("{}", render_normalize(mode));
         }
         Commands::Materialize { db } => {
             let conn = app::open_initialized_connection(&db)?;
             refinery_node::materialize::run_materialize(&conn)?;
-            println!("Feature materialization complete");
+            print!("{}", render_materialize(mode));
         }
         Commands::RunPipeline {
             db,
@@ -129,10 +145,7 @@ async fn main() -> Result<()> {
             max_files,
         } => {
             let summary = app::run_pipeline(&db, &input_dir, max_files)?;
-            print_ingest_report(&summary.ingest);
-            println!("Normalization complete");
-            println!("Feature materialization complete");
-            println!("Pipeline run complete");
+            print!("{}", render_pipeline(mode, &to_ingest_data(&summary.ingest)));
         }
         Commands::Query {
             db,
@@ -155,30 +168,53 @@ async fn main() -> Result<()> {
             )?;
 
             if release.accepted {
-                println!("release_id: {}", release.release_id);
-                println!("status: released");
-                println!("template: {}", template.as_str());
-                println!("cohort_size: {}", query_result.cohort_size);
-                println!("budget_spent: {:.4}", release.budget_spent);
-                println!("budget_remaining: {:.4}", release.budget_remaining);
-                println!(
-                    "noisy_result: {}",
-                    release.noisy_result.unwrap_or(Value::Null)
+                print!(
+                    "{}",
+                    render_node_query_released(
+                        mode,
+                        &NodeQueryReleasedData {
+                            release_id: release.release_id,
+                            template: template.as_str().to_string(),
+                            cohort_size: query_result.cohort_size,
+                            budget_spent: release.budget_spent,
+                            budget_remaining: release.budget_remaining,
+                            noisy_result: release.noisy_result.unwrap_or(Value::Null),
+                        },
+                    )
                 );
             } else {
-                println!("release_id: {}", release.release_id);
-                println!("status: rejected");
-                println!("reason: {}", release.reason);
-                println!("budget_spent: {:.4}", release.budget_spent);
-                println!("budget_remaining: {:.4}", release.budget_remaining);
+                print!(
+                    "{}",
+                    render_node_query_rejected(
+                        mode,
+                        &NodeQueryRejectedData {
+                            release_id: release.release_id,
+                            reason: release.reason,
+                            budget_spent: release.budget_spent,
+                            budget_remaining: release.budget_remaining,
+                        },
+                    )
+                );
             }
         }
         Commands::Inspect { db, top } => {
             let conn = app::open_initialized_connection(&db)?;
             app::ensure_inspect_ready(&conn)?;
-            print_top_codes(&conn, "condition_fact", "condition_code", top)?;
-            print_top_codes(&conn, "medication_fact", "medication_code", top)?;
-            print_top_codes(&conn, "observation_fact", "observation_code", top)?;
+            let tables = vec![
+                InspectTableData {
+                    table_name: "condition_fact".to_string(),
+                    rows: app::fetch_top_codes(&conn, "condition_fact", "condition_code", top)?,
+                },
+                InspectTableData {
+                    table_name: "medication_fact".to_string(),
+                    rows: app::fetch_top_codes(&conn, "medication_fact", "medication_code", top)?,
+                },
+                InspectTableData {
+                    table_name: "observation_fact".to_string(),
+                    rows: app::fetch_top_codes(&conn, "observation_fact", "observation_code", top)?,
+                },
+            ];
+            print!("{}", render_inspect(mode, &tables));
         }
         Commands::Serve {
             db,
@@ -207,35 +243,14 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-// Prints an ingestion report in the same style as the original single-node CLI.
-// @param: report - Ingestion report returned by the pipeline
-fn print_ingest_report(report: &refinery_node::ingest::IngestReport) {
-    println!("files_scanned: {}", report.files_scanned);
-    println!("files_ingested: {}", report.files_ingested);
-    println!("resources_seen: {}", report.resources_seen);
-    println!("resources_ingested: {}", report.resources_ingested);
-    println!("errors_logged: {}", report.errors_logged);
-    for (resource, count) in &report.resource_counts {
-        println!("resource_{resource}: {count}");
+// Converts an IngestReport into the presentation data struct.
+fn to_ingest_data(report: &refinery_node::ingest::IngestReport) -> IngestReportData {
+    IngestReportData {
+        files_scanned: report.files_scanned,
+        files_ingested: report.files_ingested,
+        resources_seen: report.resources_seen,
+        resources_ingested: report.resources_ingested,
+        errors_logged: report.errors_logged,
+        resource_counts: report.resource_counts.clone(),
     }
-}
-
-// Prints the top codes for one analytical table.
-// @param: conn - Database connection
-// @param: table_name - Analytical table to inspect
-// @param: code_column - Code column to aggregate
-// @param: top - Number of rows to print
-// @return: Result<()> - Error if the inspect target is unsupported
-fn print_top_codes(
-    conn: &duckdb::Connection,
-    table_name: &str,
-    code_column: &str,
-    top: usize,
-) -> Result<()> {
-    let rows = app::fetch_top_codes(conn, table_name, code_column, top)?;
-    println!("top_{table_name}:");
-    for (code, count) in rows {
-        println!("  {code}: {count}");
-    }
-    Ok(())
 }
