@@ -5,3 +5,5 @@
 /data/*.wal
 /data/*
 /jsonraw/nodes/*
+.cursor/*
+.cursor
