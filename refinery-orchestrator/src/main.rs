@@ -3,10 +3,17 @@
 
 // Standard library imports
 use std::path::{Path, PathBuf};
+use std::process;
 
 // Third-party library imports
 use anyhow::{Result, anyhow};
 use clap::{Parser, Subcommand};
+use refinery_cli::{
+    NodeStatusData, OrchestratorQueryRejectedData, OrchestratorQueryReleasedData,
+    render_error,
+    render_orchestrator_query_rejected, render_orchestrator_query_released,
+    render_orchestrator_status, resolve_output_mode,
+};
 use refinery_orchestrator::client::{ClientTlsOptions, capabilities, health_check};
 use refinery_orchestrator::config::{load_dotenv, load_privacy_config};
 use refinery_orchestrator::db::{open_ledger, record_job_finished, record_job_started};
@@ -57,9 +64,21 @@ struct Cli {
 
 // Main: Parses the CLI command and dispatches federated workflows.
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() {
     load_dotenv();
+    let mode = resolve_output_mode();
+    if let Err(err) = run().await {
+        eprint!(
+            "{}",
+            render_error(mode, "refinery-orchestrator", &format!("{err:#}"))
+        );
+        process::exit(1);
+    }
+}
+
+async fn run() -> Result<()> {
     let cli = Cli::parse();
+    let mode = resolve_output_mode();
 
     match cli.command {
         Commands::Query {
@@ -123,19 +142,30 @@ async fn main() -> Result<()> {
             )?;
 
             if release.accepted {
-                println!("job_id: {}", job.job_id);
-                println!("status: released");
-                println!("template: {}", job.template.as_str());
-                println!("participating_nodes: {}", run_output.accepted_nodes);
-                println!("cohort_size: {}", run_output.aggregated.cohort_size);
-                println!(
-                    "noisy_result: {}",
-                    release.noisy_result.unwrap_or(Value::Null)
+                print!(
+                    "{}",
+                    render_orchestrator_query_released(
+                        mode,
+                        &OrchestratorQueryReleasedData {
+                            job_id: job.job_id,
+                            template: job.template.as_str().to_string(),
+                            participating_nodes: run_output.accepted_nodes,
+                            cohort_size: run_output.aggregated.cohort_size,
+                            noisy_result: release.noisy_result.unwrap_or(Value::Null),
+                        },
+                    )
                 );
             } else {
-                println!("job_id: {}", job.job_id);
-                println!("status: rejected");
-                println!("reason: {}", release.reason);
+                print!(
+                    "{}",
+                    render_orchestrator_query_rejected(
+                        mode,
+                        &OrchestratorQueryRejectedData {
+                            job_id: job.job_id,
+                            reason: release.reason,
+                        },
+                    )
+                );
             }
         }
         Commands::Status {
@@ -150,20 +180,21 @@ async fn main() -> Result<()> {
                 ca_cert_path: ca_cert,
                 domain_name: tls_domain_name,
             };
+            let mut nodes_data = Vec::new();
             for endpoint in node {
                 let health = health_check(&endpoint, &tls).await?;
                 let caps = capabilities(&endpoint, &tls).await?;
-                println!("node: {}", endpoint);
-                println!("  status: {}", health.status);
-                println!("  node_id: {}", caps.node_id);
-                println!("  protocol_version: {}", caps.protocol_version);
-                println!("  supported_templates: {}", caps.supported_templates.join(", "));
-                println!(
-                    "  supported_smpc_protocols: {}",
-                    caps.supported_smpc_protocols.join(", ")
-                );
-                println!("  smpc_key_fingerprint: {}", caps.smpc_key_fingerprint);
+                nodes_data.push(NodeStatusData {
+                    endpoint,
+                    status: health.status,
+                    node_id: caps.node_id,
+                    protocol_version: caps.protocol_version,
+                    supported_templates: caps.supported_templates,
+                    supported_smpc_protocols: caps.supported_smpc_protocols,
+                    smpc_key_fingerprint: caps.smpc_key_fingerprint,
+                });
             }
+            print!("{}", render_orchestrator_status(mode, &nodes_data));
         }
     }
 
