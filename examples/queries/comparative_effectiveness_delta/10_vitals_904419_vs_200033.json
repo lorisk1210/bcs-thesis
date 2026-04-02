@@ -1,0 +1,10 @@
+{
+  "exposed_medication_code": "904419",
+  "control_medication_code": "200033",
+  "outcome_observation_code": "85354-9",
+  "min_age": 20,
+  "condition_codes": [
+    "66383009",
+    "741062008"
+  ]
+}
