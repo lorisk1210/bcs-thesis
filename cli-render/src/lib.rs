@@ -27,7 +27,9 @@ pub use orchestrator::{
 };
 pub use organize::{
     OrganizeQueryCreatedData, OrganizeQueryTemplatesData, PartitionData,
-    render_organize_query_created, render_organize_query_templates, render_partition,
+    render_organize_query_created, render_organize_query_prompt_intro,
+    render_organize_query_prompt_label, render_organize_query_selector,
+    render_organize_query_templates, render_partition,
 };
 
 use common::{badge, key_value, title};

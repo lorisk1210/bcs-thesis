@@ -7,6 +7,8 @@ edition.workspace = true
 anyhow.workspace = true
 clap.workspace = true
 cli-render = { path = "../cli-render" }
+crossterm = "0.28.1"
+dotenvy.workspace = true
 rand.workspace = true
 refinery-protocol = { path = "../refinery-protocol" }
 serde_json.workspace = true

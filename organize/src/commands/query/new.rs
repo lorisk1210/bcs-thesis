@@ -1,8 +1,22 @@
 use std::fs;
-use std::io::{self, Write};
+use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow, bail};
+use cli_render::{
+    OutputMode, OrganizeQueryTemplatesData, render_organize_query_prompt_intro,
+    render_organize_query_prompt_label, render_organize_query_selector,
+    render_organize_query_templates,
+};
+use crossterm::cursor::{Hide, MoveToColumn, RestorePosition, SavePosition, Show};
+use crossterm::event::{
+    Event, KeyCode, KeyEventKind, read,
+};
+use crossterm::execute;
+use crossterm::style::Print;
+use crossterm::terminal::{
+    Clear, ClearType, disable_raw_mode, enable_raw_mode,
+};
 use rand::Rng;
 use refinery_protocol::QueryTemplate;
 use serde_json::{Map, Value, json};
@@ -19,17 +33,25 @@ pub struct QueryFileSummary {
 }
 
 pub fn create_query_file(
+    mode: OutputMode,
     template: Option<QueryTemplate>,
     name: Option<String>,
     output_dir: Option<PathBuf>,
 ) -> Result<QueryFileSummary> {
     let template = match template {
         Some(template) => template,
-        None => prompt_for_template()?,
+        None => prompt_for_template(mode)?,
     };
 
+    print!(
+        "{}",
+        render_organize_query_prompt_intro(mode, Some(template.as_str()))
+    );
+
     let spec = spec_for(template);
-    let params = prompt_for_params(spec.params)?;
+    let params = prompt_for_params(mode, spec.params)?;
+    let name = resolve_name(mode, name)?;
+    let output_dir = resolve_output_dir(mode, template, output_dir)?;
     let target_dir = output_dir.unwrap_or_else(|| default_output_dir(template));
     fs::create_dir_all(&target_dir)
         .with_context(|| format!("failed to create {}", target_dir.display()))?;
@@ -50,14 +72,26 @@ pub fn create_query_file(
     })
 }
 
-fn prompt_for_template() -> Result<QueryTemplate> {
-    println!("Choose a query template:");
-    for (index, template) in QueryTemplate::supported().iter().enumerate() {
-        println!("  {}. {}", index + 1, template.as_str());
+fn prompt_for_template(mode: OutputMode) -> Result<QueryTemplate> {
+    if mode == OutputMode::Pretty && io::stdin().is_terminal() && io::stdout().is_terminal() {
+        return select_template_pretty();
     }
 
+    print!(
+        "{}",
+        render_organize_query_templates(
+            mode,
+            &OrganizeQueryTemplatesData {
+                templates: QueryTemplate::supported()
+                    .iter()
+                    .map(|template| template.as_str().to_string())
+                    .collect(),
+            },
+        )
+    );
+
     loop {
-        let input = prompt("Template number")?;
+        let input = prompt(mode, "Template number or name", None)?;
         let trimmed = input.trim();
         if trimmed.is_empty() {
             continue;
@@ -77,12 +111,90 @@ fn prompt_for_template() -> Result<QueryTemplate> {
     }
 }
 
-fn prompt_for_params(specs: &[QueryParamSpec]) -> Result<Map<String, Value>> {
+fn select_template_pretty() -> Result<QueryTemplate> {
+    let templates = QueryTemplate::supported();
+    let mut selected = 0usize;
+    let mut stdout = io::stdout();
+
+    enable_raw_mode().context("failed to enable raw mode")?;
+    execute!(stdout, SavePosition, Hide)
+        .context("failed to initialize interactive selector")?;
+
+    let result = (|| -> Result<QueryTemplate> {
+        loop {
+            render_template_selector(&mut stdout, templates, selected)?;
+
+            match read().context("failed to read terminal event")? {
+                Event::Key(key) if key.kind == KeyEventKind::Press => match key.code {
+                    KeyCode::Up => {
+                        selected = selected.saturating_sub(1);
+                    }
+                    KeyCode::Down => {
+                        selected = (selected + 1).min(templates.len().saturating_sub(1));
+                    }
+                    KeyCode::Enter => return Ok(templates[selected]),
+                    KeyCode::Char('k') => {
+                        selected = selected.saturating_sub(1);
+                    }
+                    KeyCode::Char('j') => {
+                        selected = (selected + 1).min(templates.len().saturating_sub(1));
+                    }
+                    KeyCode::Esc => bail!("template selection canceled"),
+                    _ => {}
+                },
+                _ => {}
+            }
+        }
+    })();
+
+    let cleanup_result = execute!(
+        stdout,
+        RestorePosition,
+        Clear(ClearType::FromCursorDown),
+        Show
+    )
+        .context("failed to restore terminal state");
+    let raw_mode_result = disable_raw_mode().context("failed to disable raw mode");
+
+    cleanup_result?;
+    raw_mode_result?;
+    result
+}
+
+fn render_template_selector(
+    stdout: &mut io::Stdout,
+    templates: &[QueryTemplate],
+    selected: usize,
+) -> Result<()> {
+    let rendered = render_organize_query_selector(
+        OutputMode::Pretty,
+        &templates
+            .iter()
+            .map(|template| template.as_str().to_string())
+            .collect::<Vec<_>>(),
+        selected,
+    )
+    .replace('\n', "\r\n");
+
+    execute!(
+        stdout,
+        RestorePosition,
+        MoveToColumn(0),
+        Clear(ClearType::FromCursorDown)
+    )?;
+    execute!(stdout, Print(rendered))?;
+
+    stdout.flush().context("failed to flush selector output")?;
+    Ok(())
+}
+
+fn prompt_for_params(mode: OutputMode, specs: &[QueryParamSpec]) -> Result<Map<String, Value>> {
     let mut params = Map::new();
 
     for spec in specs {
         loop {
-            let answer = prompt(spec.prompt)?;
+            let hint = spec.optional.then_some("optional");
+            let answer = prompt(mode, spec.prompt, hint)?;
             let trimmed = answer.trim();
 
             if trimmed.is_empty() {
@@ -106,6 +218,49 @@ fn prompt_for_params(specs: &[QueryParamSpec]) -> Result<Map<String, Value>> {
     }
 
     Ok(params)
+}
+
+fn resolve_name(mode: OutputMode, name: Option<String>) -> Result<Option<String>> {
+    match name {
+        Some(name) => Ok(Some(name)),
+        None => {
+            let answer = prompt(
+                mode,
+                "Query name",
+                Some("optional; empty uses <template>_<random8>.json"),
+            )?;
+            let trimmed = answer.trim();
+            if trimmed.is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some(trimmed.to_string()))
+            }
+        }
+    }
+}
+
+fn resolve_output_dir(
+    mode: OutputMode,
+    template: QueryTemplate,
+    output_dir: Option<PathBuf>,
+) -> Result<Option<PathBuf>> {
+    match output_dir {
+        Some(path) => Ok(Some(path)),
+        None => {
+            let default_dir = default_output_dir(template);
+            let answer = prompt(
+                mode,
+                "Output directory",
+                Some(&format!("optional; empty uses {}", default_dir.display())),
+            )?;
+            let trimmed = answer.trim();
+            if trimmed.is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some(PathBuf::from(trimmed)))
+            }
+        }
+    }
 }
 
 fn parse_value(spec: &QueryParamSpec, raw: &str) -> Result<Value> {
@@ -145,8 +300,8 @@ fn parse_value(spec: &QueryParamSpec, raw: &str) -> Result<Value> {
     }
 }
 
-fn prompt(label: &str) -> Result<String> {
-    print!("{label}: ");
+fn prompt(mode: OutputMode, label: &str, hint: Option<&str>) -> Result<String> {
+    print!("{}", render_organize_query_prompt_label(mode, label, hint));
     io::stdout().flush().context("failed to flush stdout")?;
 
     let mut input = String::new();
