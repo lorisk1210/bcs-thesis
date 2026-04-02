@@ -25,7 +25,10 @@ pub use orchestrator::{
     render_orchestrator_query_rejected, render_orchestrator_query_released,
     render_orchestrator_status,
 };
-pub use organize::{PartitionData, render_partition};
+pub use organize::{
+    OrganizeQueryCreatedData, OrganizeQueryTemplatesData, PartitionData,
+    render_organize_query_created, render_organize_query_templates, render_partition,
+};
 
 use common::{badge, key_value, title};
 use frame::{BG_RED, RED, frame_cli_output};

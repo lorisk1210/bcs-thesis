@@ -7,3 +7,6 @@ edition.workspace = true
 anyhow.workspace = true
 clap.workspace = true
 cli-render = { path = "../cli-render" }
+rand.workspace = true
+refinery-protocol = { path = "../refinery-protocol" }
+serde_json.workspace = true

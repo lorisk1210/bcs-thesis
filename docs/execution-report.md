@@ -65,7 +65,7 @@ cargo run -- query \
 cargo run -- query \
   --db data/node0_v2.duckdb \
   --template comparative-effectiveness-delta \
-  --params-file examples/queries/comparative_effectiveness_realistic.json \
+  --params-file examples/queries/comparative_effectiveness_delta/01_bp_adults_308136_vs_106892.json \
   --clip-min 0 --clip-max 300
 ```
 
@@ -78,7 +78,7 @@ cargo run -- query \
 cargo run -- query \
   --db data/node0_v2.duckdb \
   --template time-to-event-proxy \
-  --params-file examples/queries/time_to_event_realistic.json
+  --params-file examples/queries/time_to_event_proxy/01_one_year_308136_to_314529007.json
 ```
 
 - Status: released
