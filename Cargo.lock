@@ -2171,6 +2171,7 @@ dependencies = [
  "hex",
  "prost",
  "protoc-bin-vendored",
+ "rand 0.8.5",
  "serde",
  "serde_json",
  "sha2",
