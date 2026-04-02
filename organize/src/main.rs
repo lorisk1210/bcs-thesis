@@ -13,6 +13,7 @@ use cli_render::{
     render_organize_query_created, render_organize_query_templates, render_partition,
     resolve_output_mode,
 };
+use dotenvy::from_filename;
 use refinery_protocol::QueryTemplate;
 
 // Local module imports
@@ -57,6 +58,7 @@ struct Cli {
 }
 
 fn main() {
+    let _ = from_filename(".env");
     let mode = resolve_output_mode();
     if let Err(err) = run() {
         eprint!(
@@ -97,7 +99,7 @@ fn run() -> Result<()> {
                 name,
                 output_dir,
             } => {
-                let summary = create_query_file(template, name, output_dir)?;
+                let summary = create_query_file(mode, template, name, output_dir)?;
                 print!(
                     "{}",
                     render_organize_query_created(
