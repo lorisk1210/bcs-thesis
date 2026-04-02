@@ -1,28 +1,19 @@
-// src/federation_jobs.rs
-// Node-local federated job execution logic, separated from gRPC transport handlers.
+use std::str::FromStr;
 
-// Third-party library imports
 use anyhow::{Result, anyhow};
+use refinery_protocol::QueryTemplate;
 use refinery_protocol::grpc::{
     RunFederationRoundRequest, RunFederationRoundResponse, SubmitJobRequest, SubmitJobResponse,
 };
-use refinery_protocol::QueryTemplate;
-use std::str::FromStr;
 
-// Local module imports
-use crate::app;
-use crate::config;
-use crate::local_policy;
-use crate::query;
-use crate::server::NodeServerConfig;
-use crate::smpc::{self, SmpcJobState};
+use super::server::NodeServerConfig;
+use super::smpc::{self, SmpcJobState};
+use crate::{app, config, local_policy, query};
 
-// Minimal in-memory status for submitted jobs.
 pub(crate) const JOB_STATUS_COMPLETED: &str = "completed";
 pub(crate) const JOB_STATUS_REJECTED: &str = "rejected";
 pub(crate) const JOB_STATUS_ROUND1_READY: &str = "round1_ready";
 
-// Minimal in-memory status for submitted jobs.
 #[derive(Debug, Clone)]
 pub(crate) struct JobRecord {
     pub status: String,
@@ -31,7 +22,6 @@ pub(crate) struct JobRecord {
     pub smpc_state: Option<SmpcJobState>,
 }
 
-// Executes round-1 submission handling and returns both response and persisted job status.
 pub(crate) fn execute_submit_job(
     config: &NodeServerConfig,
     smpc_capability: Option<smpc::SmpcCapability>,
@@ -74,7 +64,6 @@ pub(crate) fn execute_submit_job(
     )
 }
 
-// Executes round-2 share aggregation handling for one accepted SMPC job.
 pub(crate) fn execute_federation_round(
     config: &NodeServerConfig,
     smpc_capability: Option<smpc::SmpcCapability>,
@@ -114,7 +103,13 @@ pub(crate) fn execute_federation_round(
         &smpc_capability,
     ) {
         Ok(result) => result,
-        Err(error) => return Ok(smpc::rejected_round_response(&config.node_id, &req, &error.to_string())),
+        Err(error) => {
+            return Ok(smpc::rejected_round_response(
+                &config.node_id,
+                &req,
+                &error.to_string(),
+            ));
+        }
     };
 
     Ok(RunFederationRoundResponse {
@@ -150,12 +145,7 @@ fn build_smpc_submit_outcome(
                 0,
                 fingerprint,
             ),
-            build_job_record(
-                JOB_STATUS_REJECTED,
-                false,
-                decision.reason,
-                None,
-            ),
+            build_job_record(JOB_STATUS_REJECTED, false, decision.reason, None),
         ));
     }
 
@@ -193,13 +183,49 @@ fn build_smpc_submit_outcome(
     };
     Ok((
         response,
-        build_job_record(
-            JOB_STATUS_ROUND1_READY,
-            true,
-            decision.reason,
-            Some(smpc_state),
-        ),
+        build_job_record(JOB_STATUS_ROUND1_READY, true, decision.reason, Some(smpc_state)),
     ))
+}
+
+fn build_job_record(
+    status: &str,
+    accepted: bool,
+    reason: String,
+    smpc_state: Option<SmpcJobState>,
+) -> JobRecord {
+    JobRecord {
+        status: status.to_string(),
+        accepted,
+        reason,
+        smpc_state,
+    }
+}
+
+fn rejected_submit_response(
+    request: &SubmitJobRequest,
+    node_id: &str,
+    template: QueryTemplate,
+    reason: String,
+    cohort_size: u64,
+    fingerprint: String,
+) -> SubmitJobResponse {
+    SubmitJobResponse {
+        job_id: request.job_id.clone(),
+        accepted: false,
+        reason,
+        template: template.as_str().to_string(),
+        cohort_size,
+        fingerprint,
+        node_id: node_id.to_string(),
+        schema_id: String::new(),
+        slot_labels: Vec::new(),
+        canonical_slots: Vec::new(),
+        share_packets: Vec::new(),
+        vector_hash: String::new(),
+        protocol_name: request.protocol_name.clone(),
+        protocol_version: request.protocol_version.clone(),
+        job_context_hash: request.job_context_hash.clone(),
+    }
 }
 
 #[cfg(test)]
@@ -213,7 +239,7 @@ mod tests {
             db_path: std::path::PathBuf::from("test.duckdb"),
             input_dir: std::path::PathBuf::from("input"),
             bind_addr: "127.0.0.1:50051".to_string(),
-            tls: crate::server::TlsConfig {
+            tls: super::super::server::TlsConfig {
                 cert_path: None,
                 key_path: None,
                 client_ca_cert_path: None,
@@ -300,46 +326,5 @@ mod tests {
             response.reason,
             "SMPC capability is not configured on this node"
         );
-    }
-}
-
-fn build_job_record(
-    status: &str,
-    accepted: bool,
-    reason: String,
-    smpc_state: Option<SmpcJobState>,
-) -> JobRecord {
-    JobRecord {
-        status: status.to_string(),
-        accepted,
-        reason,
-        smpc_state,
-    }
-}
-
-fn rejected_submit_response(
-    request: &SubmitJobRequest,
-    node_id: &str,
-    template: QueryTemplate,
-    reason: String,
-    cohort_size: u64,
-    fingerprint: String,
-) -> SubmitJobResponse {
-    SubmitJobResponse {
-        job_id: request.job_id.clone(),
-        accepted: false,
-        reason,
-        template: template.as_str().to_string(),
-        cohort_size,
-        fingerprint,
-        node_id: node_id.to_string(),
-        schema_id: String::new(),
-        slot_labels: Vec::new(),
-        canonical_slots: Vec::new(),
-        share_packets: Vec::new(),
-        vector_hash: String::new(),
-        protocol_name: request.protocol_name.clone(),
-        protocol_version: request.protocol_version.clone(),
-        job_context_hash: request.job_context_hash.clone(),
     }
 }
