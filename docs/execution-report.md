@@ -14,7 +14,7 @@ Command:
 ```bash
 cargo run -- run-pipeline \
   --db data/node0_v2.duckdb \
-  --input-dir jsonraw
+  --input-dir input
 ```
 
 Result:
@@ -92,10 +92,10 @@ cargo run -- query \
 
 ## Dataset organization
 
-- `jsonraw` is the canonical source dataset.
-- Generated node partitions belong under `jsonraw/nodes/` and can be recreated at any time.
+- `input` is the canonical source dataset.
+- Generated node partitions belong under `input/nodes/` and can be recreated at any time.
 - Rebuild partitions with:
 
 ```bash
-cargo run -p refinery-organize -- partition --nodes 3
+cargo run -p organize -- partition --nodes 3
 ```

@@ -8,7 +8,7 @@ use std::process;
 // Third-party library imports
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use refinery_cli::{
+use cli_render::{
     IngestReportData, InspectTableData, NodeQueryRejectedData, NodeQueryReleasedData,
     render_error,
     render_ingest, render_init, render_inspect, render_materialize, render_node_query_rejected,

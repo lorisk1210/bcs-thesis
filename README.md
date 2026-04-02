@@ -40,7 +40,7 @@ To build only one binary:
 
 ```bash
 cargo build -p refinery-node --release
-cargo build -p refinery-organize --release
+cargo build -p organize --release
 cargo build -p refinery-orchestrator --release
 ```
 
@@ -66,18 +66,18 @@ CLI output defaults to rich pretty formatting on interactive terminals and plain
 ```bash
 cargo run -p refinery-node --release -- run-pipeline \
   --db data/node0.duckdb \
-  --input-dir jsonraw
+  --input-dir input
 ```
 
-`jsonraw` is the ground dataset and should contain the original JSON files directly at the top level.
+`input` is the ground dataset and should contain the original JSON files directly at the top level.
 
-To generate partitioned node datasets under `jsonraw/nodes/`, run:
+To generate partitioned node datasets under `input/nodes/`, run:
 
 ```bash
-cargo run -p refinery-organize --release -- partition --nodes 3
+cargo run -p organize --release -- partition --nodes 3
 ```
 
-This recreates `jsonraw/nodes/` from scratch and distributes the top-level `jsonraw/*.json` files into `node-a`, `node-b`, `node-c`, ... folders.
+This recreates `input/nodes/` from scratch and distributes the top-level `input/*.json` files into `node-a`, `node-b`, `node-c`, ... folders.
 
 Each `refinery-node` instance is one isolated hospital node. For multi-hospital runs, launch separate node processes with different `--db` and `--input-dir` values that point at one generated node folder.
 
@@ -86,7 +86,7 @@ Optional subset mode for faster tests:
 ```bash
 cargo run -p refinery-node --release -- run-pipeline \
   --db data/node0_sample.duckdb \
-  --input-dir jsonraw \
+  --input-dir input \
   --max-files 40
 ```
 
@@ -112,7 +112,7 @@ cargo run -p refinery-node --release -- inspect --db data/node0.duckdb --top 10
 ```bash
 cargo run -p refinery-node --release -- serve \
   --db data/node0.duckdb \
-  --input-dir jsonraw/nodes/node-a \
+  --input-dir input/nodes/node-a \
   --bind 127.0.0.1:50051 \
   --node-id node-a
 ```

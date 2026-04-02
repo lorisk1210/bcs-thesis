@@ -1,9 +1,9 @@
 [workspace]
 members = [
-    "refinery-check",
-    "refinery-cli",
+    "proof-check",
+    "cli-render",
     "refinery-node",
-    "refinery-organize",
+    "organize",
     "refinery-orchestrator",
     "refinery-protocol",
 ]
