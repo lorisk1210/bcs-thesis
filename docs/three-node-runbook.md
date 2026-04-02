@@ -6,12 +6,12 @@ It covers:
 
 - building the workspace
 - confirming the shared `.env` settings
-- generating the split node datasets with `refinery-organize`
+- generating the split node datasets with `organize`
 - rebuilding all three node databases
-- optionally rebuilding `refinery-check` prepared baselines
+- optionally rebuilding `proof-check` prepared baselines
 - starting three local node servers with different SMPC private keys
 - running orchestrator status and a federated query
-- running the full `refinery-check` comparison
+- running the full `proof-check` comparison
 
 ## 1. Build the workspace
 
@@ -25,9 +25,9 @@ If you only want to build the binaries used below:
 
 ```bash
 cargo build -p refinery-node --release
-cargo build -p refinery-organize --release
+cargo build -p organize --release
 cargo build -p refinery-orchestrator --release
-cargo build -p refinery-check --release
+cargo build -p proof-check --release
 ```
 
 ## 2. Confirm the shared environment
@@ -74,17 +74,17 @@ export NODE_C_KEY="replace-with-third-64-char-hex-key"
 
 The multi-node flow needs:
 
-- `jsonraw/nodes/node-a`
-- `jsonraw/nodes/node-b`
-- `jsonraw/nodes/node-c`
+- `input/nodes/node-a`
+- `input/nodes/node-b`
+- `input/nodes/node-c`
 
-Generate them from the top-level `jsonraw/*.json` files:
+Generate them from the top-level `input/*.json` files:
 
 ```bash
-cargo run -p refinery-organize --release -- partition --nodes 3
+cargo run -p organize --release -- partition --nodes 3
 ```
 
-This recreates `jsonraw/nodes/` from scratch.
+This recreates `input/nodes/` from scratch.
 
 ## 5. Optional cleanup of generated databases
 
@@ -104,19 +104,19 @@ Run these three commands in order:
 ```bash
 cargo run -p refinery-node --release -- run-pipeline \
   --db data/node-a.duckdb \
-  --input-dir jsonraw/nodes/node-a
+  --input-dir input/nodes/node-a
 ```
 
 ```bash
 cargo run -p refinery-node --release -- run-pipeline \
   --db data/node-b.duckdb \
-  --input-dir jsonraw/nodes/node-b
+  --input-dir input/nodes/node-b
 ```
 
 ```bash
 cargo run -p refinery-node --release -- run-pipeline \
   --db data/node-c.duckdb \
-  --input-dir jsonraw/nodes/node-c
+  --input-dir input/nodes/node-c
 ```
 
 At the end of this step, you should have:
@@ -143,14 +143,14 @@ cargo run -p refinery-node --release -- inspect --db data/node-c.duckdb --top 10
 
 ## 8. Rebuild prepared checker baselines
 
-Run this if you want a fresh `refinery-check` prepared baseline directory:
+Run this if you want a fresh `proof-check` prepared baseline directory:
 
 ```bash
-cargo run -p refinery-check --release -- prepare \
+cargo run -p proof-check --release -- prepare \
   --prepared-dir data/check-baselines \
-  --raw-node node-a=jsonraw/nodes/node-a \
-  --raw-node node-b=jsonraw/nodes/node-b \
-  --raw-node node-c=jsonraw/nodes/node-c
+  --raw-node node-a=input/nodes/node-a \
+  --raw-node node-b=input/nodes/node-b \
+  --raw-node node-c=input/nodes/node-c
 ```
 
 ## 9. Start the three nodes
@@ -163,7 +163,7 @@ Start each node in its own terminal.
 env REFINERY_SMPC_PRIVATE_KEY_HEX="$NODE_A_KEY" \
 cargo run -p refinery-node --release -- serve \
   --db data/node-a.duckdb \
-  --input-dir jsonraw/nodes/node-a \
+  --input-dir input/nodes/node-a \
   --bind 127.0.0.1:50051 \
   --node-id node-a
 ```
@@ -174,7 +174,7 @@ cargo run -p refinery-node --release -- serve \
 env REFINERY_SMPC_PRIVATE_KEY_HEX="$NODE_B_KEY" \
 cargo run -p refinery-node --release -- serve \
   --db data/node-b.duckdb \
-  --input-dir jsonraw/nodes/node-b \
+  --input-dir input/nodes/node-b \
   --bind 127.0.0.1:50052 \
   --node-id node-b
 ```
@@ -185,7 +185,7 @@ cargo run -p refinery-node --release -- serve \
 env REFINERY_SMPC_PRIVATE_KEY_HEX="$NODE_C_KEY" \
 cargo run -p refinery-node --release -- serve \
   --db data/node-c.duckdb \
-  --input-dir jsonraw/nodes/node-c \
+  --input-dir input/nodes/node-c \
   --bind 127.0.0.1:50053 \
   --node-id node-c
 ```
@@ -220,12 +220,12 @@ cargo run -p refinery-orchestrator --release -- query \
   --params-file examples/queries/cohort_any.json
 ```
 
-## 12. Run the full `refinery-check` comparison
+## 12. Run the full `proof-check` comparison
 
 If you ran `prepare`, use the prepared baseline directory:
 
 ```bash
-cargo run -p refinery-check --release -- compare \
+cargo run -p proof-check --release -- compare \
   --template cohort-feasibility-count \
   --params-file examples/queries/cohort_any.json \
   --node http://127.0.0.1:50051 \
@@ -239,25 +239,25 @@ cargo run -p refinery-check --release -- compare \
 If you did not run `prepare`, compare directly against the raw split folders:
 
 ```bash
-cargo run -p refinery-check --release -- compare \
+cargo run -p proof-check --release -- compare \
   --template cohort-feasibility-count \
   --params-file examples/queries/cohort_any.json \
   --node http://127.0.0.1:50051 \
   --node http://127.0.0.1:50052 \
   --node http://127.0.0.1:50053 \
-  --raw-node node-a=jsonraw/nodes/node-a \
-  --raw-node node-b=jsonraw/nodes/node-b \
-  --raw-node node-c=jsonraw/nodes/node-c \
+  --raw-node node-a=input/nodes/node-a \
+  --raw-node node-b=input/nodes/node-b \
+  --raw-node node-c=input/nodes/node-c \
   --mode full \
   --dp-seed 42
 ```
 
 ## Notes
 
-- `refinery-check --mode full` runs:
+- `proof-check --mode full` runs:
   - `smpc_parity`
   - `coarsening_distortion`
   - `final_release_utility`
 - the checker reads privacy settings from the same environment configuration as the orchestrator
 - each node must use a different `REFINERY_SMPC_PRIVATE_KEY_HEX`
-- `jsonraw` must contain the canonical source JSON files directly at its top level before running `refinery-organize partition`
+- `input` must contain the canonical source JSON files directly at its top level before running `organize partition`
