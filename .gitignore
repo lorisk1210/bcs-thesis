@@ -4,6 +4,6 @@
 /data/*.duckdb
 /data/*.wal
 /data/*
-/jsonraw/nodes/*
+/input/nodes/*
 .cursor
 .claude
