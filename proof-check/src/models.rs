@@ -41,6 +41,14 @@ impl CompareMode {
         matches!(self, Self::Full | Self::FinalReleaseUtility)
     }
 
+    pub(crate) fn includes_release_vs_exact_raw(self) -> bool {
+        matches!(self, Self::Full | Self::FinalReleaseUtility)
+    }
+
+    pub(crate) fn includes_template_metrics(self) -> bool {
+        matches!(self, Self::Full | Self::FinalReleaseUtility)
+    }
+
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Full => "full",
@@ -82,9 +90,9 @@ pub struct PrepareRequest {
 pub struct ComparisonReport {
     pub request: RequestMetadata,
     pub nodes: Vec<NodeReport>,
-    pub smpc_parity: ComparisonSection,
-    pub coarsening_distortion: ComparisonSection,
-    pub final_release_utility: ComparisonSection,
+    pub validation: ValidationSections,
+    pub release_vs_exact_raw: PayloadComparisonSection,
+    pub template_metrics: TemplateMetricsSection,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -135,6 +143,13 @@ pub struct ComparisonSection {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct ValidationSections {
+    pub smpc_parity: ComparisonSection,
+    pub coarsening_distortion: ComparisonSection,
+    pub final_release_utility: ComparisonSection,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct DiffEntry {
     pub path: String,
     pub left: Value,
@@ -146,6 +161,42 @@ pub struct NodeRejection {
     pub node_id: String,
     pub endpoint: String,
     pub reason: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PayloadComparisonSection {
+    pub status: AnalysisStatus,
+    pub left_label: String,
+    pub right_label: String,
+    pub left_payload: Option<Value>,
+    pub right_payload: Option<Value>,
+    pub compared_left_label: Option<String>,
+    pub compared_right_label: Option<String>,
+    pub compared_left_payload: Option<Value>,
+    pub compared_right_payload: Option<Value>,
+    pub diffs: Vec<DiffEntry>,
+    pub notes: Vec<String>,
+    pub rejections: Vec<NodeRejection>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct TemplateMetricsSection {
+    pub status: AnalysisStatus,
+    pub primary_metric: Option<MetricComparison>,
+    pub context_metrics: Vec<MetricComparison>,
+    pub notes: Vec<String>,
+    pub rejections: Vec<NodeRejection>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct MetricComparison {
+    pub name: String,
+    pub released_value: Value,
+    pub exact_raw_value: Value,
+    pub difference: Option<Value>,
+    pub absolute_gap: Option<Value>,
+    pub relative_gap: Option<Value>,
+    pub note: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -186,6 +237,26 @@ impl DistortionExpectation {
             Self::ShouldMatch => "should_match",
             Self::DistortionPossible => "distortion_possible",
             Self::DistortionExpected => "distortion_expected",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AnalysisStatus {
+    Available,
+    Suppressed,
+    Inconclusive,
+    Skipped,
+}
+
+impl AnalysisStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Available => "available",
+            Self::Suppressed => "suppressed",
+            Self::Inconclusive => "inconclusive",
+            Self::Skipped => "skipped",
         }
     }
 }

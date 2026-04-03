@@ -3,9 +3,9 @@ use crate::SectionStatus;
 
 pub fn exit_code(report: &ComparisonReport) -> i32 {
     let sections = [
-        &report.smpc_parity,
-        &report.coarsening_distortion,
-        &report.final_release_utility,
+        &report.validation.smpc_parity,
+        &report.validation.coarsening_distortion,
+        &report.validation.final_release_utility,
     ];
     if sections.iter().any(|section| {
         matches!(

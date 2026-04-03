@@ -18,6 +18,39 @@ pub struct CheckSectionData {
     pub rejections: Vec<CheckRejectionEntry>,
 }
 
+pub struct CheckPayloadComparisonData {
+    pub status: String,
+    pub left_label: String,
+    pub right_label: String,
+    pub left_payload: Option<Value>,
+    pub right_payload: Option<Value>,
+    pub compared_left_label: Option<String>,
+    pub compared_right_label: Option<String>,
+    pub compared_left_payload: Option<Value>,
+    pub compared_right_payload: Option<Value>,
+    pub diffs: Vec<CheckDiffEntry>,
+    pub notes: Vec<String>,
+    pub rejections: Vec<CheckRejectionEntry>,
+}
+
+pub struct CheckMetricData {
+    pub name: String,
+    pub released_value: Value,
+    pub exact_raw_value: Value,
+    pub difference: Option<Value>,
+    pub absolute_gap: Option<Value>,
+    pub relative_gap: Option<Value>,
+    pub note: Option<String>,
+}
+
+pub struct CheckTemplateMetricsData {
+    pub status: String,
+    pub primary_metric: Option<CheckMetricData>,
+    pub context_metrics: Vec<CheckMetricData>,
+    pub notes: Vec<String>,
+    pub rejections: Vec<CheckRejectionEntry>,
+}
+
 pub struct CheckDiffEntry {
     pub path: String,
     pub left: Value,
@@ -53,7 +86,9 @@ pub struct CheckCompareReportData {
     pub epsilon: Option<f64>,
     pub min_cohort: Option<usize>,
     pub nodes: Vec<CheckNodeReport>,
-    pub sections: Vec<CheckSectionData>,
+    pub validation_sections: Vec<CheckSectionData>,
+    pub release_vs_exact_raw: CheckPayloadComparisonData,
+    pub template_metrics: CheckTemplateMetricsData,
 }
 
 pub struct CheckNodeReport {
@@ -131,9 +166,15 @@ pub fn render_check_compare_report(mode: OutputMode, r: &CheckCompareReportData)
                 );
             }
         }
-        for section in &r.sections {
-            out.push_str(&render_check_section(mode, section));
+        out.push_str("validation:\n");
+        for section in &r.validation_sections {
+            out.push_str(&render_validation_section_plain(section, "  "));
         }
+        out.push_str(&render_payload_comparison_plain(
+            "release_vs_exact_raw",
+            &r.release_vs_exact_raw,
+        ));
+        out.push_str(&render_template_metrics_plain(&r.template_metrics));
         out
     } else {
         let t = title(mode, "proof-check compare");
@@ -172,66 +213,88 @@ pub fn render_check_compare_report(mode: OutputMode, r: &CheckCompareReportData)
             }
         }
 
-        for section in &r.sections {
+        let _ = writeln!(out);
+        let _ = writeln!(out, "{}", section_header(mode, "Validation"));
+        for section in &r.validation_sections {
             let _ = writeln!(out);
-            out.push_str(&render_check_section(mode, section));
+            out.push_str(&render_validation_section_pretty(mode, section));
         }
+
+        let _ = writeln!(out);
+        out.push_str(&render_payload_comparison_pretty(
+            mode,
+            "Release Vs Exact Raw",
+            &r.release_vs_exact_raw,
+        ));
+
+        let _ = writeln!(out);
+        out.push_str(&render_template_metrics_pretty(mode, &r.template_metrics));
         out
     };
     frame_cli_output(mode, inner)
 }
 
-fn render_check_section(mode: OutputMode, s: &CheckSectionData) -> String {
-    if mode == OutputMode::Plain {
-        let mut out = String::new();
-        let _ = writeln!(out, "{}:", s.name);
-        let _ = writeln!(out, "  status: {}", s.status);
-        if let Some(ref expectation) = s.expectation {
-            let _ = writeln!(out, "  expectation: {expectation}");
-        }
-        if let Some(ref left_payload) = s.left_payload {
-            let json_str = serde_json::to_string(left_payload).unwrap_or_else(|_| "null".to_string());
-            let _ = writeln!(out, "  {}: {}", s.left_label, json_str);
-        }
-        if let Some(ref right_payload) = s.right_payload {
-            let json_str = serde_json::to_string(right_payload).unwrap_or_else(|_| "null".to_string());
-            let _ = writeln!(out, "  {}: {}", s.right_label, json_str);
-        }
-        if !s.rejections.is_empty() {
-            out.push_str("  rejections:\n");
-            for r in &s.rejections {
-                let _ = writeln!(out, "    - {} @ {}: {}", r.node_id, r.endpoint, r.reason);
-            }
-        }
-        if !s.diffs.is_empty() {
-            out.push_str("  diffs:\n");
-            for d in &s.diffs {
-                let _ = writeln!(out, "    - {} => left={}, right={}", d.path, d.left, d.right);
-            }
-        }
-        return out;
-    }
-
+fn render_validation_section_plain(section: &CheckSectionData, indent: &str) -> String {
     let mut out = String::new();
-    let _ = writeln!(out, "{}", section_header(mode, &s.name));
-    let badge = status_badge(mode, &s.status);
+    let _ = writeln!(out, "{indent}{}:", section.name);
+    let _ = writeln!(out, "{indent}  status: {}", section.status);
+    if let Some(ref expectation) = section.expectation {
+        let _ = writeln!(out, "{indent}  expectation: {expectation}");
+    }
+    if let Some(ref left_payload) = section.left_payload {
+        let json_str = serde_json::to_string(left_payload).unwrap_or_else(|_| "null".to_string());
+        let _ = writeln!(out, "{indent}  {}: {}", section.left_label, json_str);
+    }
+    if let Some(ref right_payload) = section.right_payload {
+        let json_str =
+            serde_json::to_string(right_payload).unwrap_or_else(|_| "null".to_string());
+        let _ = writeln!(out, "{indent}  {}: {}", section.right_label, json_str);
+    }
+    if !section.rejections.is_empty() {
+        let _ = writeln!(out, "{indent}  rejections:");
+        for r in &section.rejections {
+            let _ = writeln!(
+                out,
+                "{indent}    - {} @ {}: {}",
+                r.node_id, r.endpoint, r.reason
+            );
+        }
+    }
+    if !section.diffs.is_empty() {
+        let _ = writeln!(out, "{indent}  diffs:");
+        for d in &section.diffs {
+            let _ = writeln!(
+                out,
+                "{indent}    - {} => left={}, right={}",
+                d.path, d.left, d.right
+            );
+        }
+    }
+    out
+}
+
+fn render_validation_section_pretty(mode: OutputMode, section: &CheckSectionData) -> String {
+    let mut out = String::new();
+    let _ = writeln!(out, "{}", section_header(mode, &section.name));
+    let badge = status_badge(mode, &section.status);
     let _ = writeln!(out, "    {badge}");
     let _ = writeln!(out);
 
-    if let Some(ref expectation) = s.expectation {
+    if let Some(ref expectation) = section.expectation {
         let _ = writeln!(out, "{}", key_value(mode, "expectation", expectation));
     }
-    if let Some(ref left_payload) = s.left_payload {
+    if let Some(ref left_payload) = section.left_payload {
         let json_str = serde_json::to_string(left_payload).unwrap_or_else(|_| "null".to_string());
-        let _ = writeln!(out, "{}", key_value(mode, &s.left_label, &json_str));
+        let _ = writeln!(out, "{}", key_value(mode, &section.left_label, &json_str));
     }
-    if let Some(ref right_payload) = s.right_payload {
-        let json_str = serde_json::to_string(right_payload).unwrap_or_else(|_| "null".to_string());
-        let _ = writeln!(out, "{}", key_value(mode, &s.right_label, &json_str));
+    if let Some(ref right_payload) = section.right_payload {
+        let json_str =
+            serde_json::to_string(right_payload).unwrap_or_else(|_| "null".to_string());
+        let _ = writeln!(out, "{}", key_value(mode, &section.right_label, &json_str));
     }
-    if !s.rejections.is_empty() {
+    if !section.rejections.is_empty() {
         let _ = writeln!(out, "{}", section_header(mode, "rejections"));
-        for r in &s.rejections {
+        for r in &section.rejections {
             let _ = writeln!(
                 out,
                 "    {DARK_GRAY}•{RESET} {} @ {}: {}",
@@ -239,9 +302,9 @@ fn render_check_section(mode: OutputMode, s: &CheckSectionData) -> String {
             );
         }
     }
-    if !s.diffs.is_empty() {
+    if !section.diffs.is_empty() {
         let _ = writeln!(out, "{}", section_header(mode, "diffs"));
-        for d in &s.diffs {
+        for d in &section.diffs {
             let _ = writeln!(
                 out,
                 "    {DARK_GRAY}•{RESET} {BOLD}{}{RESET} => left={}, right={}",
@@ -249,5 +312,261 @@ fn render_check_section(mode: OutputMode, s: &CheckSectionData) -> String {
             );
         }
     }
+    out
+}
+
+fn render_payload_comparison_plain(
+    name: &str,
+    section: &CheckPayloadComparisonData,
+) -> String {
+    let mut out = String::new();
+    let _ = writeln!(out, "{name}:");
+    let _ = writeln!(out, "  status: {}", section.status);
+    if let Some(ref left_payload) = section.left_payload {
+        let json_str = serde_json::to_string(left_payload).unwrap_or_else(|_| "null".to_string());
+        let _ = writeln!(out, "  {}: {}", section.left_label, json_str);
+    }
+    if let Some(ref right_payload) = section.right_payload {
+        let json_str =
+            serde_json::to_string(right_payload).unwrap_or_else(|_| "null".to_string());
+        let _ = writeln!(out, "  {}: {}", section.right_label, json_str);
+    }
+    if let Some(ref label) = section.compared_left_label {
+        let json_str = serde_json::to_string(&section.compared_left_payload)
+            .unwrap_or_else(|_| "null".to_string());
+        let _ = writeln!(out, "  {}: {}", label, json_str);
+    }
+    if let Some(ref label) = section.compared_right_label {
+        let json_str = serde_json::to_string(&section.compared_right_payload)
+            .unwrap_or_else(|_| "null".to_string());
+        let _ = writeln!(out, "  {}: {}", label, json_str);
+    }
+    if !section.notes.is_empty() {
+        let _ = writeln!(out, "  notes:");
+        for note in &section.notes {
+            let _ = writeln!(out, "    - {note}");
+        }
+    }
+    if !section.rejections.is_empty() {
+        let _ = writeln!(out, "  rejections:");
+        for rejection in &section.rejections {
+            let _ = writeln!(
+                out,
+                "    - {} @ {}: {}",
+                rejection.node_id, rejection.endpoint, rejection.reason
+            );
+        }
+    }
+    if !section.diffs.is_empty() {
+        let _ = writeln!(out, "  diffs:");
+        for diff in &section.diffs {
+            let _ = writeln!(
+                out,
+                "    - {} => left={}, right={}",
+                diff.path, diff.left, diff.right
+            );
+        }
+    }
+    out
+}
+
+fn render_payload_comparison_pretty(
+    mode: OutputMode,
+    title_text: &str,
+    section: &CheckPayloadComparisonData,
+) -> String {
+    let mut out = String::new();
+    let _ = writeln!(out, "{}", section_header(mode, title_text));
+    let badge = status_badge(mode, &section.status);
+    let _ = writeln!(out, "    {badge}");
+    let _ = writeln!(out);
+
+    if let Some(ref left_payload) = section.left_payload {
+        let json_str = serde_json::to_string(left_payload).unwrap_or_else(|_| "null".to_string());
+        let _ = writeln!(out, "{}", key_value(mode, &section.left_label, &json_str));
+    }
+    if let Some(ref right_payload) = section.right_payload {
+        let json_str =
+            serde_json::to_string(right_payload).unwrap_or_else(|_| "null".to_string());
+        let _ = writeln!(out, "{}", key_value(mode, &section.right_label, &json_str));
+    }
+    if let Some(ref label) = section.compared_left_label {
+        let json_str = serde_json::to_string(&section.compared_left_payload)
+            .unwrap_or_else(|_| "null".to_string());
+        let _ = writeln!(out, "{}", key_value(mode, label, &json_str));
+    }
+    if let Some(ref label) = section.compared_right_label {
+        let json_str = serde_json::to_string(&section.compared_right_payload)
+            .unwrap_or_else(|_| "null".to_string());
+        let _ = writeln!(out, "{}", key_value(mode, label, &json_str));
+    }
+    if !section.notes.is_empty() {
+        let _ = writeln!(out, "{}", section_header(mode, "notes"));
+        for note in &section.notes {
+            let _ = writeln!(out, "    {DARK_GRAY}•{RESET} {note}");
+        }
+    }
+    if !section.rejections.is_empty() {
+        let _ = writeln!(out, "{}", section_header(mode, "rejections"));
+        for rejection in &section.rejections {
+            let _ = writeln!(
+                out,
+                "    {DARK_GRAY}•{RESET} {} @ {}: {}",
+                rejection.node_id, rejection.endpoint, rejection.reason
+            );
+        }
+    }
+    if !section.diffs.is_empty() {
+        let _ = writeln!(out, "{}", section_header(mode, "diffs"));
+        for diff in &section.diffs {
+            let _ = writeln!(
+                out,
+                "    {DARK_GRAY}•{RESET} {BOLD}{}{RESET} => left={}, right={}",
+                diff.path, diff.left, diff.right
+            );
+        }
+    }
+    out
+}
+
+fn render_template_metrics_plain(section: &CheckTemplateMetricsData) -> String {
+    let mut out = String::new();
+    let _ = writeln!(out, "template_metrics:");
+    let _ = writeln!(out, "  status: {}", section.status);
+    if let Some(ref metric) = section.primary_metric {
+        let _ = writeln!(out, "  primary_metric:");
+        out.push_str(&render_metric_plain(metric, "    "));
+    }
+    if !section.context_metrics.is_empty() {
+        let _ = writeln!(out, "  context_metrics:");
+        for metric in &section.context_metrics {
+            out.push_str(&render_metric_plain(metric, "    "));
+        }
+    }
+    if !section.notes.is_empty() {
+        let _ = writeln!(out, "  notes:");
+        for note in &section.notes {
+            let _ = writeln!(out, "    - {note}");
+        }
+    }
+    if !section.rejections.is_empty() {
+        let _ = writeln!(out, "  rejections:");
+        for rejection in &section.rejections {
+            let _ = writeln!(
+                out,
+                "    - {} @ {}: {}",
+                rejection.node_id, rejection.endpoint, rejection.reason
+            );
+        }
+    }
+    out
+}
+
+fn render_template_metrics_pretty(
+    mode: OutputMode,
+    section: &CheckTemplateMetricsData,
+) -> String {
+    let mut out = String::new();
+    let _ = writeln!(out, "{}", section_header(mode, "Template Metrics"));
+    let badge = status_badge(mode, &section.status);
+    let _ = writeln!(out, "    {badge}");
+    let _ = writeln!(out);
+
+    if let Some(ref metric) = section.primary_metric {
+        let _ = writeln!(out, "{}", section_header(mode, "primary_metric"));
+        out.push_str(&render_metric_pretty(mode, metric));
+    }
+    if !section.context_metrics.is_empty() {
+        let _ = writeln!(out, "{}", section_header(mode, "context_metrics"));
+        for metric in &section.context_metrics {
+            out.push_str(&render_metric_pretty(mode, metric));
+        }
+    }
+    if !section.notes.is_empty() {
+        let _ = writeln!(out, "{}", section_header(mode, "notes"));
+        for note in &section.notes {
+            let _ = writeln!(out, "    {DARK_GRAY}•{RESET} {note}");
+        }
+    }
+    if !section.rejections.is_empty() {
+        let _ = writeln!(out, "{}", section_header(mode, "rejections"));
+        for rejection in &section.rejections {
+            let _ = writeln!(
+                out,
+                "    {DARK_GRAY}•{RESET} {} @ {}: {}",
+                rejection.node_id, rejection.endpoint, rejection.reason
+            );
+        }
+    }
+    out
+}
+
+fn render_metric_plain(metric: &CheckMetricData, indent: &str) -> String {
+    let mut out = String::new();
+    let _ = writeln!(out, "{indent}- name: {}", metric.name);
+    let _ = writeln!(
+        out,
+        "{indent}  released_value: {}",
+        serde_json::to_string(&metric.released_value).unwrap_or_else(|_| "null".to_string())
+    );
+    let _ = writeln!(
+        out,
+        "{indent}  exact_raw_value: {}",
+        serde_json::to_string(&metric.exact_raw_value).unwrap_or_else(|_| "null".to_string())
+    );
+    if let Some(ref difference) = metric.difference {
+        let _ = writeln!(
+            out,
+            "{indent}  difference: {}",
+            serde_json::to_string(difference).unwrap_or_else(|_| "null".to_string())
+        );
+    }
+    if let Some(ref absolute_gap) = metric.absolute_gap {
+        let _ = writeln!(
+            out,
+            "{indent}  absolute_gap: {}",
+            serde_json::to_string(absolute_gap).unwrap_or_else(|_| "null".to_string())
+        );
+    }
+    if let Some(ref relative_gap) = metric.relative_gap {
+        let _ = writeln!(
+            out,
+            "{indent}  relative_gap: {}",
+            serde_json::to_string(relative_gap).unwrap_or_else(|_| "null".to_string())
+        );
+    }
+    if let Some(ref note) = metric.note {
+        let _ = writeln!(out, "{indent}  note: {note}");
+    }
+    out
+}
+
+fn render_metric_pretty(mode: OutputMode, metric: &CheckMetricData) -> String {
+    let mut out = String::new();
+    let _ = writeln!(out, "    {DARK_GRAY}•{RESET} {BOLD}{}{RESET}", metric.name);
+    let released_value =
+        serde_json::to_string(&metric.released_value).unwrap_or_else(|_| "null".to_string());
+    let exact_raw_value =
+        serde_json::to_string(&metric.exact_raw_value).unwrap_or_else(|_| "null".to_string());
+    let _ = writeln!(out, "{}", key_value(mode, "released_value", &released_value));
+    let _ = writeln!(out, "{}", key_value(mode, "exact_raw_value", &exact_raw_value));
+    if let Some(ref difference) = metric.difference {
+        let json_str = serde_json::to_string(difference).unwrap_or_else(|_| "null".to_string());
+        let _ = writeln!(out, "{}", key_value(mode, "difference", &json_str));
+    }
+    if let Some(ref absolute_gap) = metric.absolute_gap {
+        let json_str =
+            serde_json::to_string(absolute_gap).unwrap_or_else(|_| "null".to_string());
+        let _ = writeln!(out, "{}", key_value(mode, "absolute_gap", &json_str));
+    }
+    if let Some(ref relative_gap) = metric.relative_gap {
+        let json_str =
+            serde_json::to_string(relative_gap).unwrap_or_else(|_| "null".to_string());
+        let _ = writeln!(out, "{}", key_value(mode, "relative_gap", &json_str));
+    }
+    if let Some(ref note) = metric.note {
+        let _ = writeln!(out, "{}", key_value(mode, "note", note));
+    }
+    let _ = writeln!(out);
     out
 }
