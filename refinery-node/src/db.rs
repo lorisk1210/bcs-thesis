@@ -128,6 +128,7 @@ pub fn init_schema(conn: &Connection) -> Result<()> {
             cohort_size BIGINT,
             accepted BOOLEAN,
             reason TEXT,
+            release_mode TEXT,
             spent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
 
@@ -136,9 +137,10 @@ pub fn init_schema(conn: &Connection) -> Result<()> {
             template_name TEXT,
             params_json TEXT,
             raw_result_json TEXT,
-            noisy_result_json TEXT,
+            released_result_json TEXT,
             cohort_size BIGINT,
             epsilon DOUBLE,
+            release_mode TEXT,
             executed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
 
@@ -154,5 +156,78 @@ pub fn init_schema(conn: &Connection) -> Result<()> {
         "#,
     )?;
 
+    migrate_release_audit_schema(conn)?;
+
     Ok(())
+}
+
+fn migrate_release_audit_schema(conn: &Connection) -> Result<()> {
+    rename_column_if_missing_target(
+        conn,
+        "query_audit",
+        "noisy_result_json",
+        "released_result_json",
+    )?;
+    add_column_if_missing(conn, "privacy_releases", "release_mode TEXT DEFAULT 'dp'")?;
+    add_column_if_missing(conn, "query_audit", "release_mode TEXT DEFAULT 'dp'")?;
+    Ok(())
+}
+
+fn rename_column_if_missing_target(
+    conn: &Connection,
+    table_name: &str,
+    old_column: &str,
+    new_column: &str,
+) -> Result<()> {
+    if !table_has_column(conn, table_name, old_column)? || table_has_column(conn, table_name, new_column)? {
+        return Ok(());
+    }
+
+    conn.execute(
+        &format!(
+            "ALTER TABLE {table_name} RENAME COLUMN {old_column} TO {new_column}"
+        ),
+        [],
+    )?;
+    Ok(())
+}
+
+fn add_column_if_missing(conn: &Connection, table_name: &str, column_definition: &str) -> Result<()> {
+    let column_name = column_definition
+        .split_whitespace()
+        .next()
+        .expect("column definition should include a name");
+    if table_has_column(conn, table_name, column_name)? {
+        return Ok(());
+    }
+
+    conn.execute(
+        &format!("ALTER TABLE {table_name} ADD COLUMN {column_definition}"),
+        [],
+    )?;
+    Ok(())
+}
+
+fn table_has_column(conn: &Connection, table_name: &str, column_name: &str) -> Result<bool> {
+    let count: i64 = conn.query_row(
+        &format!("SELECT COUNT(*) FROM pragma_table_info('{table_name}') WHERE name = ?1"),
+        [column_name],
+        |row| row.get(0),
+    )?;
+    Ok(count > 0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn init_schema_creates_release_audit_columns() {
+        let conn = Connection::open_in_memory().expect("in-memory duckdb should open");
+        init_schema(&conn).expect("schema should initialize");
+
+        assert!(table_has_column(&conn, "privacy_releases", "release_mode").expect("column lookup should work"));
+        assert!(table_has_column(&conn, "query_audit", "released_result_json").expect("column lookup should work"));
+        assert!(table_has_column(&conn, "query_audit", "release_mode").expect("column lookup should work"));
+    }
 }

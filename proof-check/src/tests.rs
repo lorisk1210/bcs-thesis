@@ -89,6 +89,8 @@ fn final_release_utility_matches_for_identical_inputs() {
         total_budget: 10.0,
         min_participating_nodes: 2,
         ledger_db_path: PathBuf::from("unused.duckdb"),
+        release_mode: refinery_protocol::ReleaseMode::Dp,
+        dp_seed: None,
     };
 
     let section = build_final_release_utility_section(&result, &result, &config, 42)
@@ -117,6 +119,8 @@ fn final_release_utility_detects_distortion() {
         total_budget: 10.0,
         min_participating_nodes: 2,
         ledger_db_path: PathBuf::from("unused.duckdb"),
+        release_mode: refinery_protocol::ReleaseMode::Dp,
+        dp_seed: None,
     };
 
     let section = build_final_release_utility_section(&live_result, &exact_result, &config, 42)
@@ -177,7 +181,8 @@ fn serialize_release_result_preserves_rejection_reason() {
     let payload = serialize_payload(&refinery_orchestrator::dp_release::GlobalReleaseResult {
         accepted: false,
         reason: "below threshold".to_string(),
-        noisy_result: None,
+        release_mode: refinery_protocol::ReleaseMode::Dp,
+        released_result: None,
     })
     .expect("release payload should serialize");
     assert_eq!(payload["reason"], "below threshold");

@@ -2,10 +2,14 @@
 // Defines the configuration functions for the project.
 
 // Standard library imports
-use std::{env, fmt::Display, str::FromStr};
+use std::env;
 
 // Third-party library imports
 use anyhow::{Result, anyhow};
+use refinery_protocol::env_utils::{
+    parse_env, parse_env_or_default, parse_optional_env, required_env,
+};
+use refinery_protocol::ReleaseMode;
 
 // Local module imports
 use crate::privacy::PrivacyConfig;
@@ -33,16 +37,27 @@ pub fn load_privacy_config() -> Result<PrivacyConfig> {
         epsilon: parse_env("REFINERY_EPSILON")?,
         min_cohort: parse_env("REFINERY_MIN_COHORT")?,
         total_budget: parse_env("REFINERY_TOTAL_BUDGET")?,
+        release_mode: parse_env_or_default(ReleaseMode::ENV_NAME, ReleaseMode::Dp)?,
+        dp_seed: parse_optional_env(ReleaseMode::DP_SEED_ENV_NAME)?,
     };
 
-    if config.epsilon <= 0.0 {
-        return Err(anyhow!("REFINERY_EPSILON must be > 0"));
-    }
     if config.min_cohort == 0 {
         return Err(anyhow!("REFINERY_MIN_COHORT must be > 0"));
     }
-    if config.total_budget <= 0.0 {
-        return Err(anyhow!("REFINERY_TOTAL_BUDGET must be > 0"));
+    if config.release_mode.consumes_budget() {
+        if config.epsilon <= 0.0 {
+            return Err(anyhow!("REFINERY_EPSILON must be > 0"));
+        }
+        if config.total_budget <= 0.0 {
+            return Err(anyhow!("REFINERY_TOTAL_BUDGET must be > 0"));
+        }
+    }
+    if config.release_mode.requires_seed() && config.dp_seed.is_none() {
+        return Err(anyhow!(
+            "{} must be set when {}=seeded",
+            ReleaseMode::DP_SEED_ENV_NAME,
+            ReleaseMode::ENV_NAME,
+        ));
     }
 
     Ok(config)
@@ -87,31 +102,4 @@ pub fn load_smpc_config() -> Result<SmpcConfig> {
         private_key_bytes,
         min_participating_nodes,
     })
-}
-
-// Loads a required environment variable.
-fn required_env(name: &str) -> Result<String> {
-    match env::var(name) {
-        Ok(value) => {
-            let value = value.trim();
-            if value.is_empty() {
-                Err(anyhow!("{name} is set but empty"))
-            } else {
-                Ok(value.to_string())
-            }
-        }
-        Err(env::VarError::NotPresent) => Err(anyhow!("{name} is not set")),
-        Err(err) => Err(anyhow!("failed to read {name}: {err}")),
-    }
-}
-
-// Parses an environment variable into a specific type.
-fn parse_env<T>(name: &str) -> Result<T>
-where
-    T: FromStr,
-    T::Err: Display,
-{
-    let raw = required_env(name)?;
-    raw.parse::<T>()
-        .map_err(|err| anyhow!("failed to parse {name}={raw:?}: {err}"))
 }

@@ -3,14 +3,17 @@
 
 // Protocol modules
 pub mod dp;
+pub mod env_utils;
 pub mod errors;
 pub mod query;
+pub mod release;
 pub mod slot_vector;
 pub mod smpc;
 pub mod stats;
 
 // Re-exports for the most common protocol types.
 pub use query::{ClipBounds, QueryExecutionRequest, QueryResult, QueryTemplate};
+pub use release::{ReleaseMode, release_query_result, release_query_result_with_rng};
 pub use slot_vector::{decode_slot_bytes, encode_slot_bytes, sum_slot_vectors};
 pub use smpc::{
     PRIVATE_KEY_LENGTH, PUBLIC_KEY_LENGTH, SMPC_AGGREGATE_SHARE_ROUND_NAME,

@@ -55,11 +55,22 @@ Required variables:
 - `REFINERY_MIN_COHORT`
 - `REFINERY_TOTAL_BUDGET`
 
+Optional privacy/release variables:
+
+- `REFINERY_RELEASE_MODE`
+- `REFINERY_DP_SEED` when `REFINERY_RELEASE_MODE=seeded`
+
 Optional CLI output variable:
 
 - `REFINERY_CLI_OUTPUT`
 
 CLI output defaults to rich pretty formatting on interactive terminals and plain text when stdout is redirected or piped. Set `REFINERY_CLI_OUTPUT=plain` to force the legacy plain layout, or `REFINERY_CLI_OUTPUT=pretty` to force the styled layout.
+
+`REFINERY_RELEASE_MODE` defaults to `dp` and supports:
+
+- `dp`: standard nondeterministic DP release
+- `raw`: exact released payload, but still subject to cohort threshold checks
+- `seeded`: deterministic DP release using `REFINERY_DP_SEED`
 
 ## Run full local pipeline
 
@@ -189,8 +200,10 @@ Current behavior:
 
 - the node computes a local query result
 - the local result is rejected if `cohort_size < REFINERY_MIN_COHORT`
-- the local result is rejected if the local privacy budget would exceed `REFINERY_TOTAL_BUDGET`
-- if accepted, Laplace noise is applied using `REFINERY_EPSILON`
+- if `REFINERY_RELEASE_MODE` is `dp` or `seeded`, the local result is rejected if the local privacy budget would exceed `REFINERY_TOTAL_BUDGET`
+- if `REFINERY_RELEASE_MODE=dp`, Laplace noise is applied using `REFINERY_EPSILON`
+- if `REFINERY_RELEASE_MODE=seeded`, deterministic Laplace noise is applied using `REFINERY_EPSILON` and `REFINERY_DP_SEED`
+- if `REFINERY_RELEASE_MODE=raw`, the exact result is released without spending DP budget
 
 Where this is implemented:
 
@@ -199,6 +212,8 @@ Where this is implemented:
 What changes these rules:
 
 - `REFINERY_EPSILON`
+- `REFINERY_RELEASE_MODE`
+- `REFINERY_DP_SEED`
 - `REFINERY_MIN_COHORT`
 - `REFINERY_TOTAL_BUDGET`
 
@@ -225,6 +240,7 @@ Where the decision is called from:
 What changes these rules right now:
 
 - `REFINERY_MIN_COHORT`
+- `REFINERY_RELEASE_MODE`
 
 How to change the local rules:
 
