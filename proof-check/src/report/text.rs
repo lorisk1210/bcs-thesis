@@ -47,6 +47,7 @@ pub fn render_text_report(report: &ComparisonReport) -> String {
             ));
         }
     }
+    out.push_str("---\n");
     out.push_str("validation:\n");
     out.push_str(&render_validation_section(
         "smpc_parity",
@@ -60,10 +61,12 @@ pub fn render_text_report(report: &ComparisonReport) -> String {
         "final_release_utility",
         &report.validation.final_release_utility,
     ));
+    out.push_str("---\n");
     out.push_str(&render_payload_comparison_section(
         "release_vs_exact_raw",
         &report.release_vs_exact_raw,
     ));
+    out.push_str("---\n");
     out.push_str(&render_template_metrics_section(&report.template_metrics));
     out
 }
