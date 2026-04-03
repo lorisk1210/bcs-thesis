@@ -3,12 +3,12 @@
 
 // Standard library imports
 use std::env;
-use std::fmt::Display;
 use std::path::PathBuf;
-use std::str::FromStr;
 
 // Third-party library imports
 use anyhow::{Result, anyhow};
+use refinery_protocol::env_utils::{parse_env, parse_env_or_default, parse_optional_env};
+use refinery_protocol::ReleaseMode;
 
 // Global privacy settings applied after node aggregation.
 #[derive(Debug, Clone)]
@@ -18,6 +18,8 @@ pub struct GlobalPrivacyConfig {
     pub total_budget: f64,
     pub min_participating_nodes: usize,
     pub ledger_db_path: PathBuf,
+    pub release_mode: ReleaseMode,
+    pub dp_seed: Option<u64>,
 }
 
 // Loads environment variables from the local `.env` file.
@@ -36,66 +38,31 @@ pub fn load_privacy_config() -> Result<GlobalPrivacyConfig> {
         ledger_db_path: env::var("REFINERY_ORCHESTRATOR_DB")
             .map(PathBuf::from)
             .unwrap_or_else(|_| PathBuf::from("data/orchestrator.duckdb")),
+        release_mode: parse_env_or_default(ReleaseMode::ENV_NAME, ReleaseMode::Dp)?,
+        dp_seed: parse_optional_env(ReleaseMode::DP_SEED_ENV_NAME)?,
     };
 
-    if config.epsilon <= 0.0 {
-        return Err(anyhow!("REFINERY_EPSILON must be > 0"));
-    }
     if config.min_cohort == 0 {
         return Err(anyhow!("REFINERY_MIN_COHORT must be > 0"));
     }
-    if config.total_budget <= 0.0 {
-        return Err(anyhow!("REFINERY_TOTAL_BUDGET must be > 0"));
+    if config.release_mode.consumes_budget() {
+        if config.epsilon <= 0.0 {
+            return Err(anyhow!("REFINERY_EPSILON must be > 0"));
+        }
+        if config.total_budget <= 0.0 {
+            return Err(anyhow!("REFINERY_TOTAL_BUDGET must be > 0"));
+        }
     }
     if config.min_participating_nodes < 2 {
         return Err(anyhow!("REFINERY_MIN_PARTICIPATING_NODES must be >= 2"));
     }
+    if config.release_mode.requires_seed() && config.dp_seed.is_none() {
+        return Err(anyhow!(
+            "{} must be set when {}=seeded",
+            ReleaseMode::DP_SEED_ENV_NAME,
+            ReleaseMode::ENV_NAME,
+        ));
+    }
 
     Ok(config)
-}
-
-// Loads a required environment variable.
-// @param: name - Environment variable name
-// @return: Result<String> - Trimmed non-empty value
-fn required_env(name: &str) -> Result<String> {
-    match env::var(name) {
-        Ok(value) => {
-            let value = value.trim();
-            if value.is_empty() {
-                Err(anyhow!("{name} is set but empty"))
-            } else {
-                Ok(value.to_string())
-            }
-        }
-        Err(env::VarError::NotPresent) => Err(anyhow!("{name} is not set")),
-        Err(err) => Err(anyhow!("failed to read {name}: {err}")),
-    }
-}
-
-// Parses an environment variable into a typed value.
-// @param: name - Environment variable name
-// @return: Result<T> - Parsed typed configuration value
-fn parse_env<T>(name: &str) -> Result<T>
-where
-    T: FromStr,
-    T::Err: Display,
-{
-    let raw = required_env(name)?;
-    raw.parse::<T>()
-        .map_err(|err| anyhow!("failed to parse {name}={raw:?}: {err}"))
-}
-
-fn parse_env_or_default<T>(name: &str, default: T) -> Result<T>
-where
-    T: FromStr + Copy,
-    T::Err: Display,
-{
-    match env::var(name) {
-        Ok(raw) => raw
-            .trim()
-            .parse::<T>()
-            .map_err(|err| anyhow!("failed to parse {name}={raw:?}: {err}")),
-        Err(env::VarError::NotPresent) => Ok(default),
-        Err(err) => Err(anyhow!("failed to read {name}: {err}")),
-    }
 }

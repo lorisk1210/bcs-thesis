@@ -76,17 +76,19 @@ fn plain_ingest_report_shows_metrics() {
 fn plain_node_query_released() {
     let data = NodeQueryReleasedData {
         release_id: "r-123".to_string(),
+        release_mode: "raw".to_string(),
         template: "cohort_feasibility_count".to_string(),
         cohort_size: 42,
         budget_spent: 1.0,
         budget_remaining: 9.0,
-        noisy_result: serde_json::json!({"count": 42}),
+        released_result: serde_json::json!({"count": 42}),
     };
     let out = render_node_query_released(OutputMode::Plain, &data);
     assert!(out.contains("status: released"));
     assert!(out.contains("release_id: r-123"));
+    assert!(out.contains("release_mode: raw"));
     assert!(out.contains("cohort_size: 42"));
-    assert!(out.contains("noisy_result: {\"count\":42}"));
+    assert!(out.contains("released_result: {\"count\":42}"));
 }
 
 #[test]
@@ -118,14 +120,16 @@ fn plain_inspect_renders_tables() {
 fn plain_orchestrator_query_released() {
     let data = OrchestratorQueryReleasedData {
         job_id: "job-1".to_string(),
+        release_mode: "dp".to_string(),
         template: "cohort_feasibility_count".to_string(),
         participating_nodes: 3,
         cohort_size: 100,
-        noisy_result: serde_json::json!({"count": 99}),
+        released_result: serde_json::json!({"count": 99}),
     };
     let out = render_orchestrator_query_released(OutputMode::Plain, &data);
     assert!(out.contains("status: released"));
     assert!(out.contains("job_id: job-1"));
+    assert!(out.contains("release_mode: dp"));
     assert!(out.contains("participating_nodes: 3"));
 }
 

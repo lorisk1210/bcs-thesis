@@ -139,11 +139,12 @@ pub fn render_ingest(mode: OutputMode, r: &IngestReportData) -> String {
 
 pub struct NodeQueryReleasedData {
     pub release_id: String,
+    pub release_mode: String,
     pub template: String,
     pub cohort_size: usize,
     pub budget_spent: f64,
     pub budget_remaining: f64,
-    pub noisy_result: Value,
+    pub released_result: Value,
 }
 
 pub struct NodeQueryRejectedData {
@@ -160,6 +161,7 @@ pub fn render_node_query_released(mode: OutputMode, d: &NodeQueryReleasedData) -
             let badge = status_badge(mode, "released");
             let mut out = format!("{t}\n\n  {badge}\n\n");
             let _ = writeln!(out, "{}", key_value(mode, "release_id", &d.release_id));
+            let _ = writeln!(out, "{}", key_value(mode, "release_mode", &d.release_mode));
             let _ = writeln!(out, "{}", key_value(mode, "template", &d.template));
             let _ = writeln!(
                 out,
@@ -180,17 +182,18 @@ pub fn render_node_query_released(mode: OutputMode, d: &NodeQueryReleasedData) -
                     &format!("{:.4}", d.budget_remaining),
                 )
             );
-            let _ = writeln!(out, "{}", indent_json(mode, &d.noisy_result));
+            let _ = writeln!(out, "{}", indent_json(mode, &d.released_result));
             out
         }
         OutputMode::Plain => format!(
-            "release_id: {}\nstatus: released\ntemplate: {}\ncohort_size: {}\nbudget_spent: {:.4}\nbudget_remaining: {:.4}\nnoisy_result: {}\n",
+            "release_id: {}\nstatus: released\nrelease_mode: {}\ntemplate: {}\ncohort_size: {}\nbudget_spent: {:.4}\nbudget_remaining: {:.4}\nreleased_result: {}\n",
             d.release_id,
+            d.release_mode,
             d.template,
             d.cohort_size,
             d.budget_spent,
             d.budget_remaining,
-            d.noisy_result
+            d.released_result
         ),
     };
     frame_cli_output(mode, inner)
