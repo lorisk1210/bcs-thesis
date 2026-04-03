@@ -82,17 +82,17 @@ fn render_validation_section(name: &str, section: &ComparisonSection) -> String 
         ));
     }
     if let Some(left_payload) = &section.left_payload {
-        out.push_str(&format!(
-            "    {}: {}\n",
-            section.left_label,
-            serde_json::to_string(left_payload).unwrap_or_else(|_| "null".to_string())
+        out.push_str(&render_labeled_payload(
+            &section.left_label,
+            left_payload,
+            "    ",
         ));
     }
     if let Some(right_payload) = &section.right_payload {
-        out.push_str(&format!(
-            "    {}: {}\n",
-            section.right_label,
-            serde_json::to_string(right_payload).unwrap_or_else(|_| "null".to_string())
+        out.push_str(&render_labeled_payload(
+            &section.right_label,
+            right_payload,
+            "    ",
         ));
     }
     if !section.rejections.is_empty() {
@@ -120,41 +120,11 @@ fn render_payload_comparison_section(name: &str, section: &PayloadComparisonSect
     let mut out = String::new();
     out.push_str(&format!("{name}:\n"));
     out.push_str(&format!("  status: {}\n", analysis_status_name(section.status)));
-    if let Some(left_payload) = &section.left_payload {
-        out.push_str(&format!(
-            "  {}: {}\n",
-            section.left_label,
-            serde_json::to_string(left_payload).unwrap_or_else(|_| "null".to_string())
-        ));
+    if let Some((label, payload)) = displayed_payload_pair_left(section) {
+        out.push_str(&render_labeled_payload(label, payload, "  "));
     }
-    if let Some(right_payload) = &section.right_payload {
-        out.push_str(&format!(
-            "  {}: {}\n",
-            section.right_label,
-            serde_json::to_string(right_payload).unwrap_or_else(|_| "null".to_string())
-        ));
-    }
-    if let Some(label) = &section.compared_left_label {
-        out.push_str(&format!(
-            "  {}: {}\n",
-            label,
-            serde_json::to_string(&section.compared_left_payload)
-                .unwrap_or_else(|_| "null".to_string())
-        ));
-    }
-    if let Some(label) = &section.compared_right_label {
-        out.push_str(&format!(
-            "  {}: {}\n",
-            label,
-            serde_json::to_string(&section.compared_right_payload)
-                .unwrap_or_else(|_| "null".to_string())
-        ));
-    }
-    if !section.notes.is_empty() {
-        out.push_str("  notes:\n");
-        for note in &section.notes {
-            out.push_str(&format!("    - {note}\n"));
-        }
+    if let Some((label, payload)) = displayed_payload_pair_right(section) {
+        out.push_str(&render_labeled_payload(label, payload, "  "));
     }
     if !section.rejections.is_empty() {
         out.push_str("  rejections:\n");
@@ -191,12 +161,6 @@ fn render_template_metrics_section(section: &TemplateMetricsSection) -> String {
             out.push_str(&render_metric(metric, "    "));
         }
     }
-    if !section.notes.is_empty() {
-        out.push_str("  notes:\n");
-        for note in &section.notes {
-            out.push_str(&format!("    - {note}\n"));
-        }
-    }
     if !section.rejections.is_empty() {
         out.push_str("  rejections:\n");
         for rejection in &section.rejections {
@@ -212,36 +176,111 @@ fn render_template_metrics_section(section: &TemplateMetricsSection) -> String {
 fn render_metric(metric: &MetricComparison, indent: &str) -> String {
     let mut out = String::new();
     out.push_str(&format!("{indent}- name: {}\n", metric.name));
-    out.push_str(&format!(
-        "{indent}  released_value: {}\n",
-        serde_json::to_string(&metric.released_value).unwrap_or_else(|_| "null".to_string())
+    out.push_str(&render_labeled_payload(
+        "released_value",
+        &metric.released_value,
+        &format!("{indent}  "),
     ));
-    out.push_str(&format!(
-        "{indent}  exact_raw_value: {}\n",
-        serde_json::to_string(&metric.exact_raw_value).unwrap_or_else(|_| "null".to_string())
+    out.push_str(&render_labeled_payload(
+        "exact_raw_value",
+        &metric.exact_raw_value,
+        &format!("{indent}  "),
     ));
     if let Some(difference) = &metric.difference {
-        out.push_str(&format!(
-            "{indent}  difference: {}\n",
-            serde_json::to_string(difference).unwrap_or_else(|_| "null".to_string())
+        out.push_str(&render_labeled_payload(
+            "difference",
+            difference,
+            &format!("{indent}  "),
         ));
     }
     if let Some(absolute_gap) = &metric.absolute_gap {
-        out.push_str(&format!(
-            "{indent}  absolute_gap: {}\n",
-            serde_json::to_string(absolute_gap).unwrap_or_else(|_| "null".to_string())
+        out.push_str(&render_labeled_payload(
+            "absolute_gap",
+            absolute_gap,
+            &format!("{indent}  "),
         ));
     }
     if let Some(relative_gap) = &metric.relative_gap {
-        out.push_str(&format!(
-            "{indent}  relative_gap: {}\n",
-            serde_json::to_string(relative_gap).unwrap_or_else(|_| "null".to_string())
+        out.push_str(&render_labeled_payload(
+            "relative_gap",
+            relative_gap,
+            &format!("{indent}  "),
         ));
     }
-    if let Some(note) = &metric.note {
-        out.push_str(&format!("{indent}  note: {note}\n"));
+    out
+}
+
+fn displayed_payload_pair_left(
+    section: &PayloadComparisonSection,
+) -> Option<(&str, &serde_json::Value)> {
+    section
+        .compared_left_label
+        .as_deref()
+        .zip(section.compared_left_payload.as_ref())
+        .or_else(|| {
+            section
+                .left_payload
+                .as_ref()
+                .map(|payload| (section.left_label.as_str(), payload))
+        })
+}
+
+fn displayed_payload_pair_right(
+    section: &PayloadComparisonSection,
+) -> Option<(&str, &serde_json::Value)> {
+    section
+        .compared_right_label
+        .as_deref()
+        .zip(section.compared_right_payload.as_ref())
+        .or_else(|| {
+            section
+                .right_payload
+                .as_ref()
+                .map(|payload| (section.right_label.as_str(), payload))
+        })
+}
+
+fn render_labeled_payload(label: &str, payload: &serde_json::Value, indent: &str) -> String {
+    let mut out = String::new();
+    out.push_str(&format!("{indent}{label}:\n"));
+    for (path, value) in flatten_value(payload) {
+        out.push_str(&format!("{indent}  {path}: {value}\n"));
     }
     out
+}
+
+fn flatten_value(value: &serde_json::Value) -> Vec<(String, String)> {
+    let mut rows = Vec::new();
+    flatten_value_into(None, value, &mut rows);
+    rows
+}
+
+fn flatten_value_into(
+    prefix: Option<String>,
+    value: &serde_json::Value,
+    rows: &mut Vec<(String, String)>,
+) {
+    match value {
+        serde_json::Value::Object(map) if !map.is_empty() => {
+            for (key, child) in map {
+                let next_prefix = prefix
+                    .as_ref()
+                    .map(|prefix| format!("{prefix}.{key}"))
+                    .unwrap_or_else(|| key.clone());
+                flatten_value_into(Some(next_prefix), child, rows);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            let key = prefix.unwrap_or_else(|| "value".to_string());
+            let value = serde_json::to_string(items).unwrap_or_else(|_| "[]".to_string());
+            rows.push((key, value));
+        }
+        _ => {
+            let key = prefix.unwrap_or_else(|| "value".to_string());
+            let value = serde_json::to_string(value).unwrap_or_else(|_| "null".to_string());
+            rows.push((key, value));
+        }
+    }
 }
 
 pub(crate) fn section_status_name(status: SectionStatus) -> &'static str {
