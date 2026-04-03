@@ -245,13 +245,18 @@ fn render_validation_section_plain(section: &CheckSectionData, indent: &str) -> 
         let _ = writeln!(out, "{indent}  expectation: {expectation}");
     }
     if let Some(ref left_payload) = section.left_payload {
-        let json_str = serde_json::to_string(left_payload).unwrap_or_else(|_| "null".to_string());
-        let _ = writeln!(out, "{indent}  {}: {}", section.left_label, json_str);
+        out.push_str(&render_labeled_payload_plain(
+            &section.left_label,
+            left_payload,
+            &format!("{indent}  "),
+        ));
     }
     if let Some(ref right_payload) = section.right_payload {
-        let json_str =
-            serde_json::to_string(right_payload).unwrap_or_else(|_| "null".to_string());
-        let _ = writeln!(out, "{indent}  {}: {}", section.right_label, json_str);
+        out.push_str(&render_labeled_payload_plain(
+            &section.right_label,
+            right_payload,
+            &format!("{indent}  "),
+        ));
     }
     if !section.rejections.is_empty() {
         let _ = writeln!(out, "{indent}  rejections:");
@@ -287,13 +292,18 @@ fn render_validation_section_pretty(mode: OutputMode, section: &CheckSectionData
         let _ = writeln!(out, "{}", key_value(mode, "expectation", expectation));
     }
     if let Some(ref left_payload) = section.left_payload {
-        let json_str = serde_json::to_string(left_payload).unwrap_or_else(|_| "null".to_string());
-        let _ = writeln!(out, "{}", key_value(mode, &section.left_label, &json_str));
+        out.push_str(&render_labeled_payload_pretty(
+            mode,
+            &section.left_label,
+            left_payload,
+        ));
     }
     if let Some(ref right_payload) = section.right_payload {
-        let json_str =
-            serde_json::to_string(right_payload).unwrap_or_else(|_| "null".to_string());
-        let _ = writeln!(out, "{}", key_value(mode, &section.right_label, &json_str));
+        out.push_str(&render_labeled_payload_pretty(
+            mode,
+            &section.right_label,
+            right_payload,
+        ));
     }
     if !section.rejections.is_empty() {
         let _ = writeln!(out, "{}", section_header(mode, "rejections"));
@@ -325,30 +335,11 @@ fn render_payload_comparison_plain(
     let mut out = String::new();
     let _ = writeln!(out, "{name}:");
     let _ = writeln!(out, "  status: {}", section.status);
-    if let Some(ref left_payload) = section.left_payload {
-        let json_str = serde_json::to_string(left_payload).unwrap_or_else(|_| "null".to_string());
-        let _ = writeln!(out, "  {}: {}", section.left_label, json_str);
+    if let Some((label, payload)) = displayed_payload_pair_left(section) {
+        out.push_str(&render_labeled_payload_plain(label, payload, "  "));
     }
-    if let Some(ref right_payload) = section.right_payload {
-        let json_str =
-            serde_json::to_string(right_payload).unwrap_or_else(|_| "null".to_string());
-        let _ = writeln!(out, "  {}: {}", section.right_label, json_str);
-    }
-    if let Some(ref label) = section.compared_left_label {
-        let json_str = serde_json::to_string(&section.compared_left_payload)
-            .unwrap_or_else(|_| "null".to_string());
-        let _ = writeln!(out, "  {}: {}", label, json_str);
-    }
-    if let Some(ref label) = section.compared_right_label {
-        let json_str = serde_json::to_string(&section.compared_right_payload)
-            .unwrap_or_else(|_| "null".to_string());
-        let _ = writeln!(out, "  {}: {}", label, json_str);
-    }
-    if !section.notes.is_empty() {
-        let _ = writeln!(out, "  notes:");
-        for note in &section.notes {
-            let _ = writeln!(out, "    - {note}");
-        }
+    if let Some((label, payload)) = displayed_payload_pair_right(section) {
+        out.push_str(&render_labeled_payload_plain(label, payload, "  "));
     }
     if !section.rejections.is_empty() {
         let _ = writeln!(out, "  rejections:");
@@ -384,30 +375,11 @@ fn render_payload_comparison_pretty(
     let _ = writeln!(out, "    {badge}");
     let _ = writeln!(out);
 
-    if let Some(ref left_payload) = section.left_payload {
-        let json_str = serde_json::to_string(left_payload).unwrap_or_else(|_| "null".to_string());
-        let _ = writeln!(out, "{}", key_value(mode, &section.left_label, &json_str));
+    if let Some((label, payload)) = displayed_payload_pair_left(section) {
+        out.push_str(&render_labeled_payload_pretty(mode, label, payload));
     }
-    if let Some(ref right_payload) = section.right_payload {
-        let json_str =
-            serde_json::to_string(right_payload).unwrap_or_else(|_| "null".to_string());
-        let _ = writeln!(out, "{}", key_value(mode, &section.right_label, &json_str));
-    }
-    if let Some(ref label) = section.compared_left_label {
-        let json_str = serde_json::to_string(&section.compared_left_payload)
-            .unwrap_or_else(|_| "null".to_string());
-        let _ = writeln!(out, "{}", key_value(mode, label, &json_str));
-    }
-    if let Some(ref label) = section.compared_right_label {
-        let json_str = serde_json::to_string(&section.compared_right_payload)
-            .unwrap_or_else(|_| "null".to_string());
-        let _ = writeln!(out, "{}", key_value(mode, label, &json_str));
-    }
-    if !section.notes.is_empty() {
-        let _ = writeln!(out, "{}", section_header(mode, "notes"));
-        for note in &section.notes {
-            let _ = writeln!(out, "    {DARK_GRAY}•{RESET} {note}");
-        }
+    if let Some((label, payload)) = displayed_payload_pair_right(section) {
+        out.push_str(&render_labeled_payload_pretty(mode, label, payload));
     }
     if !section.rejections.is_empty() {
         let _ = writeln!(out, "{}", section_header(mode, "rejections"));
@@ -446,12 +418,6 @@ fn render_template_metrics_plain(section: &CheckTemplateMetricsData) -> String {
             out.push_str(&render_metric_plain(metric, "    "));
         }
     }
-    if !section.notes.is_empty() {
-        let _ = writeln!(out, "  notes:");
-        for note in &section.notes {
-            let _ = writeln!(out, "    - {note}");
-        }
-    }
     if !section.rejections.is_empty() {
         let _ = writeln!(out, "  rejections:");
         for rejection in &section.rejections {
@@ -485,12 +451,6 @@ fn render_template_metrics_pretty(
             out.push_str(&render_metric_pretty(mode, metric));
         }
     }
-    if !section.notes.is_empty() {
-        let _ = writeln!(out, "{}", section_header(mode, "notes"));
-        for note in &section.notes {
-            let _ = writeln!(out, "    {DARK_GRAY}•{RESET} {note}");
-        }
-    }
     if !section.rejections.is_empty() {
         let _ = writeln!(out, "{}", section_header(mode, "rejections"));
         for rejection in &section.rejections {
@@ -507,39 +467,36 @@ fn render_template_metrics_pretty(
 fn render_metric_plain(metric: &CheckMetricData, indent: &str) -> String {
     let mut out = String::new();
     let _ = writeln!(out, "{indent}- name: {}", metric.name);
-    let _ = writeln!(
-        out,
-        "{indent}  released_value: {}",
-        serde_json::to_string(&metric.released_value).unwrap_or_else(|_| "null".to_string())
-    );
-    let _ = writeln!(
-        out,
-        "{indent}  exact_raw_value: {}",
-        serde_json::to_string(&metric.exact_raw_value).unwrap_or_else(|_| "null".to_string())
-    );
+    out.push_str(&render_labeled_payload_plain(
+        "released_value",
+        &metric.released_value,
+        &format!("{indent}  "),
+    ));
+    out.push_str(&render_labeled_payload_plain(
+        "exact_raw_value",
+        &metric.exact_raw_value,
+        &format!("{indent}  "),
+    ));
     if let Some(ref difference) = metric.difference {
-        let _ = writeln!(
-            out,
-            "{indent}  difference: {}",
-            serde_json::to_string(difference).unwrap_or_else(|_| "null".to_string())
-        );
+        out.push_str(&render_labeled_payload_plain(
+            "difference",
+            difference,
+            &format!("{indent}  "),
+        ));
     }
     if let Some(ref absolute_gap) = metric.absolute_gap {
-        let _ = writeln!(
-            out,
-            "{indent}  absolute_gap: {}",
-            serde_json::to_string(absolute_gap).unwrap_or_else(|_| "null".to_string())
-        );
+        out.push_str(&render_labeled_payload_plain(
+            "absolute_gap",
+            absolute_gap,
+            &format!("{indent}  "),
+        ));
     }
     if let Some(ref relative_gap) = metric.relative_gap {
-        let _ = writeln!(
-            out,
-            "{indent}  relative_gap: {}",
-            serde_json::to_string(relative_gap).unwrap_or_else(|_| "null".to_string())
-        );
-    }
-    if let Some(ref note) = metric.note {
-        let _ = writeln!(out, "{indent}  note: {note}");
+        out.push_str(&render_labeled_payload_plain(
+            "relative_gap",
+            relative_gap,
+            &format!("{indent}  "),
+        ));
     }
     out
 }
@@ -547,29 +504,99 @@ fn render_metric_plain(metric: &CheckMetricData, indent: &str) -> String {
 fn render_metric_pretty(mode: OutputMode, metric: &CheckMetricData) -> String {
     let mut out = String::new();
     let _ = writeln!(out, "    {DARK_GRAY}•{RESET} {BOLD}{}{RESET}", metric.name);
-    let released_value =
-        serde_json::to_string(&metric.released_value).unwrap_or_else(|_| "null".to_string());
-    let exact_raw_value =
-        serde_json::to_string(&metric.exact_raw_value).unwrap_or_else(|_| "null".to_string());
-    let _ = writeln!(out, "{}", key_value(mode, "released_value", &released_value));
-    let _ = writeln!(out, "{}", key_value(mode, "exact_raw_value", &exact_raw_value));
+    out.push_str(&render_labeled_payload_pretty(
+        mode,
+        "released_value",
+        &metric.released_value,
+    ));
+    out.push_str(&render_labeled_payload_pretty(
+        mode,
+        "exact_raw_value",
+        &metric.exact_raw_value,
+    ));
     if let Some(ref difference) = metric.difference {
-        let json_str = serde_json::to_string(difference).unwrap_or_else(|_| "null".to_string());
-        let _ = writeln!(out, "{}", key_value(mode, "difference", &json_str));
+        out.push_str(&render_labeled_payload_pretty(mode, "difference", difference));
     }
     if let Some(ref absolute_gap) = metric.absolute_gap {
-        let json_str =
-            serde_json::to_string(absolute_gap).unwrap_or_else(|_| "null".to_string());
-        let _ = writeln!(out, "{}", key_value(mode, "absolute_gap", &json_str));
+        out.push_str(&render_labeled_payload_pretty(mode, "absolute_gap", absolute_gap));
     }
     if let Some(ref relative_gap) = metric.relative_gap {
-        let json_str =
-            serde_json::to_string(relative_gap).unwrap_or_else(|_| "null".to_string());
-        let _ = writeln!(out, "{}", key_value(mode, "relative_gap", &json_str));
-    }
-    if let Some(ref note) = metric.note {
-        let _ = writeln!(out, "{}", key_value(mode, "note", note));
+        out.push_str(&render_labeled_payload_pretty(mode, "relative_gap", relative_gap));
     }
     let _ = writeln!(out);
     out
+}
+
+fn displayed_payload_pair_left(section: &CheckPayloadComparisonData) -> Option<(&str, &Value)> {
+    section
+        .compared_left_label
+        .as_deref()
+        .zip(section.compared_left_payload.as_ref())
+        .or_else(|| {
+            section
+                .left_payload
+                .as_ref()
+                .map(|payload| (section.left_label.as_str(), payload))
+        })
+}
+
+fn displayed_payload_pair_right(section: &CheckPayloadComparisonData) -> Option<(&str, &Value)> {
+    section
+        .compared_right_label
+        .as_deref()
+        .zip(section.compared_right_payload.as_ref())
+        .or_else(|| {
+            section
+                .right_payload
+                .as_ref()
+                .map(|payload| (section.right_label.as_str(), payload))
+        })
+}
+
+fn render_labeled_payload_plain(label: &str, payload: &Value, indent: &str) -> String {
+    let mut out = String::new();
+    let _ = writeln!(out, "{indent}{label}:");
+    for (path, value) in flatten_value(payload) {
+        let _ = writeln!(out, "{indent}  {path}: {value}");
+    }
+    out
+}
+
+fn render_labeled_payload_pretty(mode: OutputMode, label: &str, payload: &Value) -> String {
+    let mut out = String::new();
+    let _ = writeln!(out, "    {BOLD}{label}{RESET}");
+    for (path, value) in flatten_value(payload) {
+        let _ = writeln!(out, "{}", key_value(mode, &path, &value));
+    }
+    out
+}
+
+fn flatten_value(value: &Value) -> Vec<(String, String)> {
+    let mut rows = Vec::new();
+    flatten_value_into(None, value, &mut rows);
+    rows
+}
+
+fn flatten_value_into(prefix: Option<String>, value: &Value, rows: &mut Vec<(String, String)>) {
+    match value {
+        Value::Object(map) if !map.is_empty() => {
+            for (key, child) in map {
+                let next_prefix = prefix
+                    .as_ref()
+                    .map(|prefix| format!("{prefix}.{key}"))
+                    .unwrap_or_else(|| key.clone());
+                flatten_value_into(Some(next_prefix), child, rows);
+            }
+        }
+        Value::Array(items) => {
+            let key = prefix.unwrap_or_else(|| "value".to_string());
+            let value = serde_json::to_string(items).unwrap_or_else(|_| "[]".to_string());
+            rows.push((key, value));
+        }
+        _ => {
+            let key = prefix.unwrap_or_else(|| "value".to_string());
+            let value = serde_json::to_string(value).unwrap_or_else(|_| "null".to_string());
+            rows.push((key, value));
+        }
+    }
 }
