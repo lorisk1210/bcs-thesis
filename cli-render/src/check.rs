@@ -167,15 +167,15 @@ pub fn render_check_compare_report(mode: OutputMode, r: &CheckCompareReportData)
             }
         }
         out.push_str("---\n");
-        out.push_str("validation:\n");
-        for section in &r.validation_sections {
-            out.push_str(&render_validation_section_plain(section, "  "));
-        }
-        out.push_str("---\n");
         out.push_str(&render_payload_comparison_plain(
             "release_vs_exact_raw",
             &r.release_vs_exact_raw,
         ));
+        out.push_str("---\n");
+        out.push_str("validation:\n");
+        for section in &r.validation_sections {
+            out.push_str(&render_validation_section_plain(section, "  "));
+        }
         out.push_str("---\n");
         out.push_str(&render_template_metrics_plain(&r.template_metrics));
         out
@@ -217,18 +217,18 @@ pub fn render_check_compare_report(mode: OutputMode, r: &CheckCompareReportData)
         }
 
         let _ = writeln!(out, "__SEPARATOR__");
-        let _ = writeln!(out, "{}", section_header(mode, "Validation"));
-        for section in &r.validation_sections {
-            let _ = writeln!(out);
-            out.push_str(&render_validation_section_pretty(mode, section));
-        }
-
-        let _ = writeln!(out, "__SEPARATOR__");
         out.push_str(&render_payload_comparison_pretty(
             mode,
             "Release Vs Exact Raw",
             &r.release_vs_exact_raw,
         ));
+
+        let _ = writeln!(out, "__SEPARATOR__");
+        let _ = writeln!(out, "{}", section_header(mode, "Validation"));
+        for section in &r.validation_sections {
+            let _ = writeln!(out);
+            out.push_str(&render_validation_section_pretty(mode, section));
+        }
 
         let _ = writeln!(out, "__SEPARATOR__");
         out.push_str(&render_template_metrics_pretty(mode, &r.template_metrics));
@@ -283,44 +283,42 @@ fn render_validation_section_plain(section: &CheckSectionData, indent: &str) -> 
 
 fn render_validation_section_pretty(mode: OutputMode, section: &CheckSectionData) -> String {
     let mut out = String::new();
-    let _ = writeln!(out, "{}", section_header(mode, &section.name));
     let badge = status_badge(mode, &section.status);
-    let _ = writeln!(out, "    {badge}");
-    let _ = writeln!(out);
+    let _ = writeln!(out, "    {BOLD}{}{RESET}  {badge}", section.name);
 
     if let Some(ref expectation) = section.expectation {
         let _ = writeln!(out, "{}", key_value(mode, "expectation", expectation));
     }
     if let Some(ref left_payload) = section.left_payload {
         out.push_str(&render_labeled_payload_pretty(
-            mode,
             &section.left_label,
             left_payload,
+            "    ",
         ));
     }
     if let Some(ref right_payload) = section.right_payload {
         out.push_str(&render_labeled_payload_pretty(
-            mode,
             &section.right_label,
             right_payload,
+            "    ",
         ));
     }
     if !section.rejections.is_empty() {
-        let _ = writeln!(out, "{}", section_header(mode, "rejections"));
+        let _ = writeln!(out, "    {DARK_GRAY}•{RESET} {BOLD}rejections{RESET}");
         for r in &section.rejections {
             let _ = writeln!(
                 out,
-                "    {DARK_GRAY}•{RESET} {} @ {}: {}",
+                "      {} @ {}: {}",
                 r.node_id, r.endpoint, r.reason
             );
         }
     }
     if !section.diffs.is_empty() {
-        let _ = writeln!(out, "{}", section_header(mode, "diffs"));
+        let _ = writeln!(out, "    {DARK_GRAY}•{RESET} {BOLD}diffs{RESET}");
         for d in &section.diffs {
             let _ = writeln!(
                 out,
-                "    {DARK_GRAY}•{RESET} {BOLD}{}{RESET} => left={}, right={}",
+                "      {BOLD}{}{RESET} => left={}, right={}",
                 d.path, d.left, d.right
             );
         }
@@ -370,16 +368,15 @@ fn render_payload_comparison_pretty(
     section: &CheckPayloadComparisonData,
 ) -> String {
     let mut out = String::new();
-    let _ = writeln!(out, "{}", section_header(mode, title_text));
     let badge = status_badge(mode, &section.status);
-    let _ = writeln!(out, "    {badge}");
+    let _ = writeln!(out, "{}  {badge}", section_header(mode, title_text));
     let _ = writeln!(out);
 
     if let Some((label, payload)) = displayed_payload_pair_left(section) {
-        out.push_str(&render_labeled_payload_pretty(mode, label, payload));
+        out.push_str(&render_labeled_payload_pretty(label, payload, "    "));
     }
     if let Some((label, payload)) = displayed_payload_pair_right(section) {
-        out.push_str(&render_labeled_payload_pretty(mode, label, payload));
+        out.push_str(&render_labeled_payload_pretty(label, payload, "    "));
     }
     if !section.rejections.is_empty() {
         let _ = writeln!(out, "{}", section_header(mode, "rejections"));
@@ -436,27 +433,26 @@ fn render_template_metrics_pretty(
     section: &CheckTemplateMetricsData,
 ) -> String {
     let mut out = String::new();
-    let _ = writeln!(out, "{}", section_header(mode, "Template Metrics"));
     let badge = status_badge(mode, &section.status);
-    let _ = writeln!(out, "    {badge}");
+    let _ = writeln!(out, "{}  {badge}", section_header(mode, "Template Metrics"));
     let _ = writeln!(out);
 
     if let Some(ref metric) = section.primary_metric {
-        let _ = writeln!(out, "{}", section_header(mode, "primary_metric"));
-        out.push_str(&render_metric_pretty(mode, metric));
+        let _ = writeln!(out, "    {BOLD}primary_metric{RESET}");
+        out.push_str(&render_metric_pretty(metric));
     }
     if !section.context_metrics.is_empty() {
-        let _ = writeln!(out, "{}", section_header(mode, "context_metrics"));
+        let _ = writeln!(out, "    {BOLD}context_metrics{RESET}");
         for metric in &section.context_metrics {
-            out.push_str(&render_metric_pretty(mode, metric));
+            out.push_str(&render_metric_pretty(metric));
         }
     }
     if !section.rejections.is_empty() {
-        let _ = writeln!(out, "{}", section_header(mode, "rejections"));
+        let _ = writeln!(out, "    {BOLD}rejections{RESET}");
         for rejection in &section.rejections {
             let _ = writeln!(
                 out,
-                "    {DARK_GRAY}•{RESET} {} @ {}: {}",
+                "      {DARK_GRAY}•{RESET} {} @ {}: {}",
                 rejection.node_id, rejection.endpoint, rejection.reason
             );
         }
@@ -501,27 +497,27 @@ fn render_metric_plain(metric: &CheckMetricData, indent: &str) -> String {
     out
 }
 
-fn render_metric_pretty(mode: OutputMode, metric: &CheckMetricData) -> String {
+fn render_metric_pretty(metric: &CheckMetricData) -> String {
     let mut out = String::new();
-    let _ = writeln!(out, "    {DARK_GRAY}•{RESET} {BOLD}{}{RESET}", metric.name);
+    let _ = writeln!(out, "      {DARK_GRAY}•{RESET} {BOLD}{}{RESET}", metric.name);
     out.push_str(&render_labeled_payload_pretty(
-        mode,
         "released_value",
         &metric.released_value,
+        "        ",
     ));
     out.push_str(&render_labeled_payload_pretty(
-        mode,
         "exact_raw_value",
         &metric.exact_raw_value,
+        "        ",
     ));
     if let Some(ref difference) = metric.difference {
-        out.push_str(&render_labeled_payload_pretty(mode, "difference", difference));
+        out.push_str(&render_labeled_payload_pretty("difference", difference, "        "));
     }
     if let Some(ref absolute_gap) = metric.absolute_gap {
-        out.push_str(&render_labeled_payload_pretty(mode, "absolute_gap", absolute_gap));
+        out.push_str(&render_labeled_payload_pretty("absolute_gap", absolute_gap, "        "));
     }
     if let Some(ref relative_gap) = metric.relative_gap {
-        out.push_str(&render_labeled_payload_pretty(mode, "relative_gap", relative_gap));
+        out.push_str(&render_labeled_payload_pretty("relative_gap", relative_gap, "        "));
     }
     let _ = writeln!(out);
     out
@@ -562,11 +558,11 @@ fn render_labeled_payload_plain(label: &str, payload: &Value, indent: &str) -> S
     out
 }
 
-fn render_labeled_payload_pretty(mode: OutputMode, label: &str, payload: &Value) -> String {
+fn render_labeled_payload_pretty(label: &str, payload: &Value, indent: &str) -> String {
     let mut out = String::new();
-    let _ = writeln!(out, "    {BOLD}{label}{RESET}");
+    let _ = writeln!(out, "{indent}{BOLD}{label}{RESET}");
     for (path, value) in flatten_value(payload) {
-        let _ = writeln!(out, "{}", key_value(mode, &path, &value));
+        let _ = writeln!(out, "{indent}  {DARK_GRAY}•{RESET} {DIM}{path}:{RESET} {value}");
     }
     out
 }
