@@ -166,14 +166,17 @@ pub fn render_check_compare_report(mode: OutputMode, r: &CheckCompareReportData)
                 );
             }
         }
+        out.push_str("---\n");
         out.push_str("validation:\n");
         for section in &r.validation_sections {
             out.push_str(&render_validation_section_plain(section, "  "));
         }
+        out.push_str("---\n");
         out.push_str(&render_payload_comparison_plain(
             "release_vs_exact_raw",
             &r.release_vs_exact_raw,
         ));
+        out.push_str("---\n");
         out.push_str(&render_template_metrics_plain(&r.template_metrics));
         out
     } else {
@@ -213,21 +216,21 @@ pub fn render_check_compare_report(mode: OutputMode, r: &CheckCompareReportData)
             }
         }
 
-        let _ = writeln!(out);
+        let _ = writeln!(out, "__SEPARATOR__");
         let _ = writeln!(out, "{}", section_header(mode, "Validation"));
         for section in &r.validation_sections {
             let _ = writeln!(out);
             out.push_str(&render_validation_section_pretty(mode, section));
         }
 
-        let _ = writeln!(out);
+        let _ = writeln!(out, "__SEPARATOR__");
         out.push_str(&render_payload_comparison_pretty(
             mode,
             "Release Vs Exact Raw",
             &r.release_vs_exact_raw,
         ));
 
-        let _ = writeln!(out);
+        let _ = writeln!(out, "__SEPARATOR__");
         out.push_str(&render_template_metrics_pretty(mode, &r.template_metrics));
         out
     };
