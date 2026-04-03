@@ -8,10 +8,11 @@ use crate::frame::frame_cli_output;
 
 pub struct OrchestratorQueryReleasedData {
     pub job_id: String,
+    pub release_mode: String,
     pub template: String,
     pub participating_nodes: usize,
     pub cohort_size: usize,
-    pub noisy_result: Value,
+    pub released_result: Value,
 }
 
 pub struct OrchestratorQueryRejectedData {
@@ -29,6 +30,7 @@ pub fn render_orchestrator_query_released(
             let badge = status_badge(mode, "released");
             let mut out = format!("{t}\n\n  {badge}\n\n");
             let _ = writeln!(out, "{}", key_value(mode, "job_id", &d.job_id));
+            let _ = writeln!(out, "{}", key_value(mode, "release_mode", &d.release_mode));
             let _ = writeln!(out, "{}", key_value(mode, "template", &d.template));
             let _ = writeln!(
                 out,
@@ -44,12 +46,17 @@ pub fn render_orchestrator_query_released(
                 "{}",
                 key_value(mode, "cohort_size", &d.cohort_size.to_string())
             );
-            let _ = writeln!(out, "{}", indent_json(mode, &d.noisy_result));
+            let _ = writeln!(out, "{}", indent_json(mode, &d.released_result));
             out
         }
         OutputMode::Plain => format!(
-            "job_id: {}\nstatus: released\ntemplate: {}\nparticipating_nodes: {}\ncohort_size: {}\nnoisy_result: {}\n",
-            d.job_id, d.template, d.participating_nodes, d.cohort_size, d.noisy_result
+            "job_id: {}\nstatus: released\nrelease_mode: {}\ntemplate: {}\nparticipating_nodes: {}\ncohort_size: {}\nreleased_result: {}\n",
+            d.job_id,
+            d.release_mode,
+            d.template,
+            d.participating_nodes,
+            d.cohort_size,
+            d.released_result
         ),
     };
     frame_cli_output(mode, inner)

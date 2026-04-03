@@ -5,8 +5,7 @@
 use anyhow::{Result, anyhow};
 use chrono::Utc;
 use duckdb::{Connection, Transaction, params};
-use refinery_protocol::dp::{apply_noise, count_noised_metrics};
-use refinery_protocol::QueryResult;
+use refinery_protocol::{QueryResult, ReleaseMode, release_query_result};
 use serde_json::Value;
 
 // Struct for the privacy configuration
@@ -15,6 +14,22 @@ pub struct PrivacyConfig {
     pub epsilon: f64,
     pub min_cohort: usize,
     pub total_budget: f64,
+    pub release_mode: ReleaseMode,
+    pub dp_seed: Option<u64>,
+}
+
+impl PrivacyConfig {
+    fn consumes_budget(&self) -> bool {
+        self.release_mode.consumes_budget()
+    }
+
+    fn recorded_epsilon(&self) -> f64 {
+        if self.consumes_budget() {
+            self.epsilon
+        } else {
+            0.0
+        }
+    }
 }
 
 // Struct for the release result
@@ -23,7 +38,8 @@ pub struct ReleaseResult {
     pub release_id: String,
     pub accepted: bool,
     pub reason: String,
-    pub noisy_result: Option<Value>,
+    pub release_mode: ReleaseMode,
+    pub released_result: Option<Value>,
     pub budget_spent: f64,
     pub budget_remaining: f64,
 }
@@ -42,10 +58,10 @@ pub fn enforce_and_release(
     query_result: &QueryResult,
     config: &PrivacyConfig,
 ) -> Result<ReleaseResult> {
-    if config.epsilon <= 0.0 {
+    if config.consumes_budget() && config.epsilon <= 0.0 {
         return Err(anyhow!("epsilon must be > 0"));
     }
-    if config.total_budget <= 0.0 {
+    if config.consumes_budget() && config.total_budget <= 0.0 {
         return Err(anyhow!("total_budget must be > 0"));
     }
 
@@ -73,22 +89,24 @@ pub fn enforce_and_release(
             &release_id,
             query_fingerprint,
             &query_result.template_name,
-            config.epsilon,
+            config.recorded_epsilon(),
             query_result.cohort_size,
             &reason,
+            config.release_mode,
         )?;
         tx.commit()?;
         return Ok(ReleaseResult {
             release_id,
             accepted: false,
             reason,
-            noisy_result: None,
+            release_mode: config.release_mode,
+            released_result: None,
             budget_spent: spent,
             budget_remaining: (config.total_budget - spent).max(0.0),
         });
     }
 
-    if spent + config.epsilon > config.total_budget {
+    if config.consumes_budget() && spent + config.epsilon > config.total_budget {
         let reason = format!(
             "privacy budget exceeded: spent {:.4}, requested {:.4}, total {:.4}",
             spent, config.epsilon, config.total_budget
@@ -98,75 +116,75 @@ pub fn enforce_and_release(
             &release_id,
             query_fingerprint,
             &query_result.template_name,
-            config.epsilon,
+            config.recorded_epsilon(),
             query_result.cohort_size,
             &reason,
+            config.release_mode,
         )?;
         tx.commit()?;
         return Ok(ReleaseResult {
             release_id,
             accepted: false,
             reason,
-            noisy_result: None,
+            release_mode: config.release_mode,
+            released_result: None,
             budget_spent: spent,
             budget_remaining: (config.total_budget - spent).max(0.0),
         });
     }
 
-    let mut noisy_result = query_result.raw_result.clone();
-    let noised_metric_count = count_noised_metrics(&noisy_result).max(1);
-    let epsilon_per_metric = config.epsilon / noised_metric_count as f64;
-
-    let value_scale = if query_result.sensitivity <= 0.0 {
-        0.0
-    } else {
-        query_result.sensitivity / epsilon_per_metric
-    };
-    let count_scale = 1.0 / epsilon_per_metric;
-    let mut rng = rand::thread_rng();
-    apply_noise(&mut noisy_result, value_scale, count_scale, &mut rng);
+    let released_result = release_query_result(
+        query_result,
+        config.epsilon,
+        config.release_mode,
+        config.dp_seed,
+    )?;
+    let recorded_epsilon = config.recorded_epsilon();
 
     tx.execute(
         r#"
         INSERT INTO privacy_releases (
-            release_id, query_fingerprint, template_name, epsilon, cohort_size, accepted, reason
-        ) VALUES (?1, ?2, ?3, ?4, ?5, TRUE, 'released')
+            release_id, query_fingerprint, template_name, epsilon, cohort_size, accepted, reason, release_mode
+        ) VALUES (?1, ?2, ?3, ?4, ?5, TRUE, 'released', ?6)
         "#,
         params![
             &release_id,
             query_fingerprint,
             &query_result.template_name,
-            config.epsilon,
+            recorded_epsilon,
             query_result.cohort_size as i64,
+            config.release_mode.as_str(),
         ],
     )?;
 
     tx.execute(
         r#"
         INSERT INTO query_audit (
-            query_fingerprint, template_name, params_json, raw_result_json, noisy_result_json, cohort_size, epsilon
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+            query_fingerprint, template_name, params_json, raw_result_json, released_result_json, cohort_size, epsilon, release_mode
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
         "#,
         params![
             query_fingerprint,
             &query_result.template_name,
             params_json.to_string(),
             query_result.raw_result.to_string(),
-            noisy_result.to_string(),
+            released_result.to_string(),
             query_result.cohort_size as i64,
-            config.epsilon,
+            recorded_epsilon,
+            config.release_mode.as_str(),
         ],
     )?;
 
     tx.commit()?;
 
-    let new_spent = spent + config.epsilon;
+    let new_spent = spent + recorded_epsilon;
 
     Ok(ReleaseResult {
         release_id,
         accepted: true,
         reason: "released".to_string(),
-        noisy_result: Some(noisy_result),
+        release_mode: config.release_mode,
+        released_result: Some(released_result),
         budget_spent: new_spent,
         budget_remaining: (config.total_budget - new_spent).max(0.0),
     })
@@ -180,6 +198,7 @@ pub fn enforce_and_release(
 // @param: epsilon - The epsilon value
 // @param: cohort_size - The size of the cohort
 // @param: reason - The reason for the rejection
+// @param: release_mode - The configured release mode
 // @return: Result<()> - Returns the result of the write
 fn write_rejection(
     tx: &Transaction<'_>,
@@ -189,12 +208,13 @@ fn write_rejection(
     epsilon: f64,
     cohort_size: usize,
     reason: &str,
+    release_mode: ReleaseMode,
 ) -> Result<()> {
     tx.execute(
         r#"
         INSERT INTO privacy_releases (
-            release_id, query_fingerprint, template_name, epsilon, cohort_size, accepted, reason
-        ) VALUES (?1, ?2, ?3, ?4, ?5, FALSE, ?6)
+            release_id, query_fingerprint, template_name, epsilon, cohort_size, accepted, reason, release_mode
+        ) VALUES (?1, ?2, ?3, ?4, ?5, FALSE, ?6, ?7)
         "#,
         params![
             release_id,
@@ -203,7 +223,72 @@ fn write_rejection(
             epsilon,
             cohort_size as i64,
             reason,
+            release_mode.as_str(),
         ],
     )?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use duckdb::Connection;
+    use serde_json::json;
+
+    use super::*;
+    use crate::db::init_schema;
+
+    fn sample_query_result() -> QueryResult {
+        QueryResult {
+            template_name: "cohort_feasibility_count".to_string(),
+            raw_result: json!({"count": 20}),
+            cohort_size: 20,
+            sensitivity: 1.0,
+        }
+    }
+
+    #[test]
+    fn raw_mode_releases_exact_payload_without_spending_budget() {
+        let mut conn = Connection::open_in_memory().expect("in-memory duckdb should open");
+        init_schema(&conn).expect("schema should initialize");
+
+        let query_result = sample_query_result();
+        let release = enforce_and_release(
+            &mut conn,
+            "fingerprint",
+            &json!({"example": true}),
+            &query_result,
+            &PrivacyConfig {
+                epsilon: 0.5,
+                min_cohort: 10,
+                total_budget: 10.0,
+                release_mode: ReleaseMode::Raw,
+                dp_seed: None,
+            },
+        )
+        .expect("raw release should succeed");
+
+        assert!(release.accepted);
+        assert_eq!(release.release_mode, ReleaseMode::Raw);
+        assert_eq!(release.released_result, Some(query_result.raw_result.clone()));
+        assert_eq!(release.budget_spent, 0.0);
+        assert_eq!(release.budget_remaining, 10.0);
+
+        let recorded_epsilon: f64 = conn
+            .query_row(
+                "SELECT epsilon FROM privacy_releases WHERE accepted = TRUE",
+                [],
+                |row| row.get(0),
+            )
+            .expect("accepted release row should exist");
+        assert_eq!(recorded_epsilon, 0.0);
+
+        let recorded_release_mode: String = conn
+            .query_row(
+                "SELECT release_mode FROM privacy_releases WHERE accepted = TRUE",
+                [],
+                |row| row.get(0),
+            )
+            .expect("accepted release row should include release mode");
+        assert_eq!(recorded_release_mode, "raw");
+    }
 }

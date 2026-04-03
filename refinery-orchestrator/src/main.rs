@@ -112,7 +112,7 @@ async fn run() -> Result<()> {
             };
 
             let ledger = open_ledger(&privacy_config.ledger_db_path)?;
-            record_job_started(&ledger, &job, None)?;
+            record_job_started(&ledger, &job, None, privacy_config.release_mode)?;
 
             let run_output = match run_job(&job, &tls, privacy_config.min_participating_nodes).await
             {
@@ -148,10 +148,11 @@ async fn run() -> Result<()> {
                         mode,
                         &OrchestratorQueryReleasedData {
                             job_id: job.job_id,
+                            release_mode: release.release_mode.as_str().to_string(),
                             template: job.template.as_str().to_string(),
                             participating_nodes: run_output.accepted_nodes,
                             cohort_size: run_output.aggregated.cohort_size,
-                            noisy_result: release.noisy_result.unwrap_or(Value::Null),
+                            released_result: release.released_result.unwrap_or(Value::Null),
                         },
                     )
                 );

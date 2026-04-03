@@ -174,11 +174,12 @@ async fn run() -> Result<()> {
                         mode,
                         &NodeQueryReleasedData {
                             release_id: release.release_id,
+                            release_mode: release.release_mode.as_str().to_string(),
                             template: template.as_str().to_string(),
                             cohort_size: query_result.cohort_size,
                             budget_spent: release.budget_spent,
                             budget_remaining: release.budget_remaining,
-                            noisy_result: release.noisy_result.unwrap_or(Value::Null),
+                            released_result: release.released_result.unwrap_or(Value::Null),
                         },
                     )
                 );
