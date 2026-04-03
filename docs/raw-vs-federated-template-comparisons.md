@@ -4,6 +4,8 @@ This note defines how to compare a raw/local result to a federated result for ea
 
 The goal is not protocol-parity checking. If both sides represent the same population before DP noise, then the values should match directly. This document is for analyst-facing comparison when the raw result comes from one site or one raw baseline and the federated result comes from a larger multi-site population.
 
+It also defines a practical notion of utility preservation: how far a federated result may deviate from an exact raw result before the result stops being decision-useful for the template's intended purpose.
+
 ## Comparison rule of thumb
 
 - Do not treat absolute counts as the main comparison if the raw and federated scopes are different.
@@ -11,6 +13,23 @@ The goal is not protocol-parity checking. If both sides represent the same popul
 - Use counts as context only: they explain whether a difference is likely structural or just driven by scale.
 - For grouped templates, compare both outcome level and group composition. A similar mean with a very different group mix is still informative.
 - If the federated result is post-DP, expect small deviations around the same pattern. The comparison ideas below still hold, but exact equality is not expected.
+
+## Utility-preservation principle
+
+This is the most defensible claim the system can support:
+
+- the federated result preserves value if it preserves the same decision or ranking that the exact raw result would support
+- small numeric deviations are acceptable if the qualitative conclusion does not change
+- utility should therefore be judged against task-specific tolerance bands, not exact equality
+
+This is not a proof that no information is lost. It is a proof strategy that the loss is bounded enough to keep the result useful for the intended analytic task.
+
+Across templates, four generic acceptance tests are relevant:
+
+- magnitude stability: the main metric stays close enough to the raw value
+- direction stability: the sign of an effect or difference does not flip
+- ranking stability: the ordering of groups or arms does not materially change
+- decision stability: the analyst would make the same go/no-go or prioritization decision
 
 ## By template
 
@@ -45,6 +64,20 @@ Interpretation:
 Caveat:
 
 - The template only releases `count`, so the population denominator must come from site metadata, a patient census, or a separate baseline query.
+
+Utility-preserving deviation:
+
+- This template is usually used for feasibility screening, not exact estimation.
+- The federated result keeps value if it preserves the same feasibility bucket.
+- A practical rule is:
+  - low prevalence cohorts: absolute prevalence error within 1 percentage point
+  - moderate to common cohorts: relative prevalence error within 10%
+- If the result is being used as a binary screen such as "is this cohort large enough to study?", the more important condition is decision stability:
+  - the federated result should stay on the same side of the feasibility threshold as the exact raw result
+
+Why this still has value:
+
+- For cohort feasibility, the analyst usually needs a reliable order of magnitude and a correct feasibility decision, not an exact patient count.
 
 ### 2. `comparative_effectiveness_delta`
 
@@ -84,6 +117,20 @@ What not to compare directly:
 
 - Do not compare `outcome_sum_exposed` or `outcome_sum_control`. Those are intermediate totals and scale with cohort size.
 
+Utility-preserving deviation:
+
+- The result keeps value if the treatment effect conclusion does not change.
+- A practical rule is:
+  - absolute error in `delta` within 10% of the clip range
+  - and no sign flip unless the raw `delta` is already near zero
+- If the raw effect is small, require a stronger stability check:
+  - `|fed_delta - raw_delta| < 0.25 * |raw_delta|` only when `raw_delta` is materially different from zero
+
+Why this still has value:
+
+- Comparative effectiveness is useful when it preserves whether exposed performs better, worse, or similarly to control.
+- If the delta changes slightly but the direction and rough effect size class remain the same, the result still supports the same interpretation.
+
 ### 3. `time_to_event_proxy`
 
 Released values:
@@ -120,6 +167,18 @@ Interpretation:
 Caveat:
 
 - The template result itself does not include the full index cohort denominator, only patients with a valid observed event inside the window.
+
+Utility-preserving deviation:
+
+- The result keeps value if it preserves the timing class of the event pattern.
+- A practical rule is:
+  - absolute error in `mean_days_to_event` within 10% of the configured `max_days`
+  - and no shift across an analyst-defined timing bucket such as acute, short-term, medium-term, or long-term
+
+Why this still has value:
+
+- This template is a timing proxy, so the important question is whether events occur on roughly the same timescale.
+- A small shift in mean days does not destroy value if the same timing interpretation still holds.
 
 ### 4. `subgroup_effect_estimate`
 
@@ -159,6 +218,19 @@ Caveat:
 
 - For `age_bucket`, the same `age_cutoffs` must be used on both sides. Otherwise the groups are not comparable.
 
+Utility-preserving deviation:
+
+- The result keeps value if subgroup ranking and subgroup contrast remain stable.
+- A practical rule is:
+  - per-group `mean_outcome` error within 10%
+  - per-group share error within 5 percentage points
+  - no change in the top-risk or bottom-risk subgroup unless the raw subgroup means are nearly tied
+
+Why this still has value:
+
+- Analysts use this template to see whether some subgroups stand out.
+- That value is preserved when the same subgroup pattern remains visible even if exact values move slightly.
+
 ### 5. `dose_response_trend`
 
 Released value:
@@ -192,6 +264,19 @@ Interpretation:
 - Bucket-level means show whether the same low-to-high pattern appears locally and federated.
 - Bucket share shows whether a site is dominated by one dose bucket and may therefore behave differently.
 - `trend_span` is a compact summary when a single number is needed.
+
+Utility-preserving deviation:
+
+- The result keeps value if the dose-response shape is preserved.
+- A practical rule is:
+  - bucket mean error within 10%
+  - trend-span error within 15%
+  - no reversal of the overall ordering between `low`, `medium`, and `high` unless adjacent buckets are effectively tied in the raw result
+
+Why this still has value:
+
+- The analyst mainly needs to know whether outcome severity increases, decreases, or stays flat with more exposure.
+- As long as the trend direction and rough slope survive, the result remains useful.
 
 ### 6. `ae_incidence_signal_proxy`
 
@@ -227,6 +312,19 @@ Interpretation:
 - Risk ratio is better when relative elevation matters more than absolute spread.
 - Arm mix helps explain why a site may contribute limited evidence even if its direction matches the network.
 
+Utility-preserving deviation:
+
+- The result keeps value if the safety signal classification is unchanged.
+- A practical rule is:
+  - absolute incidence error within 2 percentage points per arm
+  - risk-difference error within 1 percentage point
+  - no reversal of signal direction unless the raw risk difference is already close to zero
+
+Why this still has value:
+
+- In signal detection, the key question is whether exposed risk is meaningfully higher than control risk.
+- Slight numeric movement is acceptable if the same safety concern is still visible.
+
 ### 7. `ddi_signal_proxy`
 
 Released values:
@@ -260,6 +358,19 @@ Interpretation:
 - Signal direction and magnitude should be compared first.
 - `combo_share` explains whether a site has enough combination exposure to materially influence the federated estimate.
 
+Utility-preserving deviation:
+
+- The result keeps value if it preserves whether combination therapy appears riskier, similar, or safer than `a_only`.
+- A practical rule is:
+  - absolute incidence error within 2 percentage points per arm
+  - risk-difference error within 1 percentage point
+  - no reversal of the interaction signal unless the raw difference is already near zero
+
+Why this still has value:
+
+- The purpose is interaction detection, not exact pharmacovigilance incidence accounting.
+- If the same interaction signal survives, the federated result still supports the same downstream decision.
+
 ## Recommended summary format
 
 If these comparisons need to be reported consistently across templates, use this structure:
@@ -270,6 +381,8 @@ If these comparisons need to be reported consistently across templates, use this
 - `absolute_gap`
 - `relative_gap`
 - `context_metric`: one scale or composition metric to explain the gap
+- `utility_threshold`
+- `utility_status`: preserved / borderline / not preserved
 
 Examples:
 
@@ -290,3 +403,13 @@ Examples:
 - `dose_response_trend`: compare bucket means plus trend shape
 - `ae_incidence_signal_proxy`: compare risk difference or risk ratio
 - `ddi_signal_proxy`: compare risk difference or risk ratio
+
+## Suggested proof framing
+
+If you want to argue that the system "does not lose value of data", the strongest wording is:
+
+- the system may lose exact numeric precision because of federation constraints and DP noise
+- but it preserves analytic utility when template-specific conclusions remain stable within predefined tolerance bands
+- therefore value is preserved at the decision level even when exact equality is not preserved at the numeric level
+
+That framing is much easier to defend than claiming zero loss.
