@@ -93,7 +93,11 @@ pub(crate) fn execute_federation_round(
         ));
     };
     if let Some(reason) = smpc::validate_round_request(&req, &smpc_state, &config.node_id) {
-        return Ok(smpc::rejected_round_response(&config.node_id, &req, &reason));
+        return Ok(smpc::rejected_round_response(
+            &config.node_id,
+            &req,
+            &reason,
+        ));
     }
 
     let (aggregate_share, vector_hash) = match smpc::aggregate_inbound_share_packets(
@@ -161,7 +165,12 @@ fn build_smpc_submit_outcome(
         participant_keys: req
             .participants
             .iter()
-            .map(|participant| (participant.node_id.clone(), participant.smpc_public_key.clone()))
+            .map(|participant| {
+                (
+                    participant.node_id.clone(),
+                    participant.smpc_public_key.clone(),
+                )
+            })
             .collect(),
     };
     let response = SubmitJobResponse {
@@ -183,7 +192,12 @@ fn build_smpc_submit_outcome(
     };
     Ok((
         response,
-        build_job_record(JOB_STATUS_ROUND1_READY, true, decision.reason, Some(smpc_state)),
+        build_job_record(
+            JOB_STATUS_ROUND1_READY,
+            true,
+            decision.reason,
+            Some(smpc_state),
+        ),
     ))
 }
 

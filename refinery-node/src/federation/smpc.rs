@@ -7,8 +7,8 @@ use refinery_protocol::grpc::{
 use refinery_protocol::{
     LocalStatistics, PRIVATE_KEY_LENGTH, SMPC_AGGREGATE_SHARE_ROUND_NAME, SMPC_PROTOCOL_NAME,
     SMPC_PROTOCOL_VERSION, SharePayload, decode_slot_bytes, encode_slot_bytes,
-    encrypt_share_payload, public_key_fingerprint, public_key_from_private_key,
-    sealed_packet_hash, slot_vector_hash, split_additive_shares, sum_slot_vectors,
+    encrypt_share_payload, public_key_fingerprint, public_key_from_private_key, sealed_packet_hash,
+    slot_vector_hash, split_additive_shares, sum_slot_vectors,
 };
 use zeroize::Zeroize;
 
@@ -100,8 +100,11 @@ pub fn build_share_packets(
             slot_labels: stats.slot_labels.clone(),
             slot_bytes: encode_slot_bytes(&share_vector),
         };
-        let (nonce, ciphertext) =
-            encrypt_share_payload(&smpc.private_key_bytes, &participant.smpc_public_key, &payload)?;
+        let (nonce, ciphertext) = encrypt_share_payload(
+            &smpc.private_key_bytes,
+            &participant.smpc_public_key,
+            &payload,
+        )?;
         let mut packet = SealedSharePacket {
             job_id: request.job_id.clone(),
             job_context_hash: request.job_context_hash.clone(),

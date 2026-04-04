@@ -92,7 +92,9 @@ pub fn record_job_finished(
         .and_then(|release| release.released_result.as_ref())
         .map(serde_json::to_string)
         .transpose()?;
-    let cohort_size = aggregated_result.map(|result| result.cohort_size as i64).unwrap_or(0);
+    let cohort_size = aggregated_result
+        .map(|result| result.cohort_size as i64)
+        .unwrap_or(0);
 
     conn.execute(
         r#"
@@ -153,8 +155,16 @@ fn migrate_ledger_schema(conn: &Connection) -> Result<()> {
         "noisy_result_json",
         "released_result_json",
     )?;
-    add_column_if_missing(conn, "federated_job_ledger", "release_mode TEXT DEFAULT 'dp'")?;
-    add_column_if_missing(conn, "federated_release_ledger", "release_mode TEXT DEFAULT 'dp'")?;
+    add_column_if_missing(
+        conn,
+        "federated_job_ledger",
+        "release_mode TEXT DEFAULT 'dp'",
+    )?;
+    add_column_if_missing(
+        conn,
+        "federated_release_ledger",
+        "release_mode TEXT DEFAULT 'dp'",
+    )?;
     Ok(())
 }
 
@@ -177,7 +187,11 @@ fn rename_column_if_missing_target(
     Ok(())
 }
 
-fn add_column_if_missing(conn: &Connection, table_name: &str, column_definition: &str) -> Result<()> {
+fn add_column_if_missing(
+    conn: &Connection,
+    table_name: &str,
+    column_definition: &str,
+) -> Result<()> {
     let column_name = column_definition
         .split_whitespace()
         .next()
@@ -211,13 +225,21 @@ mod tests {
         let conn = Connection::open_in_memory().expect("in-memory duckdb should open");
         init_ledger_schema(&conn).expect("ledger schema should initialize");
 
-        assert!(table_has_column(&conn, "federated_job_ledger", "released_result_json")
-            .expect("column lookup should work"));
-        assert!(table_has_column(&conn, "federated_job_ledger", "release_mode")
-            .expect("column lookup should work"));
-        assert!(table_has_column(&conn, "federated_release_ledger", "released_result_json")
-            .expect("column lookup should work"));
-        assert!(table_has_column(&conn, "federated_release_ledger", "release_mode")
-            .expect("column lookup should work"));
+        assert!(
+            table_has_column(&conn, "federated_job_ledger", "released_result_json")
+                .expect("column lookup should work")
+        );
+        assert!(
+            table_has_column(&conn, "federated_job_ledger", "release_mode")
+                .expect("column lookup should work")
+        );
+        assert!(
+            table_has_column(&conn, "federated_release_ledger", "released_result_json")
+                .expect("column lookup should work")
+        );
+        assert!(
+            table_has_column(&conn, "federated_release_ledger", "release_mode")
+                .expect("column lookup should work")
+        );
     }
 }

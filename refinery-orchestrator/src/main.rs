@@ -9,8 +9,7 @@ use std::process;
 use anyhow::{Result, anyhow};
 use clap::{Parser, Subcommand};
 use cli_render::{
-    NodeStatusData, OrchestratorQueryRejectedData, OrchestratorQueryReleasedData,
-    render_error,
+    NodeStatusData, OrchestratorQueryRejectedData, OrchestratorQueryReleasedData, render_error,
     render_orchestrator_query_rejected, render_orchestrator_query_released,
     render_orchestrator_status, resolve_output_mode,
 };
@@ -134,7 +133,11 @@ async fn run() -> Result<()> {
             record_job_finished(
                 &ledger,
                 &job.job_id,
-                if release.accepted { "released" } else { "rejected" },
+                if release.accepted {
+                    "released"
+                } else {
+                    "rejected"
+                },
                 run_output.accepted_nodes,
                 &release.reason,
                 Some(&run_output.aggregated),

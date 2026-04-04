@@ -4,19 +4,15 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow, bail};
 use cli_render::{
-    OutputMode, OrganizeQueryTemplatesData, render_organize_query_prompt_intro,
+    OrganizeQueryTemplatesData, OutputMode, render_organize_query_prompt_intro,
     render_organize_query_prompt_label, render_organize_query_selector,
     render_organize_query_templates,
 };
 use crossterm::cursor::{Hide, MoveToColumn, RestorePosition, SavePosition, Show};
-use crossterm::event::{
-    Event, KeyCode, KeyEventKind, read,
-};
+use crossterm::event::{Event, KeyCode, KeyEventKind, read};
 use crossterm::execute;
 use crossterm::style::Print;
-use crossterm::terminal::{
-    Clear, ClearType, disable_raw_mode, enable_raw_mode,
-};
+use crossterm::terminal::{Clear, ClearType, disable_raw_mode, enable_raw_mode};
 use rand::Rng;
 use refinery_protocol::QueryTemplate;
 use serde_json::{Map, Value, json};
@@ -117,8 +113,7 @@ fn select_template_pretty() -> Result<QueryTemplate> {
     let mut stdout = io::stdout();
 
     enable_raw_mode().context("failed to enable raw mode")?;
-    execute!(stdout, SavePosition, Hide)
-        .context("failed to initialize interactive selector")?;
+    execute!(stdout, SavePosition, Hide).context("failed to initialize interactive selector")?;
 
     let result = (|| -> Result<QueryTemplate> {
         loop {
@@ -153,7 +148,7 @@ fn select_template_pretty() -> Result<QueryTemplate> {
         Clear(ClearType::FromCursorDown),
         Show
     )
-        .context("failed to restore terminal state");
+    .context("failed to restore terminal state");
     let raw_mode_result = disable_raw_mode().context("failed to disable raw mode");
 
     cleanup_result?;
@@ -266,17 +261,21 @@ fn resolve_output_dir(
 fn parse_value(spec: &QueryParamSpec, raw: &str) -> Result<Value> {
     match spec.kind {
         ParamKind::Integer => {
-            let value = raw.parse::<i64>().map_err(|_| {
-                anyhow!("expected an integer for '{}'", spec.key)
-            })?;
+            let value = raw
+                .parse::<i64>()
+                .map_err(|_| anyhow!("expected an integer for '{}'", spec.key))?;
             Ok(json!(value))
         }
         ParamKind::IntegerList => {
             let mut values = Vec::new();
-            for item in raw.split(',').map(str::trim).filter(|item| !item.is_empty()) {
-                let value = item.parse::<i64>().map_err(|_| {
-                    anyhow!("expected comma-separated integers for '{}'", spec.key)
-                })?;
+            for item in raw
+                .split(',')
+                .map(str::trim)
+                .filter(|item| !item.is_empty())
+            {
+                let value = item
+                    .parse::<i64>()
+                    .map_err(|_| anyhow!("expected comma-separated integers for '{}'", spec.key))?;
                 values.push(json!(value));
             }
             if values.is_empty() && !spec.optional {
@@ -368,7 +367,9 @@ mod tests {
     use refinery_protocol::QueryTemplate;
     use serde_json::json;
 
-    use super::{build_file_name, default_output_dir, parse_value, random_suffix, sanitize_file_stem};
+    use super::{
+        build_file_name, default_output_dir, parse_value, random_suffix, sanitize_file_stem,
+    };
     use crate::commands::query::templates::{ParamKind, QueryParamSpec};
 
     #[test]

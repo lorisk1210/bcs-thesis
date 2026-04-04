@@ -27,6 +27,8 @@ enum Commands {
         input_dir: PathBuf,
         #[arg(long)]
         nodes: usize,
+        #[arg(long)]
+        sample_size: Option<usize>,
     },
     Query {
         #[command(subcommand)]
@@ -61,10 +63,7 @@ fn main() {
     let _ = from_filename(".env");
     let mode = resolve_output_mode();
     if let Err(err) = run() {
-        eprint!(
-            "{}",
-            render_error(mode, "organize", &format!("{err:#}"))
-        );
+        eprint!("{}", render_error(mode, "organize", &format!("{err:#}")));
         process::exit(1);
     }
 }
@@ -77,8 +76,12 @@ fn run() -> Result<()> {
     let mode = resolve_output_mode();
 
     match cli.command {
-        Commands::Partition { input_dir, nodes } => {
-            let summary = partition_input(&input_dir, nodes)?;
+        Commands::Partition {
+            input_dir,
+            nodes,
+            sample_size,
+        } => {
+            let summary = partition_input(&input_dir, nodes, sample_size)?;
             print!(
                 "{}",
                 render_partition(

@@ -80,8 +80,11 @@ fn compare_objects(
 
 fn numbers_match(left: &serde_json::Number, right: &serde_json::Number) -> bool {
     match (
-        left.as_i64().or_else(|| left.as_u64().map(|value| value as i64)),
-        right.as_i64().or_else(|| right.as_u64().map(|value| value as i64)),
+        left.as_i64()
+            .or_else(|| left.as_u64().map(|value| value as i64)),
+        right
+            .as_i64()
+            .or_else(|| right.as_u64().map(|value| value as i64)),
     ) {
         (Some(left_int), Some(right_int)) => left_int == right_int,
         _ => {

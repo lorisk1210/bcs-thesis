@@ -76,7 +76,10 @@ pub fn render_orchestrator_query_rejected(
             out
         }
         OutputMode::Plain => {
-            format!("job_id: {}\nstatus: rejected\nreason: {}\n", d.job_id, d.reason)
+            format!(
+                "job_id: {}\nstatus: rejected\nreason: {}\n",
+                d.job_id, d.reason
+            )
         }
     };
     frame_cli_output(mode, inner)
@@ -157,11 +160,7 @@ pub fn render_orchestrator_status(mode: OutputMode, nodes: &[NodeStatusData]) ->
                     "  supported_smpc_protocols: {}",
                     node.supported_smpc_protocols.join(", ")
                 );
-                let _ = writeln!(
-                    out,
-                    "  smpc_key_fingerprint: {}",
-                    node.smpc_key_fingerprint
-                );
+                let _ = writeln!(out, "  smpc_key_fingerprint: {}", node.smpc_key_fingerprint);
             }
             out
         }

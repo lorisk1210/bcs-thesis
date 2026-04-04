@@ -6,10 +6,10 @@ use std::env;
 
 // Third-party library imports
 use anyhow::{Result, anyhow};
+use refinery_protocol::ReleaseMode;
 use refinery_protocol::env_utils::{
     parse_env, parse_env_or_default, parse_optional_env, required_env,
 };
-use refinery_protocol::ReleaseMode;
 
 // Local module imports
 use crate::privacy::PrivacyConfig;
@@ -72,7 +72,11 @@ pub fn load_smpc_config() -> Result<SmpcConfig> {
             Some(refinery_protocol::validate_private_key_bytes(&decoded)?)
         }
         Err(env::VarError::NotPresent) => None,
-        Err(err) => return Err(anyhow!("failed to read REFINERY_SMPC_PRIVATE_KEY_HEX: {err}")),
+        Err(err) => {
+            return Err(anyhow!(
+                "failed to read REFINERY_SMPC_PRIVATE_KEY_HEX: {err}"
+            ));
+        }
     };
 
     let min_participating_nodes = match env::var("REFINERY_MIN_PARTICIPATING_NODES") {
@@ -84,9 +88,7 @@ pub fn load_smpc_config() -> Result<SmpcConfig> {
                 )
             })?;
             if parsed < 2 {
-                return Err(anyhow!(
-                    "REFINERY_MIN_PARTICIPATING_NODES must be >= 2"
-                ));
+                return Err(anyhow!("REFINERY_MIN_PARTICIPATING_NODES must be >= 2"));
             }
             parsed
         }
@@ -94,7 +96,7 @@ pub fn load_smpc_config() -> Result<SmpcConfig> {
         Err(err) => {
             return Err(anyhow!(
                 "failed to read REFINERY_MIN_PARTICIPATING_NODES: {err}"
-            ))
+            ));
         }
     };
 
