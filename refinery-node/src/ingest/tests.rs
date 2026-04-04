@@ -10,9 +10,10 @@ use serde_json::json;
 use crate::{db, materialize, normalize};
 
 use super::{
-    fresh::run_fresh_ingest_with_files, incremental::run_incremental_ingest_with_files,
-    shared::{discover_input_files, Pseudonymizer},
     IngestOptions, IngestReport, TransformMode,
+    fresh::run_fresh_ingest_with_files,
+    incremental::run_incremental_ingest_with_files,
+    shared::{Pseudonymizer, discover_input_files},
 };
 
 const PIPELINE_TABLES: &[&str] = &[
@@ -255,8 +256,14 @@ fn create_test_input_dir(prefix: &str) -> Result<PathBuf> {
             }
         ]
     });
-    fs::write(dir.join("a_bundle.json"), serde_json::to_vec_pretty(&bundle_a)?)?;
-    fs::write(dir.join("z_bundle.json"), serde_json::to_vec_pretty(&bundle_b)?)?;
+    fs::write(
+        dir.join("a_bundle.json"),
+        serde_json::to_vec_pretty(&bundle_a)?,
+    )?;
+    fs::write(
+        dir.join("z_bundle.json"),
+        serde_json::to_vec_pretty(&bundle_b)?,
+    )?;
     Ok(dir)
 }
 
@@ -265,8 +272,5 @@ fn unique_test_path(prefix: &str) -> PathBuf {
         .duration_since(UNIX_EPOCH)
         .expect("system time after epoch")
         .as_nanos();
-    std::env::temp_dir().join(format!(
-        "refinery-{prefix}-{}-{nonce}",
-        std::process::id()
-    ))
+    std::env::temp_dir().join(format!("refinery-{prefix}-{}-{nonce}", std::process::id()))
 }

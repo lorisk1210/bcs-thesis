@@ -6,9 +6,9 @@ use anyhow::{Result, anyhow};
 use serde_json::{Map, Value, json};
 
 // Local module imports
-use super::helpers::{required_f64, required_u64, safe_mean};
 use super::StatisticsSchema;
 use super::encoding::{decode_count, decode_fixed, encode_count, encode_fixed};
+use super::helpers::{required_f64, required_u64, safe_mean};
 use crate::errors::invalid_stats_shape;
 use crate::query::QueryTemplate;
 
@@ -50,7 +50,8 @@ pub(crate) fn decode_stats(
 ) -> Option<Result<Value>> {
     match template {
         QueryTemplate::SubgroupEffectEstimate => Some(
-            decode_group_stats(slot_labels, slots, "subgroup").map(|groups| json!({ "groups": groups })),
+            decode_group_stats(slot_labels, slots, "subgroup")
+                .map(|groups| json!({ "groups": groups })),
         ),
         QueryTemplate::DoseResponseTrend => Some(
             decode_group_stats(slot_labels, slots, "dose_bucket")
@@ -109,7 +110,10 @@ fn subgroup_schema(params: &Value) -> Result<StatisticsSchema> {
     Ok(grouped_schema(
         QueryTemplate::SubgroupEffectEstimate,
         "gender",
-        GENDER_GROUPS.iter().map(|label| label.to_string()).collect(),
+        GENDER_GROUPS
+            .iter()
+            .map(|label| label.to_string())
+            .collect(),
     ))
 }
 
@@ -188,7 +192,10 @@ fn decode_group_stats(slot_labels: &[String], slots: &[u64], group_key: &str) ->
         let mut group = Map::new();
         group.insert(group_key.to_string(), Value::String(label));
         group.insert("n".to_string(), Value::from(n));
-        group.insert("outcome_sum".to_string(), Value::from(decode_fixed(slots[index + 1])?));
+        group.insert(
+            "outcome_sum".to_string(),
+            Value::from(decode_fixed(slots[index + 1])?),
+        );
         groups.push(Value::Object(group));
     }
     Ok(Value::Array(groups))
@@ -227,16 +234,19 @@ fn required_group_label(group: &Value) -> Result<&str> {
 
 fn find_group_slot_index(slot_labels: &[String], label: &str) -> Option<usize> {
     let exact = group_n_slot_label(label);
-    slot_labels.iter().position(|slot| slot == &exact).or_else(|| {
-        let normalized = label.trim().to_ascii_lowercase();
-        (normalized != label)
-            .then(|| {
-                slot_labels
-                    .iter()
-                    .position(|slot| slot == &group_n_slot_label(&normalized))
-            })
-            .flatten()
-    })
+    slot_labels
+        .iter()
+        .position(|slot| slot == &exact)
+        .or_else(|| {
+            let normalized = label.trim().to_ascii_lowercase();
+            (normalized != label)
+                .then(|| {
+                    slot_labels
+                        .iter()
+                        .position(|slot| slot == &group_n_slot_label(&normalized))
+                })
+                .flatten()
+        })
 }
 
 fn group_n_slot_label(label: &str) -> String {

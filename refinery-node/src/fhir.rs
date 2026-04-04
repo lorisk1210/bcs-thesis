@@ -126,7 +126,10 @@ pub fn first_coding(value: &Value) -> (Option<String>, Option<String>, Option<St
 // @param: resource - Reference to the resource
 // @param: key - Reference to the key of the codeable concept
 // @return: (Option<String>, Option<String>, Option<String>) - Returns the first codeable concept if it exists, None otherwise
-pub fn first_codeable_concept(resource: &Value, key: &str) -> (Option<String>, Option<String>, Option<String>) {
+pub fn first_codeable_concept(
+    resource: &Value,
+    key: &str,
+) -> (Option<String>, Option<String>, Option<String>) {
     resource
         .get(key)
         .map(first_coding)
@@ -137,11 +140,15 @@ pub fn first_codeable_concept(resource: &Value, key: &str) -> (Option<String>, O
 // @param: resource - Reference to the JSON value
 // @param: key - Reference to the key of the array
 // @return: (Option<String>, Option<String>, Option<String>) - Returns the first code if it exists, None otherwise
-pub fn first_code_from_array(resource: &Value, key: &str) -> (Option<String>, Option<String>, Option<String>) {
-    let first = resource.get(key).and_then(Value::as_array).and_then(|arr| arr.first());
-    first
-        .map(first_coding)
-        .unwrap_or((None, None, None))
+pub fn first_code_from_array(
+    resource: &Value,
+    key: &str,
+) -> (Option<String>, Option<String>, Option<String>) {
+    let first = resource
+        .get(key)
+        .and_then(Value::as_array)
+        .and_then(|arr| arr.first());
+    first.map(first_coding).unwrap_or((None, None, None))
 }
 
 // Gets the effective timestamp from a resource

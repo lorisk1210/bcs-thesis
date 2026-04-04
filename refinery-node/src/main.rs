@@ -9,8 +9,7 @@ use std::process;
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use cli_render::{
-    IngestReportData, InspectTableData, NodeQueryRejectedData, NodeQueryReleasedData,
-    render_error,
+    IngestReportData, InspectTableData, NodeQueryRejectedData, NodeQueryReleasedData, render_error,
     render_ingest, render_init, render_inspect, render_materialize, render_node_query_rejected,
     render_node_query_released, render_normalize, render_pipeline, resolve_output_mode,
 };
@@ -103,7 +102,10 @@ async fn main() {
     refinery_node::config::load_dotenv();
     let mode = resolve_output_mode();
     if let Err(err) = run().await {
-        eprint!("{}", render_error(mode, "refinery-node", &format!("{err:#}")));
+        eprint!(
+            "{}",
+            render_error(mode, "refinery-node", &format!("{err:#}"))
+        );
         process::exit(1);
     }
 }
@@ -145,7 +147,10 @@ async fn run() -> Result<()> {
             max_files,
         } => {
             let summary = app::run_pipeline(&db, &input_dir, max_files)?;
-            print!("{}", render_pipeline(mode, &to_ingest_data(&summary.ingest)));
+            print!(
+                "{}",
+                render_pipeline(mode, &to_ingest_data(&summary.ingest))
+            );
         }
         Commands::Query {
             db,
@@ -157,7 +162,8 @@ async fn run() -> Result<()> {
             let mut conn = app::open_initialized_connection(&db)?;
             let privacy_config = refinery_node::config::load_privacy_config()?;
             let params = app::load_params_file(&params_file)?;
-            let query_result = query::execute_template(&conn, template, &params, clip_min, clip_max)?;
+            let query_result =
+                query::execute_template(&conn, template, &params, clip_min, clip_max)?;
             let fingerprint = app::fingerprint(template, &params, clip_min, clip_max);
             let release = privacy::enforce_and_release(
                 &mut conn,

@@ -2,8 +2,8 @@ use serde_json::Value;
 
 use crate::OutputMode;
 use crate::frame::{
-    BG_DARK_GRAY, BG_GREEN, BG_RED, BG_YELLOW, BLUE, BOLD, CYAN, DARK_GRAY, DIM, GREEN,
-    MAGENTA, RED, RESET, YELLOW,
+    BG_DARK_GRAY, BG_GREEN, BG_RED, BG_YELLOW, BLUE, BOLD, CYAN, DARK_GRAY, DIM, GREEN, MAGENTA,
+    RED, RESET, YELLOW,
 };
 
 pub(crate) fn badge(mode: OutputMode, label: &str, _fg_color: &str, bg_color: &str) -> String {

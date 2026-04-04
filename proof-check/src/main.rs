@@ -9,10 +9,9 @@ use anyhow::Result;
 use clap::{Parser, Subcommand, ValueEnum};
 use cli_render::{
     CheckCompareReportData, CheckDiffEntry, CheckMetricData, CheckNodeReport,
-    CheckPayloadComparisonData, CheckPrepareReportData, CheckPreparedNodeData,
-    CheckRejectionEntry, CheckSectionData, CheckTemplateMetricsData,
-    render_check_compare_report, render_check_prepare_report, render_error,
-    resolve_output_mode,
+    CheckPayloadComparisonData, CheckPrepareReportData, CheckPreparedNodeData, CheckRejectionEntry,
+    CheckSectionData, CheckTemplateMetricsData, render_check_compare_report,
+    render_check_prepare_report, render_error, resolve_output_mode,
 };
 use refinery_orchestrator::client::ClientTlsOptions;
 use refinery_protocol::{ClipBounds, QueryTemplate};
@@ -272,10 +271,7 @@ async fn run() -> Result<i32> {
     }
 }
 
-fn to_section_data(
-    name: &str,
-    section: &proof_check::ComparisonSection,
-) -> CheckSectionData {
+fn to_section_data(name: &str, section: &proof_check::ComparisonSection) -> CheckSectionData {
     CheckSectionData {
         name: name.to_string(),
         status: section_status_str(section.status),
@@ -346,11 +342,7 @@ fn to_template_metrics_data(
     CheckTemplateMetricsData {
         status: analysis_status_str(section.status),
         primary_metric: section.primary_metric.as_ref().map(to_metric_data),
-        context_metrics: section
-            .context_metrics
-            .iter()
-            .map(to_metric_data)
-            .collect(),
+        context_metrics: section.context_metrics.iter().map(to_metric_data).collect(),
         notes: section.notes.clone(),
         rejections: section
             .rejections

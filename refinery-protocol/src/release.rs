@@ -125,7 +125,10 @@ mod tests {
 
     #[test]
     fn release_mode_parses_expected_values() {
-        assert_eq!("dp".parse::<ReleaseMode>().expect("dp should parse"), ReleaseMode::Dp);
+        assert_eq!(
+            "dp".parse::<ReleaseMode>().expect("dp should parse"),
+            ReleaseMode::Dp
+        );
         assert_eq!(
             "raw".parse::<ReleaseMode>().expect("raw should parse"),
             ReleaseMode::Raw
@@ -179,8 +182,10 @@ mod tests {
 
         let error =
             release_query_result(&query_result, 1.0, ReleaseMode::Seeded, None).unwrap_err();
-        assert!(error
-            .to_string()
-            .contains("REFINERY_DP_SEED must be set when REFINERY_RELEASE_MODE=seeded"));
+        assert!(
+            error
+                .to_string()
+                .contains("REFINERY_DP_SEED must be set when REFINERY_RELEASE_MODE=seeded")
+        );
     }
 }

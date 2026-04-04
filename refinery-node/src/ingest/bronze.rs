@@ -1,9 +1,9 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use serde_json::Value;
 
 use crate::fhir;
 
-use super::{shared::Pseudonymizer, TransformMode};
+use super::{TransformMode, shared::Pseudonymizer};
 
 #[derive(Debug, Clone)]
 pub(crate) enum BronzeRecord {

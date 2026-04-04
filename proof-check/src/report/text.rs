@@ -74,7 +74,10 @@ pub fn render_text_report(report: &ComparisonReport) -> String {
 fn render_validation_section(name: &str, section: &ComparisonSection) -> String {
     let mut out = String::new();
     out.push_str(&format!("  {name}:\n"));
-    out.push_str(&format!("    status: {}\n", section_status_name(section.status)));
+    out.push_str(&format!(
+        "    status: {}\n",
+        section_status_name(section.status)
+    ));
     if let Some(expectation) = section.expectation {
         out.push_str(&format!(
             "    expectation: {}\n",
@@ -119,7 +122,10 @@ fn render_validation_section(name: &str, section: &ComparisonSection) -> String 
 fn render_payload_comparison_section(name: &str, section: &PayloadComparisonSection) -> String {
     let mut out = String::new();
     out.push_str(&format!("{name}:\n"));
-    out.push_str(&format!("  status: {}\n", analysis_status_name(section.status)));
+    out.push_str(&format!(
+        "  status: {}\n",
+        analysis_status_name(section.status)
+    ));
     if let Some((label, payload)) = displayed_payload_pair_left(section) {
         out.push_str(&render_labeled_payload(label, payload, "  "));
     }
@@ -150,7 +156,10 @@ fn render_payload_comparison_section(name: &str, section: &PayloadComparisonSect
 fn render_template_metrics_section(section: &TemplateMetricsSection) -> String {
     let mut out = String::new();
     out.push_str("template_metrics:\n");
-    out.push_str(&format!("  status: {}\n", analysis_status_name(section.status)));
+    out.push_str(&format!(
+        "  status: {}\n",
+        analysis_status_name(section.status)
+    ));
     if let Some(primary_metric) = &section.primary_metric {
         out.push_str("  primary_metric:\n");
         out.push_str(&render_metric(primary_metric, "    "));

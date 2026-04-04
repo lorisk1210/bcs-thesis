@@ -16,9 +16,7 @@ use crate::baseline::{
     prepare_nodes_from_metadata,
 };
 use crate::diff::diff_payloads;
-use crate::insights::{
-    build_release_vs_exact_raw_section, build_template_metrics_section,
-};
+use crate::insights::{build_release_vs_exact_raw_section, build_template_metrics_section};
 use crate::{
     CompareRequest, ComparisonReport, ComparisonSection, DistortionExpectation, NodeRejection,
     NodeReport, RequestMetadata, SectionStatus, ValidationSections,
@@ -36,7 +34,8 @@ pub async fn run_compare(request: CompareRequest) -> Result<ComparisonReport> {
         Some(prepared_dir) => {
             let metadata = load_prepared_metadata(prepared_dir)?;
             if request.mode.requires_live_nodes() {
-                prepare_nodes_from_metadata(&request.node_endpoints, &metadata, &request.tls).await?
+                prepare_nodes_from_metadata(&request.node_endpoints, &metadata, &request.tls)
+                    .await?
             } else {
                 load_nodes_from_metadata(&metadata)
             }
@@ -184,10 +183,7 @@ pub async fn run_compare(request: CompareRequest) -> Result<ComparisonReport> {
                 "live_smpc_post_dp_seeded",
                 "exact_raw_post_dp_seeded",
                 None,
-                exact_release
-                    .as_ref()
-                    .map(serialize_payload)
-                    .transpose()?,
+                exact_release.as_ref().map(serialize_payload).transpose()?,
                 missing_live_reason(&live_error),
                 &request.node_endpoints,
             ),
@@ -216,13 +212,7 @@ pub async fn run_compare(request: CompareRequest) -> Result<ComparisonReport> {
             &request.node_endpoints,
         )?
     } else {
-        build_template_metrics_section(
-            request.template,
-            None,
-            None,
-            None,
-            &request.node_endpoints,
-        )?
+        build_template_metrics_section(request.template, None, None, None, &request.node_endpoints)?
     };
 
     Ok(ComparisonReport {

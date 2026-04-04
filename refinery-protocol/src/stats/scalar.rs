@@ -10,15 +10,14 @@ use super::StatisticsSchema;
 use super::encoding::{
     decode_count, decode_fixed, decode_signed, encode_count, encode_fixed, encode_signed,
 };
-use crate::query::{ClipBounds, QueryTemplate};
 use super::helpers::{
     clipped_mean_sensitivity, required_f64, required_i64, required_u64, safe_mean, safe_rate,
 };
+use crate::query::{ClipBounds, QueryTemplate};
 
 const TWO_ARM_COUNT_SLOTS: &[usize] = &[0, 1];
 
-const COHORT_FEASIBILITY_FIELDS: &[ScalarFieldSpec] =
-    &[ScalarFieldSpec::count("count")];
+const COHORT_FEASIBILITY_FIELDS: &[ScalarFieldSpec] = &[ScalarFieldSpec::count("count")];
 const COMPARATIVE_EFFECTIVENESS_FIELDS: &[ScalarFieldSpec] = &[
     ScalarFieldSpec::count("n_exposed"),
     ScalarFieldSpec::count("n_control"),
@@ -153,9 +152,7 @@ enum ScalarCohortSize {
 enum ScalarSensitivityKind {
     Count,
     ClippedMean,
-    TimeToEvent {
-        max_days_index: usize,
-    },
+    TimeToEvent { max_days_index: usize },
     InverseCount,
 }
 
@@ -163,7 +160,11 @@ pub(crate) fn schema_for_query(template: QueryTemplate) -> Option<StatisticsSche
     scalar_template_spec(template).map(|spec| StatisticsSchema {
         template,
         schema_id: format!("{}:v1", template.as_str()),
-        slot_labels: spec.fields.iter().map(|field| field.label.to_string()).collect(),
+        slot_labels: spec
+            .fields
+            .iter()
+            .map(|field| field.label.to_string())
+            .collect(),
     })
 }
 

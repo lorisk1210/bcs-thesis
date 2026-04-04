@@ -40,7 +40,11 @@ pub fn render_organize_query_prompt_intro(mode: OutputMode, template: Option<&st
             let _ = writeln!(
                 out,
                 "{}",
-                key_value(mode, "defaults", "leave name or output_dir empty to use standard values")
+                key_value(
+                    mode,
+                    "defaults",
+                    "leave name or output_dir empty to use standard values"
+                )
             );
             frame_cli_output(mode, out)
         }
@@ -85,7 +89,11 @@ pub fn render_partition(mode: OutputMode, d: &PartitionData) -> String {
                 let _ = writeln!(out, "{}", section_header(mode, "File distribution"));
                 let max_name = d.files_per_node.keys().map(|k| k.len()).max().unwrap_or(0);
                 for (node, count) in &d.files_per_node {
-                    let _ = writeln!(out, "{}", table_row(mode, node, &count.to_string(), max_name));
+                    let _ = writeln!(
+                        out,
+                        "{}",
+                        table_row(mode, node, &count.to_string(), max_name)
+                    );
                 }
             }
             out
@@ -140,7 +148,12 @@ pub fn render_organize_query_templates(mode: OutputMode, d: &OrganizeQueryTempla
             let t = title(mode, "organize query list-templates");
             let mut out = format!("{t}\n\n");
             let _ = writeln!(out, "{}", section_header(mode, "Available templates"));
-            let max_name = d.templates.iter().map(|template| template.len()).max().unwrap_or(0);
+            let max_name = d
+                .templates
+                .iter()
+                .map(|template| template.len())
+                .max()
+                .unwrap_or(0);
             for template in &d.templates {
                 let _ = writeln!(out, "{}", table_row(mode, template, "", max_name));
             }
@@ -170,7 +183,11 @@ pub fn render_organize_query_selector(
             let _ = writeln!(
                 out,
                 "{}",
-                key_value(mode, "controls", "Use ↑/↓ or j/k, then press Enter to select.")
+                key_value(
+                    mode,
+                    "controls",
+                    "Use ↑/↓ or j/k, then press Enter to select."
+                )
             );
             let _ = writeln!(out);
 

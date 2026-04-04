@@ -236,17 +236,19 @@ fn release_vs_exact_raw_compares_released_payload_to_exact_raw_result() {
         sensitivity: 1.0,
     };
 
-    let section = build_release_vs_exact_raw_section(
-        Some(&live_release),
-        Some(&exact_baseline),
-        None,
-        &[],
-    )
-    .expect("release-vs-raw section should build");
+    let section =
+        build_release_vs_exact_raw_section(Some(&live_release), Some(&exact_baseline), None, &[])
+            .expect("release-vs-raw section should build");
 
     assert_eq!(section.status, AnalysisStatus::Available);
-    assert_eq!(section.compared_left_label.as_deref(), Some("released_result"));
-    assert_eq!(section.compared_right_label.as_deref(), Some("exact_raw_result"));
+    assert_eq!(
+        section.compared_left_label.as_deref(),
+        Some("released_result")
+    );
+    assert_eq!(
+        section.compared_right_label.as_deref(),
+        Some("exact_raw_result")
+    );
     assert!(section.diffs.iter().any(|diff| diff.path == "$.count"));
 }
 
@@ -289,10 +291,12 @@ fn template_metrics_for_comparative_effectiveness_include_primary_and_context_me
     assert_eq!(section.status, AnalysisStatus::Available);
     let primary = section.primary_metric.expect("primary metric should exist");
     assert_eq!(primary.name, "delta");
-    assert!(section
-        .context_metrics
-        .iter()
-        .any(|metric| metric.name == "exposed_share"));
+    assert!(
+        section
+            .context_metrics
+            .iter()
+            .any(|metric| metric.name == "exposed_share")
+    );
 }
 
 #[test]
@@ -421,7 +425,9 @@ fn snapshot_prepared_dbs(
     Ok(snapshots)
 }
 
-fn snapshot_pipeline_tables(conn: &Connection) -> Result<BTreeMap<String, Vec<Vec<Option<String>>>>> {
+fn snapshot_pipeline_tables(
+    conn: &Connection,
+) -> Result<BTreeMap<String, Vec<Vec<Option<String>>>>> {
     let tables = [
         "bronze_patient",
         "bronze_condition",
@@ -504,12 +510,7 @@ fn create_prepare_test_nodes(base_dir: &Path) -> Result<Vec<RawNodeInput>> {
     ])
 }
 
-fn write_node_fixture(
-    dir: &Path,
-    patient_id: &str,
-    condition_id: &str,
-    state: &str,
-) -> Result<()> {
+fn write_node_fixture(dir: &Path, patient_id: &str, condition_id: &str, state: &str) -> Result<()> {
     let bundle = json!({
         "resourceType": "Bundle",
         "entry": [
