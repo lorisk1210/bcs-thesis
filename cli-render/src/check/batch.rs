@@ -261,23 +261,27 @@ fn render_batch_query_plain(query: &CheckBatchQueryData) -> String {
     let mut out = String::new();
     let _ = writeln!(out, "  - query_file: {}", query.query_file);
     let _ = writeln!(out, "    status: {}", query.final_status);
-    out.push_str(&indent_block(
+    push_indented_block(
+        &mut out,
         &render_payload_comparison_plain("release_vs_exact_raw", &query.release_vs_exact_raw),
         "    ",
-    ));
-    out.push_str(&indent_block(
+    );
+    push_indented_block(
+        &mut out,
         &render_query_metric_summary_plain(&query.utility_verdict),
         "    ",
-    ));
-    out.push_str(&indent_block(
+    );
+    push_indented_block(
+        &mut out,
         &render_utility_verdict_plain(&query.utility_verdict),
         "    ",
-    ));
+    );
     if let Some(ref seed_robustness) = query.seed_robustness {
-        out.push_str(&indent_block(
+        push_indented_block(
+            &mut out,
             &render_seed_robustness_plain(seed_robustness),
             "    ",
-        ));
+        );
     }
     out
 }
@@ -287,29 +291,43 @@ fn render_batch_query_pretty(mode: OutputMode, query: &CheckBatchQueryData) -> S
     let badge = status_badge(mode, &query.final_status);
     let _ = writeln!(out, "    {BOLD}{}{RESET}  {badge}", query.query_file);
     let _ = writeln!(out);
-    out.push_str(&indent_block(
+    push_indented_block(
+        &mut out,
         &render_payload_comparison_pretty(
             mode,
             "Release Vs Exact Raw",
             &query.release_vs_exact_raw,
         ),
         "    ",
-    ));
-    out.push_str(&indent_block(
+    );
+    push_indented_block(
+        &mut out,
         &render_query_metric_summary_pretty(mode, &query.utility_verdict),
         "    ",
-    ));
-    out.push_str(&indent_block(
+    );
+    push_indented_block(
+        &mut out,
         &render_utility_verdict_pretty(mode, &query.utility_verdict),
         "    ",
-    ));
+    );
     if let Some(ref seed_robustness) = query.seed_robustness {
-        out.push_str(&indent_block(
+        push_indented_block(
+            &mut out,
             &render_seed_robustness_pretty(mode, seed_robustness),
             "    ",
-        ));
+        );
     }
     out
+}
+
+fn push_indented_block(out: &mut String, block: &str, indent: &str) {
+    if block.is_empty() {
+        return;
+    }
+    out.push_str(&indent_block(block, indent));
+    if !out.ends_with('\n') {
+        out.push('\n');
+    }
 }
 
 fn render_utility_verdict_plain(data: &CheckUtilityVerdictData) -> String {
