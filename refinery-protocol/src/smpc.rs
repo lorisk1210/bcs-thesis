@@ -35,7 +35,8 @@ pub struct SharePayload {
 
 // Parses a raw 32-byte SMPC private key.
 pub fn validate_private_key_bytes(bytes: &[u8]) -> Result<[u8; PRIVATE_KEY_LENGTH]> {
-    bytes.try_into()
+    bytes
+        .try_into()
         .map_err(|_| anyhow!("SMPC private key must be 32 bytes"))
 }
 
@@ -76,9 +77,7 @@ pub fn compute_job_context_hash(
         .map(|participant| {
             format!(
                 "{}|{}|{}",
-                participant.node_id,
-                participant.endpoint,
-                participant.smpc_key_fingerprint
+                participant.node_id, participant.endpoint, participant.smpc_key_fingerprint
             )
         })
         .collect::<Vec<_>>();
@@ -212,13 +211,9 @@ mod tests {
         let (nonce, ciphertext) =
             encrypt_share_payload(&sender_private, &recipient_public, &payload)
                 .expect("encrypt should succeed");
-        let decrypted = decrypt_share_payload(
-            &recipient_private,
-            &sender_public,
-            &nonce,
-            &ciphertext,
-        )
-        .expect("decrypt should succeed");
+        let decrypted =
+            decrypt_share_payload(&recipient_private, &sender_public, &nonce, &ciphertext)
+                .expect("decrypt should succeed");
 
         assert_eq!(decrypted, payload);
     }

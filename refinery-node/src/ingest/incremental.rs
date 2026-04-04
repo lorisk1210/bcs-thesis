@@ -4,9 +4,9 @@ use anyhow::Result;
 use duckdb::{Connection, Statement, ToSql, Transaction};
 
 use super::{
-    bronze::{transform_birth_date, transform_clinical_datetime, BronzeRecord},
-    shared::{process_files_with_writer, truncate_error, Pseudonymizer, RecordWriter},
     IngestOptions, IngestReport, TransformMode,
+    bronze::{BronzeRecord, transform_birth_date, transform_clinical_datetime},
+    shared::{Pseudonymizer, RecordWriter, process_files_with_writer, truncate_error},
 };
 
 struct IncrementalWriter<'tx> {

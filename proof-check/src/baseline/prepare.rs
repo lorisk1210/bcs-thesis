@@ -54,17 +54,19 @@ pub fn prepare_baselines(request: crate::PrepareRequest) -> Result<PrepareReport
             let tx = tx.clone();
             let prepared_dir = request.prepared_dir.clone();
             let as_of_date = request.as_of_date;
-            scope.spawn(move || loop {
-                let next_job = {
-                    let mut jobs = jobs.lock().expect("prepare worker mutex poisoned");
-                    jobs.pop()
-                };
-                let Some((index, raw_node)) = next_job else {
-                    break;
-                };
-                let result = prepare_one_node_baseline(&prepared_dir, &raw_node, as_of_date);
-                if tx.send((index, result)).is_err() {
-                    break;
+            scope.spawn(move || {
+                loop {
+                    let next_job = {
+                        let mut jobs = jobs.lock().expect("prepare worker mutex poisoned");
+                        jobs.pop()
+                    };
+                    let Some((index, raw_node)) = next_job else {
+                        break;
+                    };
+                    let result = prepare_one_node_baseline(&prepared_dir, &raw_node, as_of_date);
+                    if tx.send((index, result)).is_err() {
+                        break;
+                    }
                 }
             });
         }
@@ -81,7 +83,12 @@ pub fn prepare_baselines(request: crate::PrepareRequest) -> Result<PrepareReport
         .into_iter()
         .enumerate()
         .map(|(index, result)| {
-            result.ok_or_else(|| anyhow!("prepare worker dropped node {}", request.raw_nodes[index].node_id))?
+            result.ok_or_else(|| {
+                anyhow!(
+                    "prepare worker dropped node {}",
+                    request.raw_nodes[index].node_id
+                )
+            })?
         })
         .collect::<Result<Vec<_>>>()?;
 
@@ -117,7 +124,9 @@ fn prepare_one_node_baseline(
     let coarsened_db_path = prepared_dir
         .join("coarsened")
         .join(format!("{file_stem}.duckdb"));
-    let exact_db_path = prepared_dir.join("exact").join(format!("{file_stem}.duckdb"));
+    let exact_db_path = prepared_dir
+        .join("exact")
+        .join(format!("{file_stem}.duckdb"));
 
     remove_if_exists(&coarsened_db_path)?;
     remove_if_exists(&exact_db_path)?;
@@ -144,7 +153,9 @@ pub fn parse_raw_node_spec(spec: &str) -> Result<RawNodeInput> {
         .split_once('=')
         .ok_or_else(|| anyhow!("raw node spec must be in the form node_id=/path/to/bundles"))?;
     if node_id.trim().is_empty() || path.trim().is_empty() {
-        return Err(anyhow!("raw node spec must include a non-empty node id and path"));
+        return Err(anyhow!(
+            "raw node spec must include a non-empty node id and path"
+        ));
     }
     Ok(RawNodeInput {
         node_id: node_id.trim().to_string(),

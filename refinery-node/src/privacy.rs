@@ -269,7 +269,10 @@ mod tests {
 
         assert!(release.accepted);
         assert_eq!(release.release_mode, ReleaseMode::Raw);
-        assert_eq!(release.released_result, Some(query_result.raw_result.clone()));
+        assert_eq!(
+            release.released_result,
+            Some(query_result.raw_result.clone())
+        );
         assert_eq!(release.budget_spent, 0.0);
         assert_eq!(release.budget_remaining, 10.0);
 

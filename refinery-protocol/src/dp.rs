@@ -78,7 +78,13 @@ fn add_noise_with_key<R>(
         }
         Value::Object(map) => {
             for (child_key, item) in map.iter_mut() {
-                add_noise_with_key(item, value_scale, count_scale, Some(child_key.as_str()), rng);
+                add_noise_with_key(
+                    item,
+                    value_scale,
+                    count_scale,
+                    Some(child_key.as_str()),
+                    rng,
+                );
             }
         }
         _ => {}

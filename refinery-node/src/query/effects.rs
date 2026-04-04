@@ -117,7 +117,9 @@ pub(super) fn execute_subgroup_effect(
         for window in cutoffs.windows(2) {
             let lower = window[0];
             let upper = window[1];
-            case_sql.push_str(&format!(" WHEN p.age_years < {upper} THEN '[{lower},{upper})'"));
+            case_sql.push_str(&format!(
+                " WHEN p.age_years < {upper} THEN '[{lower},{upper})'"
+            ));
         }
 
         let last = *cutoffs.last().unwrap_or(&65);

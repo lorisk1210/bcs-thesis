@@ -7,8 +7,8 @@ use std::path::PathBuf;
 
 // Third-party library imports
 use anyhow::{Result, anyhow};
-use refinery_protocol::env_utils::{parse_env, parse_env_or_default, parse_optional_env};
 use refinery_protocol::ReleaseMode;
+use refinery_protocol::env_utils::{parse_env, parse_env_or_default, parse_optional_env};
 
 // Global privacy settings applied after node aggregation.
 #[derive(Debug, Clone)]
