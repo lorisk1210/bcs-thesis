@@ -5,6 +5,7 @@ use refinery_orchestrator::dp_release::GlobalReleaseResult;
 use refinery_protocol::{QueryResult, QueryTemplate};
 use serde_json::{Map, Value, json};
 
+use crate::compare::LIVE_POST_RELEASE_LABEL;
 use crate::diff::diff_payloads;
 use crate::{
     AnalysisStatus, MetricComparison, NodeRejection, PayloadComparisonSection,
@@ -18,7 +19,7 @@ pub(crate) fn build_release_vs_exact_raw_section(
     endpoints: &[String],
 ) -> Result<PayloadComparisonSection> {
     let mut notes = vec![
-        "Diffs compare the released DP payload against exact_raw_baseline.raw_result.".to_string(),
+        "Diffs compare the released payload against exact_raw_baseline.raw_result.".to_string(),
     ];
 
     match (live_release, exact_baseline) {
@@ -32,7 +33,7 @@ pub(crate) fn build_release_vs_exact_raw_section(
                 ));
                 return Ok(PayloadComparisonSection {
                     status: AnalysisStatus::Suppressed,
-                    left_label: "live_smpc_post_dp_seeded".to_string(),
+                    left_label: LIVE_POST_RELEASE_LABEL.to_string(),
                     right_label: "exact_raw_baseline".to_string(),
                     left_payload,
                     right_payload,
@@ -55,7 +56,7 @@ pub(crate) fn build_release_vs_exact_raw_section(
 
             Ok(PayloadComparisonSection {
                 status: AnalysisStatus::Available,
-                left_label: "live_smpc_post_dp_seeded".to_string(),
+                left_label: LIVE_POST_RELEASE_LABEL.to_string(),
                 right_label: "exact_raw_baseline".to_string(),
                 left_payload,
                 right_payload,
@@ -70,7 +71,7 @@ pub(crate) fn build_release_vs_exact_raw_section(
         }
         (None, Some(exact_baseline)) => Ok(PayloadComparisonSection {
             status: AnalysisStatus::Inconclusive,
-            left_label: "live_smpc_post_dp_seeded".to_string(),
+            left_label: LIVE_POST_RELEASE_LABEL.to_string(),
             right_label: "exact_raw_baseline".to_string(),
             left_payload: None,
             right_payload: Some(serde_json::to_value(exact_baseline)?),
@@ -410,7 +411,7 @@ fn build_template_metrics(
 fn skipped_payload_comparison_section() -> PayloadComparisonSection {
     PayloadComparisonSection {
         status: AnalysisStatus::Skipped,
-        left_label: "live_smpc_post_dp_seeded".to_string(),
+        left_label: LIVE_POST_RELEASE_LABEL.to_string(),
         right_label: "exact_raw_baseline".to_string(),
         left_payload: None,
         right_payload: None,
