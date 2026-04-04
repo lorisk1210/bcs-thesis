@@ -105,7 +105,11 @@ fn render_ingest_body(mode: OutputMode, r: &IngestReportData) -> String {
     let _ = writeln!(
         out,
         "{}",
-        key_value(mode, "resources_ingested", &r.resources_ingested.to_string())
+        key_value(
+            mode,
+            "resources_ingested",
+            &r.resources_ingested.to_string()
+        )
     );
     let _ = writeln!(
         out,
@@ -118,7 +122,11 @@ fn render_ingest_body(mode: OutputMode, r: &IngestReportData) -> String {
         let _ = writeln!(out, "{}", section_header(mode, "Resource counts"));
         let max_key = r.resource_counts.keys().map(|k| k.len()).max().unwrap_or(0);
         for (resource, count) in &r.resource_counts {
-            let _ = writeln!(out, "{}", table_row(mode, resource, &count.to_string(), max_key));
+            let _ = writeln!(
+                out,
+                "{}",
+                table_row(mode, resource, &count.to_string(), max_key)
+            );
         }
     }
     out

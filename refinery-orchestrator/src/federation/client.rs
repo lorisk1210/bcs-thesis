@@ -39,11 +39,17 @@ pub async fn run_federation_round(
 pub async fn health_check(endpoint: &str, tls: &ClientTlsOptions) -> Result<HealthCheckResponse> {
     let channel = connect(endpoint, tls).await?;
     let mut client = NodeServiceClient::new(channel);
-    let response = client.health_check(HealthCheckRequest {}).await?.into_inner();
+    let response = client
+        .health_check(HealthCheckRequest {})
+        .await?
+        .into_inner();
     Ok(response)
 }
 
-pub async fn capabilities(endpoint: &str, tls: &ClientTlsOptions) -> Result<GetCapabilitiesResponse> {
+pub async fn capabilities(
+    endpoint: &str,
+    tls: &ClientTlsOptions,
+) -> Result<GetCapabilitiesResponse> {
     let channel = connect(endpoint, tls).await?;
     let mut client = NodeServiceClient::new(channel);
     let response = client

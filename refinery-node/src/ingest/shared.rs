@@ -3,7 +3,7 @@ use std::fs::File;
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use duckdb::Connection;
 use serde_json::Value;
 use walkdir::WalkDir;
@@ -11,8 +11,8 @@ use walkdir::WalkDir;
 use crate::fhir;
 
 use super::{
-    bronze::{extract_bronze_record, BronzeRecord},
     IngestReport,
+    bronze::{BronzeRecord, extract_bronze_record},
 };
 
 pub(crate) struct Pseudonymizer {
@@ -35,8 +35,7 @@ impl Pseudonymizer {
 
         let pseudonymized = fhir::pseudonymize_patient_id(&self.secret, raw_id)
             .ok_or_else(|| anyhow!("failed to pseudonymize patient id"))?;
-        self.cache
-            .insert(raw_id.to_string(), pseudonymized.clone());
+        self.cache.insert(raw_id.to_string(), pseudonymized.clone());
         Ok(pseudonymized)
     }
 
@@ -59,7 +58,10 @@ pub(crate) trait RecordWriter {
     fn flush(&mut self) -> Result<()>;
 }
 
-pub(crate) fn discover_input_files(input_dir: &Path, max_files: Option<usize>) -> Result<Vec<PathBuf>> {
+pub(crate) fn discover_input_files(
+    input_dir: &Path,
+    max_files: Option<usize>,
+) -> Result<Vec<PathBuf>> {
     let mut files: Vec<PathBuf> = WalkDir::new(input_dir)
         .into_iter()
         .filter_map(Result::ok)
@@ -107,7 +109,13 @@ pub(crate) fn process_files_with_writer<W: RecordWriter>(
             Ok(bundle) => bundle,
             Err(err) => {
                 report.errors_logged += 1;
-                writer.append_error(&ingest_file, "Bundle", None, "JSON_PARSE", &err.to_string())?;
+                writer.append_error(
+                    &ingest_file,
+                    "Bundle",
+                    None,
+                    "JSON_PARSE",
+                    &err.to_string(),
+                )?;
                 continue;
             }
         };

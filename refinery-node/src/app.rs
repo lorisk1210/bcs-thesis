@@ -97,7 +97,12 @@ pub fn run_pipeline_with_options(
     as_of_date: NaiveDate,
 ) -> Result<PipelineRunSummary> {
     let mut conn = open_initialized_connection(db_path)?;
-    let ingest = run_ingest_with_mode(&mut conn, input_dir.to_path_buf(), max_files, transform_mode)?;
+    let ingest = run_ingest_with_mode(
+        &mut conn,
+        input_dir.to_path_buf(),
+        max_files,
+        transform_mode,
+    )?;
     normalize::run_normalize(&conn)?;
     materialize::run_materialize_as_of(&conn, as_of_date)?;
 
@@ -142,8 +147,12 @@ pub fn run_dual_pipeline_with_options(
 pub fn load_params_file(params_file: &Path) -> Result<Value> {
     let raw = fs::read_to_string(params_file)
         .with_context(|| format!("failed to read params file {}", params_file.display()))?;
-    let params = serde_json::from_str(&raw)
-        .with_context(|| format!("failed to parse params file {} as JSON", params_file.display()))?;
+    let params = serde_json::from_str(&raw).with_context(|| {
+        format!(
+            "failed to parse params file {} as JSON",
+            params_file.display()
+        )
+    })?;
     Ok(params)
 }
 
@@ -153,7 +162,12 @@ pub fn load_params_file(params_file: &Path) -> Result<Value> {
 // @param: clip_min - Lower clipping bound for bounded metrics
 // @param: clip_max - Upper clipping bound for bounded metrics
 // @return: String - SHA256 fingerprint of the request
-pub fn fingerprint(template: QueryTemplate, params: &Value, clip_min: f64, clip_max: f64) -> String {
+pub fn fingerprint(
+    template: QueryTemplate,
+    params: &Value,
+    clip_min: f64,
+    clip_max: f64,
+) -> String {
     let mut hasher = Sha256::new();
     hasher.update(template.as_str().as_bytes());
     hasher.update(params.to_string().as_bytes());

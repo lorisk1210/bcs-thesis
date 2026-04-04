@@ -34,7 +34,9 @@ pub fn compute_local_statistics(
     clip: ClipBounds,
 ) -> Result<LocalStatistics> {
     match template {
-        QueryTemplate::CohortFeasibilityCount => cohort::execute_cohort_count(conn, template, params),
+        QueryTemplate::CohortFeasibilityCount => {
+            cohort::execute_cohort_count(conn, template, params)
+        }
         QueryTemplate::ComparativeEffectivenessDelta => {
             effects::execute_comparative_effectiveness(conn, template, params, clip)
         }

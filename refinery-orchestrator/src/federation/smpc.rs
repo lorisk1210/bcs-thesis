@@ -217,7 +217,9 @@ fn required_same_slot_labels(responses: &[SubmitJobResponse]) -> Result<Vec<Stri
         .iter()
         .any(|response| response.slot_labels != first.slot_labels)
     {
-        return Err(anyhow!("mismatched slot labels across federation responses"));
+        return Err(anyhow!(
+            "mismatched slot labels across federation responses"
+        ));
     }
     Ok(first.slot_labels.clone())
 }

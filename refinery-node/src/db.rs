@@ -179,20 +179,24 @@ fn rename_column_if_missing_target(
     old_column: &str,
     new_column: &str,
 ) -> Result<()> {
-    if !table_has_column(conn, table_name, old_column)? || table_has_column(conn, table_name, new_column)? {
+    if !table_has_column(conn, table_name, old_column)?
+        || table_has_column(conn, table_name, new_column)?
+    {
         return Ok(());
     }
 
     conn.execute(
-        &format!(
-            "ALTER TABLE {table_name} RENAME COLUMN {old_column} TO {new_column}"
-        ),
+        &format!("ALTER TABLE {table_name} RENAME COLUMN {old_column} TO {new_column}"),
         [],
     )?;
     Ok(())
 }
 
-fn add_column_if_missing(conn: &Connection, table_name: &str, column_definition: &str) -> Result<()> {
+fn add_column_if_missing(
+    conn: &Connection,
+    table_name: &str,
+    column_definition: &str,
+) -> Result<()> {
     let column_name = column_definition
         .split_whitespace()
         .next()
@@ -226,8 +230,17 @@ mod tests {
         let conn = Connection::open_in_memory().expect("in-memory duckdb should open");
         init_schema(&conn).expect("schema should initialize");
 
-        assert!(table_has_column(&conn, "privacy_releases", "release_mode").expect("column lookup should work"));
-        assert!(table_has_column(&conn, "query_audit", "released_result_json").expect("column lookup should work"));
-        assert!(table_has_column(&conn, "query_audit", "release_mode").expect("column lookup should work"));
+        assert!(
+            table_has_column(&conn, "privacy_releases", "release_mode")
+                .expect("column lookup should work")
+        );
+        assert!(
+            table_has_column(&conn, "query_audit", "released_result_json")
+                .expect("column lookup should work")
+        );
+        assert!(
+            table_has_column(&conn, "query_audit", "release_mode")
+                .expect("column lookup should work")
+        );
     }
 }

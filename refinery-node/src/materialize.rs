@@ -21,9 +21,8 @@ pub fn run_materialize(conn: &Connection) -> Result<()> {
 
 // Turns clinical facts into ready-to-use features using a fixed as-of date for stable age calculations.
 pub fn run_materialize_as_of(conn: &Connection, as_of_date: NaiveDate) -> Result<()> {
-    conn.execute_batch(
-        &format!(
-            r#"
+    conn.execute_batch(&format!(
+        r#"
         CREATE OR REPLACE TABLE feature_medication_exposure AS
         SELECT
             patient_pseudo_id,
@@ -85,8 +84,7 @@ pub fn run_materialize_as_of(conn: &Connection, as_of_date: NaiveDate) -> Result
         LEFT JOIN feature_comorbidity c USING (patient_pseudo_id)
         LEFT JOIN feature_event_flags f USING (patient_pseudo_id);
         "#,
-        ),
-    )?;
+    ))?;
 
     Ok(())
 }

@@ -107,9 +107,11 @@ pub fn aggregate_local_statistics(
         .ok_or_else(|| anyhow!("cannot aggregate zero local statistics"))?;
     validate_aggregate_items(template, &first.schema_id, &first.slot_labels, items)?;
 
-    let mut slots =
-        slot_vector::sum_slot_slices(first.slot_labels.len(), items.iter().map(|item| item.slots.as_slice()))
-            .map_err(|_| anyhow!("slot vector length mismatch for {}", template.as_str()))?;
+    let mut slots = slot_vector::sum_slot_slices(
+        first.slot_labels.len(),
+        items.iter().map(|item| item.slots.as_slice()),
+    )
+    .map_err(|_| anyhow!("slot vector length mismatch for {}", template.as_str()))?;
     if let Some(result) = scalar::normalize_aggregated_slots(template, &mut slots, items.len()) {
         result?;
     }
@@ -137,9 +139,11 @@ pub fn aggregate_slot_vectors(
         return Err(anyhow!("cannot aggregate zero slot vectors"));
     }
 
-    let mut slots =
-        slot_vector::sum_slot_slices(slot_labels.len(), slot_vectors.iter().map(|vector| vector.as_slice()))
-        .map_err(|_| anyhow!("slot vector length mismatch for {}", template.as_str()))?;
+    let mut slots = slot_vector::sum_slot_slices(
+        slot_labels.len(),
+        slot_vectors.iter().map(|vector| vector.as_slice()),
+    )
+    .map_err(|_| anyhow!("slot vector length mismatch for {}", template.as_str()))?;
     if let Some(result) =
         scalar::normalize_aggregated_slots(template, &mut slots, slot_vectors.len())
     {
@@ -192,13 +196,20 @@ fn validate_aggregate_items(
             ));
         }
         if item.schema_id != schema_id || item.slot_labels != slot_labels {
-            return Err(anyhow!("statistics schema mismatch for {}", template.as_str()));
+            return Err(anyhow!(
+                "statistics schema mismatch for {}",
+                template.as_str()
+            ));
         }
     }
     Ok(())
 }
 
-fn encode_stats_value(template: QueryTemplate, slot_labels: &[String], stats: &Value) -> Result<Vec<u64>> {
+fn encode_stats_value(
+    template: QueryTemplate,
+    slot_labels: &[String],
+    stats: &Value,
+) -> Result<Vec<u64>> {
     if let Some(slots) = scalar::encode_stats(template, stats) {
         return slots;
     }
@@ -212,7 +223,11 @@ fn encode_stats_value(template: QueryTemplate, slot_labels: &[String], stats: &V
     ))
 }
 
-fn decode_stats_value(template: QueryTemplate, slot_labels: &[String], slots: &[u64]) -> Result<Value> {
+fn decode_stats_value(
+    template: QueryTemplate,
+    slot_labels: &[String],
+    slots: &[u64],
+) -> Result<Value> {
     validate_slot_layout(template, slot_labels, slots.len())?;
 
     if let Some(stats) = scalar::decode_stats(template, slots) {
@@ -254,7 +269,9 @@ fn validate_slot_layout(
     slot_count: usize,
 ) -> Result<()> {
     if slot_labels.len() != slot_count {
-        return Err(anyhow!("slot label count does not match slot vector length"));
+        return Err(anyhow!(
+            "slot label count does not match slot vector length"
+        ));
     }
 
     if let Some(schema) = scalar::schema_for_query(template) {
@@ -388,8 +405,14 @@ mod tests {
         let decoded = aggregated.to_stats_value().expect("stats should decode");
 
         assert_eq!(decoded["max_days"], json!(90));
-        let rendered = render_query_result(&aggregated, ClipBounds { min: 0.0, max: 300.0 })
-            .expect("result should render");
+        let rendered = render_query_result(
+            &aggregated,
+            ClipBounds {
+                min: 0.0,
+                max: 300.0,
+            },
+        )
+        .expect("result should render");
         assert_eq!(rendered.sensitivity, 18.0);
     }
 
@@ -484,7 +507,9 @@ mod tests {
             let local =
                 LocalStatistics::from_stats_value(template, &params, stats.clone(), cohort_size)
                     .expect("local statistics should encode");
-            let decoded = local.to_stats_value().expect("local statistics should decode");
+            let decoded = local
+                .to_stats_value()
+                .expect("local statistics should decode");
             match template {
                 QueryTemplate::SubgroupEffectEstimate | QueryTemplate::DoseResponseTrend => {
                     let mut expected_groups = stats["groups"]

@@ -74,7 +74,9 @@ mod tests {
         let share_count = stats.len();
         let share_sets = stats
             .iter()
-            .map(|stat| split_additive_shares(&stat.slots, share_count).expect("shares should split"))
+            .map(|stat| {
+                split_additive_shares(&stat.slots, share_count).expect("shares should split")
+            })
             .collect::<Vec<_>>();
 
         let mut aggregate_shares = vec![vec![0u64; stats[0].slots.len()]; share_count];
@@ -153,7 +155,10 @@ mod tests {
         let baseline_result = render_query_result(
             &aggregate_local_statistics(QueryTemplate::ComparativeEffectivenessDelta, &locals)
                 .expect("local aggregation should succeed"),
-            ClipBounds { min: 0.0, max: 300.0 },
+            ClipBounds {
+                min: 0.0,
+                max: 300.0,
+            },
         )
         .expect("baseline render should succeed");
         let smpc_result = aggregate_smpc_round_responses(
@@ -164,7 +169,10 @@ mod tests {
             SMPC_PROTOCOL_NAME,
             SMPC_PROTOCOL_VERSION,
             &round_two,
-            ClipBounds { min: 0.0, max: 300.0 },
+            ClipBounds {
+                min: 0.0,
+                max: 300.0,
+            },
         )
         .expect("smpc aggregation should succeed");
 
@@ -209,7 +217,10 @@ mod tests {
         let baseline_result = render_query_result(
             &aggregate_local_statistics(QueryTemplate::DoseResponseTrend, &locals)
                 .expect("local aggregation should succeed"),
-            ClipBounds { min: 0.0, max: 300.0 },
+            ClipBounds {
+                min: 0.0,
+                max: 300.0,
+            },
         )
         .expect("baseline render should succeed");
         let smpc_result = aggregate_smpc_round_responses(
@@ -220,7 +231,10 @@ mod tests {
             SMPC_PROTOCOL_NAME,
             SMPC_PROTOCOL_VERSION,
             &round_two,
-            ClipBounds { min: 0.0, max: 300.0 },
+            ClipBounds {
+                min: 0.0,
+                max: 300.0,
+            },
         )
         .expect("smpc aggregation should succeed");
 
@@ -257,7 +271,10 @@ mod tests {
             SMPC_PROTOCOL_NAME,
             SMPC_PROTOCOL_VERSION,
             &responses,
-            ClipBounds { min: 0.0, max: 300.0 },
+            ClipBounds {
+                min: 0.0,
+                max: 300.0,
+            },
         )
         .expect_err("aggregation should reject bad metadata");
 

@@ -23,7 +23,10 @@ pub(crate) fn load_nodes_from_raw(raw_nodes: &[RawNodeInput]) -> Result<Vec<Prep
             .insert(raw_node.node_id.clone(), raw_node.input_dir.clone())
             .is_some()
         {
-            return Err(anyhow!("duplicate raw node mapping for {}", raw_node.node_id));
+            return Err(anyhow!(
+                "duplicate raw node mapping for {}",
+                raw_node.node_id
+            ));
         }
     }
 
@@ -39,9 +42,7 @@ pub(crate) fn load_nodes_from_raw(raw_nodes: &[RawNodeInput]) -> Result<Vec<Prep
         .collect())
 }
 
-pub(crate) fn load_nodes_from_metadata(
-    metadata: &PreparedDirectoryMetadata,
-) -> Vec<PreparedNode> {
+pub(crate) fn load_nodes_from_metadata(metadata: &PreparedDirectoryMetadata) -> Vec<PreparedNode> {
     metadata
         .nodes
         .iter()
@@ -90,7 +91,11 @@ pub(crate) async fn prepare_nodes(
     }
 
     if !raw_by_node_id.is_empty() {
-        let extra = raw_by_node_id.keys().cloned().collect::<Vec<_>>().join(", ");
+        let extra = raw_by_node_id
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(", ");
         return Err(anyhow!("unused --raw-node mappings provided for: {extra}"));
     }
 

@@ -23,12 +23,18 @@ fn resolve_mode_defaults_to_pretty() {
 
 #[test]
 fn resolve_mode_plain_from_env() {
-    assert_eq!(resolve_output_mode_for_tty(Some("plain"), true), OutputMode::Plain);
+    assert_eq!(
+        resolve_output_mode_for_tty(Some("plain"), true),
+        OutputMode::Plain
+    );
 }
 
 #[test]
 fn resolve_mode_ignores_unknown_values() {
-    assert_eq!(resolve_output_mode_for_tty(Some("fancy"), true), OutputMode::Pretty);
+    assert_eq!(
+        resolve_output_mode_for_tty(Some("fancy"), true),
+        OutputMode::Pretty
+    );
 }
 
 #[test]
@@ -288,7 +294,11 @@ fn plain_error_matches_legacy_style() {
 fn wraps_long_lines_inside_requested_width() {
     let wrapped = wrap_ansi_line("this is a very long line that should wrap cleanly", 12);
     assert!(wrapped.len() > 1);
-    assert!(wrapped.iter().all(|line| display_len_ignore_ansi(line) <= 12));
+    assert!(
+        wrapped
+            .iter()
+            .all(|line| display_len_ignore_ansi(line) <= 12)
+    );
 }
 
 #[test]
@@ -297,7 +307,11 @@ fn wraps_ansi_prefixed_unbroken_lines_without_blank_output() {
     let wrapped = wrap_lines_for_frame(&[&line], 20);
     assert!(wrapped.len() > 1);
     assert!(wrapped.iter().all(|line| display_len_ignore_ansi(line) > 0));
-    assert!(wrapped.iter().all(|line| display_len_ignore_ansi(line) <= 20));
+    assert!(
+        wrapped
+            .iter()
+            .all(|line| display_len_ignore_ansi(line) <= 20)
+    );
 }
 
 #[test]

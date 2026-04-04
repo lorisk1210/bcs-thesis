@@ -30,12 +30,7 @@ pub fn release_result(
     query_result: &QueryResult,
     config: &GlobalPrivacyConfig,
 ) -> Result<GlobalReleaseResult> {
-    release_result_for_mode(
-        query_result,
-        config,
-        config.release_mode,
-        config.dp_seed,
-    )
+    release_result_for_mode(query_result, config, config.release_mode, config.dp_seed)
 }
 
 // Applies the release policy using an explicit RNG for deterministic tests.

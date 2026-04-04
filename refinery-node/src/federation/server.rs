@@ -15,7 +15,7 @@ use tokio::sync::Mutex;
 use tonic::transport::{Certificate, Identity, Server, ServerTlsConfig};
 use tonic::{Request, Response, Status};
 
-use super::jobs::{self, JobRecord, JOB_STATUS_COMPLETED, JOB_STATUS_REJECTED};
+use super::jobs::{self, JOB_STATUS_COMPLETED, JOB_STATUS_REJECTED, JobRecord};
 use super::smpc;
 use crate::app;
 
