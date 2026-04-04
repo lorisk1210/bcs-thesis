@@ -2,7 +2,8 @@ use std::collections::BTreeMap;
 use std::env;
 
 use crate::check::{
-    CheckCompareReportData, CheckPrepareReportData, CheckPreparedNodeData, CheckSectionData,
+    CheckCompareReportData, CheckPayloadComparisonData, CheckPrepareReportData,
+    CheckPreparedNodeData, CheckSectionData, CheckTemplateMetricsData,
 };
 use crate::common::key_value;
 use crate::frame::{display_len_ignore_ansi, wrap_ansi_line, wrap_lines_for_frame};
@@ -236,7 +237,7 @@ fn plain_check_compare_report_section_status() {
         epsilon: Some(1.0),
         min_cohort: Some(5),
         nodes: vec![],
-        sections: vec![CheckSectionData {
+        validation_sections: vec![CheckSectionData {
             name: "smpc_parity".to_string(),
             status: "match".to_string(),
             expectation: None,
@@ -247,9 +248,33 @@ fn plain_check_compare_report_section_status() {
             diffs: vec![],
             rejections: vec![],
         }],
+        release_vs_exact_raw: CheckPayloadComparisonData {
+            status: "available".to_string(),
+            left_label: "release".to_string(),
+            right_label: "exact_raw".to_string(),
+            left_payload: None,
+            right_payload: None,
+            compared_left_label: None,
+            compared_right_label: None,
+            compared_left_payload: None,
+            compared_right_payload: None,
+            diffs: vec![],
+            notes: vec![],
+            rejections: vec![],
+        },
+        template_metrics: CheckTemplateMetricsData {
+            status: "available".to_string(),
+            primary_metric: None,
+            context_metrics: vec![],
+            notes: vec![],
+            rejections: vec![],
+        },
     };
     let out = render_check_compare_report(OutputMode::Plain, &data);
     assert!(out.contains("template: cohort_feasibility_count"));
+    assert!(out.contains("validation:"));
+    assert!(out.contains("release_vs_exact_raw:"));
+    assert!(out.contains("template_metrics:"));
     assert!(out.contains("status: match"));
 }
 

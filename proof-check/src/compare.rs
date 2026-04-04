@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use anyhow::{Result, anyhow};
 use chrono::{NaiveDate, Utc};
 use refinery_orchestrator::config::{GlobalPrivacyConfig, load_privacy_config};
-use refinery_orchestrator::dp_release::release_result_with_seed;
+use refinery_orchestrator::dp_release::{GlobalReleaseResult, release_result_with_seed};
 use refinery_orchestrator::jobs::FederatedJob;
 use refinery_orchestrator::protocol_runner::run_job;
 use refinery_protocol::{QueryResult, QueryTemplate};
@@ -16,9 +16,12 @@ use crate::baseline::{
     prepare_nodes_from_metadata,
 };
 use crate::diff::diff_payloads;
+use crate::insights::{
+    build_release_vs_exact_raw_section, build_template_metrics_section,
+};
 use crate::{
     CompareRequest, ComparisonReport, ComparisonSection, DistortionExpectation, NodeRejection,
-    NodeReport, RequestMetadata, SectionStatus,
+    NodeReport, RequestMetadata, SectionStatus, ValidationSections,
 };
 
 static CHECKER_JOB_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -111,74 +114,50 @@ pub async fn run_compare(request: CompareRequest) -> Result<ComparisonReport> {
         None
     };
 
-    let live_result = if let Some(config) = privacy_config.as_ref() {
+    let (live_result, live_error) = if let Some(config) = privacy_config.as_ref() {
         match run_live_job(&request, config).await {
-            Ok(result) => Some(result),
-            Err(error) => {
-                let reason = error.to_string();
-                return Ok(ComparisonReport {
-                    request: request_metadata,
-                    nodes: node_reports,
-                    smpc_parity: if request.mode.includes_smpc_parity() {
-                        build_inconclusive_section(
-                            "live_smpc_pre_dp",
-                            "coarsened_baseline",
-                            None,
-                            Some(serialize_payload(&coarsened_baseline)?),
-                            &reason,
-                            &request.node_endpoints,
-                        )
-                    } else {
-                        skipped_section("live_smpc_pre_dp", "coarsened_baseline")
-                    },
-                    coarsening_distortion: if request.mode.includes_coarsening_distortion() {
-                        let exact = exact_baseline
-                            .as_ref()
-                            .ok_or_else(|| anyhow!("exact baseline missing for distortion mode"))?;
-                        build_coarsening_distortion_section(
-                            &coarsened_baseline,
-                            exact,
-                            request.template,
-                            &request.params,
-                        )?
-                    } else {
-                        skipped_section("coarsened_baseline", "exact_raw_baseline")
-                    },
-                    final_release_utility: if request.mode.includes_final_release_utility() {
-                        let right_payload = exact_baseline
-                            .as_ref()
-                            .map(|exact| release_result_with_seed(exact, config, request.dp_seed))
-                            .transpose()?
-                            .map(|release| serialize_payload(&release))
-                            .transpose()?;
-                        build_inconclusive_section(
-                            "live_smpc_post_dp_seeded",
-                            "exact_raw_post_dp_seeded",
-                            None,
-                            right_payload,
-                            &reason,
-                            &request.node_endpoints,
-                        )
-                    } else {
-                        skipped_section(
-                            "live_smpc_post_dp_seeded",
-                            "exact_raw_post_dp_seeded",
-                        )
-                    },
-                });
-            }
+            Ok(result) => (Some(result), None),
+            Err(error) => (None, Some(error.to_string())),
         }
+    } else {
+        (None, None)
+    };
+
+    let live_release = if request.mode.includes_final_release_utility()
+        || request.mode.includes_release_vs_exact_raw()
+        || request.mode.includes_template_metrics()
+    {
+        live_result
+            .as_ref()
+            .zip(privacy_config.as_ref())
+            .map(|(result, config)| release_result_with_seed(result, config, request.dp_seed))
+            .transpose()?
+    } else {
+        None
+    };
+
+    let exact_release = if request.mode.includes_final_release_utility() {
+        exact_baseline
+            .as_ref()
+            .zip(privacy_config.as_ref())
+            .map(|(result, config)| release_result_with_seed(result, config, request.dp_seed))
+            .transpose()?
     } else {
         None
     };
 
     let smpc_parity = if request.mode.includes_smpc_parity() {
-        build_smpc_parity_section(
-            live_result
-                .as_ref()
-                .ok_or_else(|| anyhow!("live SMPC result missing for parity mode"))?,
-            &coarsened_baseline,
-        )?
+        match live_result.as_ref() {
+            Some(live_result) => build_smpc_parity_section(live_result, &coarsened_baseline)?,
+            None => build_inconclusive_section(
+                "live_smpc_pre_dp",
+                "coarsened_baseline",
+                None,
+                Some(serialize_payload(&coarsened_baseline)?),
+                missing_live_reason(&live_error),
+                &request.node_endpoints,
+            ),
+        }
     } else {
         skipped_section("live_smpc_pre_dp", "coarsened_baseline")
     };
@@ -197,28 +176,65 @@ pub async fn run_compare(request: CompareRequest) -> Result<ComparisonReport> {
     };
 
     let final_release_utility = if request.mode.includes_final_release_utility() {
-        build_final_release_utility_section(
-            live_result
-                .as_ref()
-                .ok_or_else(|| anyhow!("live SMPC result missing for utility mode"))?,
-            exact_baseline
-                .as_ref()
-                .ok_or_else(|| anyhow!("exact baseline missing for utility mode"))?,
-            privacy_config
-                .as_ref()
-                .ok_or_else(|| anyhow!("privacy config missing for utility mode"))?,
-            request.dp_seed,
-        )?
+        match (live_release.as_ref(), exact_release.as_ref()) {
+            (Some(live_release), Some(exact_release)) => {
+                build_final_release_utility_section(live_release, exact_release)?
+            }
+            _ => build_inconclusive_section(
+                "live_smpc_post_dp_seeded",
+                "exact_raw_post_dp_seeded",
+                None,
+                exact_release
+                    .as_ref()
+                    .map(serialize_payload)
+                    .transpose()?,
+                missing_live_reason(&live_error),
+                &request.node_endpoints,
+            ),
+        }
     } else {
         skipped_section("live_smpc_post_dp_seeded", "exact_raw_post_dp_seeded")
+    };
+
+    let release_vs_exact_raw = if request.mode.includes_release_vs_exact_raw() {
+        build_release_vs_exact_raw_section(
+            live_release.as_ref(),
+            exact_baseline.as_ref(),
+            live_error.as_deref(),
+            &request.node_endpoints,
+        )?
+    } else {
+        build_release_vs_exact_raw_section(None, None, None, &request.node_endpoints)?
+    };
+
+    let template_metrics = if request.mode.includes_template_metrics() {
+        build_template_metrics_section(
+            request.template,
+            live_release.as_ref(),
+            exact_baseline.as_ref(),
+            live_error.as_deref(),
+            &request.node_endpoints,
+        )?
+    } else {
+        build_template_metrics_section(
+            request.template,
+            None,
+            None,
+            None,
+            &request.node_endpoints,
+        )?
     };
 
     Ok(ComparisonReport {
         request: request_metadata,
         nodes: node_reports,
-        smpc_parity,
-        coarsening_distortion,
-        final_release_utility,
+        validation: ValidationSections {
+            smpc_parity,
+            coarsening_distortion,
+            final_release_utility,
+        },
+        release_vs_exact_raw,
+        template_metrics,
     })
 }
 
@@ -299,15 +315,11 @@ fn build_coarsening_distortion_section(
 }
 
 pub(crate) fn build_final_release_utility_section(
-    live_result: &QueryResult,
-    exact_baseline: &QueryResult,
-    config: &GlobalPrivacyConfig,
-    dp_seed: u64,
+    live_release: &GlobalReleaseResult,
+    exact_release: &GlobalReleaseResult,
 ) -> Result<ComparisonSection> {
-    let live_release = release_result_with_seed(live_result, config, dp_seed)?;
-    let exact_release = release_result_with_seed(exact_baseline, config, dp_seed)?;
-    let left_payload = serialize_payload(&live_release)?;
-    let right_payload = serialize_payload(&exact_release)?;
+    let left_payload = serialize_payload(live_release)?;
+    let right_payload = serialize_payload(exact_release)?;
     let diffs = diff_payloads(&left_payload, &right_payload);
 
     Ok(ComparisonSection {
@@ -324,6 +336,12 @@ pub(crate) fn build_final_release_utility_section(
         diffs,
         rejections: Vec::new(),
     })
+}
+
+fn missing_live_reason(live_error: &Option<String>) -> &str {
+    live_error
+        .as_deref()
+        .unwrap_or("live federated result missing")
 }
 
 fn build_inconclusive_section(
