@@ -350,7 +350,7 @@ mod tests {
             protocol_name: SMPC_PROTOCOL_NAME.to_string(),
             protocol_version: SMPC_PROTOCOL_VERSION.to_string(),
             schema_id: "schema".to_string(),
-            slot_labels: vec!["count".to_string()],
+            slot_labels: vec!["count".to_string(), "population_in_scope".to_string()],
             share_packets: Vec::new(),
             recipient_node_id: "node-a".to_string(),
         };
@@ -370,7 +370,7 @@ mod tests {
             protocol_name: SMPC_PROTOCOL_NAME.to_string(),
             protocol_version: SMPC_PROTOCOL_VERSION.to_string(),
             schema_id: "schema".to_string(),
-            slot_labels: vec!["count".to_string()],
+            slot_labels: vec!["count".to_string(), "population_in_scope".to_string()],
             share_packets: vec![
                 SealedSharePacket {
                     job_id: "job".to_string(),
@@ -380,7 +380,7 @@ mod tests {
                     sender_node_id: "node-a".to_string(),
                     recipient_node_id: "node-b".to_string(),
                     schema_id: "schema".to_string(),
-                    slot_labels: vec!["count".to_string()],
+                    slot_labels: vec!["count".to_string(), "population_in_scope".to_string()],
                     nonce: vec![1],
                     ciphertext: vec![2],
                     packet_hash: "hash-a".to_string(),
@@ -393,7 +393,7 @@ mod tests {
                     sender_node_id: "node-a".to_string(),
                     recipient_node_id: "node-b".to_string(),
                     schema_id: "schema".to_string(),
-                    slot_labels: vec!["count".to_string()],
+                    slot_labels: vec!["count".to_string(), "population_in_scope".to_string()],
                     nonce: vec![3],
                     ciphertext: vec![4],
                     packet_hash: "hash-b".to_string(),
@@ -404,7 +404,7 @@ mod tests {
         let state = SmpcJobState {
             job_context_hash: "hash".to_string(),
             schema_id: "schema".to_string(),
-            slot_labels: vec!["count".to_string()],
+            slot_labels: vec!["count".to_string(), "population_in_scope".to_string()],
             protocol_name: SMPC_PROTOCOL_NAME.to_string(),
             protocol_version: SMPC_PROTOCOL_VERSION.to_string(),
             participant_keys: BTreeMap::from([

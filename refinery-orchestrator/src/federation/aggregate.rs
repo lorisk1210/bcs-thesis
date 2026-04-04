@@ -248,14 +248,14 @@ mod tests {
             LocalStatistics::from_stats_value(
                 QueryTemplate::CohortFeasibilityCount,
                 &json!({}),
-                json!({"count": 4}),
+                json!({"count": 4, "population_in_scope": 10}),
                 4,
             )
             .expect("local stats"),
             LocalStatistics::from_stats_value(
                 QueryTemplate::CohortFeasibilityCount,
                 &json!({}),
-                json!({"count": 6}),
+                json!({"count": 6, "population_in_scope": 20}),
                 6,
             )
             .expect("local stats"),
@@ -265,8 +265,8 @@ mod tests {
 
         let error = aggregate_smpc_round_responses(
             QueryTemplate::CohortFeasibilityCount,
-            "cohort_feasibility_count:v1",
-            &[String::from("count")],
+            "cohort_feasibility_count:v2",
+            &[String::from("count"), String::from("population_in_scope")],
             "hash",
             SMPC_PROTOCOL_NAME,
             SMPC_PROTOCOL_VERSION,

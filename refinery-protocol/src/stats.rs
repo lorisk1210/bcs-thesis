@@ -422,7 +422,7 @@ mod tests {
             (
                 QueryTemplate::CohortFeasibilityCount,
                 json!({}),
-                json!({"count": 12}),
+                json!({"count": 12, "population_in_scope": 24}),
                 12usize,
             ),
             (
