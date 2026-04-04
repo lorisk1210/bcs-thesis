@@ -10,10 +10,12 @@ mod organize;
 mod tests;
 
 pub use check::{
+    CheckAggregateMetricData, CheckAggregateUtilityData, CheckBatchQueryData, CheckBatchReportData,
     CheckCompareReportData, CheckDiffEntry, CheckMetricData, CheckNodeReport,
     CheckPayloadComparisonData, CheckPrepareReportData, CheckPreparedNodeData, CheckRejectionEntry,
-    CheckSectionData, CheckTemplateMetricsData, render_check_compare_report,
-    render_check_prepare_report,
+    CheckSectionData, CheckSeedRobustnessData, CheckSeedVerdictData, CheckTemplateMetricsData,
+    CheckUtilityCheckData, CheckUtilityMetricData, CheckUtilityVerdictData,
+    render_check_batch_report, render_check_compare_report, render_check_prepare_report,
 };
 pub use mode::{OutputMode, resolve_output_mode, resolve_output_mode_for_tty};
 pub use node::{
