@@ -213,9 +213,7 @@ pub(crate) fn frame_cli_output(mode: OutputMode, inner: String) -> String {
     let trimmed = inner.trim_end_matches('\n');
     let lines: Vec<&str> = trimmed.lines().collect();
     if lines.is_empty() {
-        return format!(
-            "{DARK_GRAY}┌──┐{RESET}\n{DARK_GRAY}│  │{RESET}\n{DARK_GRAY}└──┘{RESET}\n"
-        );
+        return format!("{DARK_GRAY}┌──┐{RESET}\n{DARK_GRAY}│  │{RESET}\n{DARK_GRAY}└──┘{RESET}\n");
     }
 
     let max_content_width = terminal_columns()

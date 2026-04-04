@@ -10,15 +10,17 @@ mod organize;
 mod tests;
 
 pub use check::{
+    CheckAggregateMetricData, CheckAggregateUtilityData, CheckBatchQueryData, CheckBatchReportData,
     CheckCompareReportData, CheckDiffEntry, CheckMetricData, CheckNodeReport,
-    CheckPayloadComparisonData, CheckPrepareReportData, CheckPreparedNodeData,
-    CheckRejectionEntry, CheckSectionData, CheckTemplateMetricsData,
-    render_check_compare_report, render_check_prepare_report,
+    CheckPayloadComparisonData, CheckPrepareReportData, CheckPreparedNodeData, CheckRejectionEntry,
+    CheckSectionData, CheckSeedRobustnessData, CheckSeedVerdictData, CheckTemplateMetricsData,
+    CheckUtilityCheckData, CheckUtilityMetricData, CheckUtilityVerdictData,
+    render_check_batch_report, render_check_compare_report, render_check_prepare_report,
 };
 pub use mode::{OutputMode, resolve_output_mode, resolve_output_mode_for_tty};
 pub use node::{
-    IngestReportData, InspectTableData, NodeQueryRejectedData, NodeQueryReleasedData, render_ingest,
-    render_init, render_inspect, render_materialize, render_node_query_rejected,
+    IngestReportData, InspectTableData, NodeQueryRejectedData, NodeQueryReleasedData,
+    render_ingest, render_init, render_inspect, render_materialize, render_node_query_rejected,
     render_node_query_released, render_normalize, render_pipeline,
 };
 pub use orchestrator::{
@@ -41,7 +43,10 @@ pub fn render_error(mode: OutputMode, command_name: &str, error: &str) -> String
         OutputMode::Pretty => {
             let t = title(mode, command_name);
             let badge = badge(mode, "ERROR", RED, BG_RED);
-            format!("{t}\n\n  {badge}\n\n{}\n", key_value(mode, "message", error))
+            format!(
+                "{t}\n\n  {badge}\n\n{}\n",
+                key_value(mode, "message", error)
+            )
         }
         OutputMode::Plain => format!("error: {error}\n"),
     };

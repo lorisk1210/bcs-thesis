@@ -2,8 +2,8 @@ use serde_json::Value;
 
 use crate::OutputMode;
 use crate::frame::{
-    BG_DARK_GRAY, BG_GREEN, BG_RED, BG_YELLOW, BLUE, BOLD, CYAN, DARK_GRAY, DIM, GREEN,
-    MAGENTA, RED, RESET, YELLOW,
+    BG_DARK_GRAY, BG_GREEN, BG_RED, BG_YELLOW, BLUE, BOLD, CYAN, DARK_GRAY, DIM, GREEN, MAGENTA,
+    RED, RESET, YELLOW,
 };
 
 pub(crate) fn badge(mode: OutputMode, label: &str, _fg_color: &str, bg_color: &str) -> String {
@@ -49,6 +49,12 @@ pub(crate) fn table_row(mode: OutputMode, left: &str, right: &str, left_width: u
 
 pub(crate) fn status_badge(mode: OutputMode, status: &str) -> String {
     let (display, fg, bg) = match status {
+        "preserved" => ("PRESERVED", GREEN, BG_GREEN),
+        "preserved_on_evaluable_queries" => ("PRESERVED ON EVALUABLE QUERIES", GREEN, BG_GREEN),
+        "borderline" => ("BORDERLINE", YELLOW, BG_YELLOW),
+        "not_preserved" => ("NOT PRESERVED", RED, BG_RED),
+        "passed" => ("PASSED", GREEN, BG_GREEN),
+        "failed" => ("FAILED", RED, BG_RED),
         "released" => ("RELEASED", GREEN, BG_GREEN),
         "rejected" => ("REJECTED", RED, BG_RED),
         "available" => ("AVAILABLE", GREEN, BG_GREEN),

@@ -8,7 +8,6 @@ use chrono::NaiveDate;
 use duckdb::Connection;
 use refinery_node::{app, ingest::TransformMode};
 use refinery_orchestrator::config::GlobalPrivacyConfig;
-use refinery_orchestrator::dp_release::release_result_with_seed;
 use refinery_protocol::{QueryResult, QueryTemplate};
 use serde_json::json;
 
@@ -16,12 +15,17 @@ use crate::baseline::{
     PreparedDirectoryMetadata, PreparedNodeMetadata, prepared_metadata_path, remove_if_exists,
     safe_node_file_stem, write_prepared_metadata,
 };
+use crate::batch::{build_aggregate_utility_summary, discover_query_files};
 use crate::compare::{
-    build_final_release_utility_section, checker_job_id, classify_distortion_expectation,
+    EXACT_POST_RELEASE_LABEL, LIVE_POST_RELEASE_LABEL, build_final_release_utility_section,
+    checker_job_id, classify_distortion_expectation, release_result_for_proof_check,
     serialize_payload,
 };
 use crate::diff::diff_payloads;
 use crate::insights::{build_release_vs_exact_raw_section, build_template_metrics_section};
+use crate::utility::{
+    QueryUtilityContext, consolidate_seed_status, evaluate_utility, resolve_query_utility_context,
+};
 use crate::*;
 
 #[test]
@@ -96,13 +100,15 @@ fn final_release_utility_matches_for_identical_inputs() {
     };
 
     let live_release =
-        release_result_with_seed(&result, &config, 42).expect("seeded release should work");
+        release_result_for_proof_check(&result, &config, 42).expect("release should work");
     let exact_release =
-        release_result_with_seed(&result, &config, 42).expect("seeded release should work");
+        release_result_for_proof_check(&result, &config, 42).expect("release should work");
     let section = build_final_release_utility_section(&live_release, &exact_release)
         .expect("utility section should build");
     assert_eq!(section.status, SectionStatus::Match);
     assert!(section.diffs.is_empty());
+    assert_eq!(section.left_label, LIVE_POST_RELEASE_LABEL);
+    assert_eq!(section.right_label, EXACT_POST_RELEASE_LABEL);
 }
 
 #[test]
@@ -130,13 +136,40 @@ fn final_release_utility_detects_distortion() {
     };
 
     let live_release =
-        release_result_with_seed(&live_result, &config, 42).expect("seeded release should work");
+        release_result_for_proof_check(&live_result, &config, 42).expect("release should work");
     let exact_release =
-        release_result_with_seed(&exact_result, &config, 42).expect("seeded release should work");
+        release_result_for_proof_check(&exact_result, &config, 42).expect("release should work");
     let section = build_final_release_utility_section(&live_release, &exact_release)
         .expect("utility section should build");
     assert_eq!(section.status, SectionStatus::Mismatch);
     assert!(!section.diffs.is_empty());
+    assert_eq!(section.left_label, LIVE_POST_RELEASE_LABEL);
+    assert_eq!(section.right_label, EXACT_POST_RELEASE_LABEL);
+}
+
+#[test]
+fn proof_check_release_honors_raw_mode() {
+    let result = QueryResult {
+        template_name: "cohort_feasibility_count".to_string(),
+        raw_result: json!({"count": 20}),
+        cohort_size: 20,
+        sensitivity: 1.0,
+    };
+    let config = GlobalPrivacyConfig {
+        epsilon: 1.0,
+        min_cohort: 10,
+        total_budget: 10.0,
+        min_participating_nodes: 2,
+        ledger_db_path: PathBuf::from("unused.duckdb"),
+        release_mode: refinery_protocol::ReleaseMode::Raw,
+        dp_seed: None,
+    };
+
+    let release =
+        release_result_for_proof_check(&result, &config, 42).expect("release should work");
+    assert!(release.accepted);
+    assert_eq!(release.release_mode, refinery_protocol::ReleaseMode::Raw);
+    assert_eq!(release.released_result, Some(result.raw_result));
 }
 
 #[test]
@@ -236,17 +269,20 @@ fn release_vs_exact_raw_compares_released_payload_to_exact_raw_result() {
         sensitivity: 1.0,
     };
 
-    let section = build_release_vs_exact_raw_section(
-        Some(&live_release),
-        Some(&exact_baseline),
-        None,
-        &[],
-    )
-    .expect("release-vs-raw section should build");
+    let section =
+        build_release_vs_exact_raw_section(Some(&live_release), Some(&exact_baseline), None, &[])
+            .expect("release-vs-raw section should build");
 
     assert_eq!(section.status, AnalysisStatus::Available);
-    assert_eq!(section.compared_left_label.as_deref(), Some("released_result"));
-    assert_eq!(section.compared_right_label.as_deref(), Some("exact_raw_result"));
+    assert_eq!(
+        section.compared_left_label.as_deref(),
+        Some("released_result")
+    );
+    assert_eq!(
+        section.compared_right_label.as_deref(),
+        Some("exact_raw_result")
+    );
+    assert_eq!(section.left_label, LIVE_POST_RELEASE_LABEL);
     assert!(section.diffs.iter().any(|diff| diff.path == "$.count"));
 }
 
@@ -289,10 +325,12 @@ fn template_metrics_for_comparative_effectiveness_include_primary_and_context_me
     assert_eq!(section.status, AnalysisStatus::Available);
     let primary = section.primary_metric.expect("primary metric should exist");
     assert_eq!(primary.name, "delta");
-    assert!(section
-        .context_metrics
-        .iter()
-        .any(|metric| metric.name == "exposed_share"));
+    assert!(
+        section
+            .context_metrics
+            .iter()
+            .any(|metric| metric.name == "exposed_share")
+    );
 }
 
 #[test]
@@ -421,7 +459,9 @@ fn snapshot_prepared_dbs(
     Ok(snapshots)
 }
 
-fn snapshot_pipeline_tables(conn: &Connection) -> Result<BTreeMap<String, Vec<Vec<Option<String>>>>> {
+fn snapshot_pipeline_tables(
+    conn: &Connection,
+) -> Result<BTreeMap<String, Vec<Vec<Option<String>>>>> {
     let tables = [
         "bronze_patient",
         "bronze_condition",
@@ -504,12 +544,7 @@ fn create_prepare_test_nodes(base_dir: &Path) -> Result<Vec<RawNodeInput>> {
     ])
 }
 
-fn write_node_fixture(
-    dir: &Path,
-    patient_id: &str,
-    condition_id: &str,
-    state: &str,
-) -> Result<()> {
+fn write_node_fixture(dir: &Path, patient_id: &str, condition_id: &str, state: &str) -> Result<()> {
     let bundle = json!({
         "resourceType": "Bundle",
         "entry": [
@@ -563,4 +598,441 @@ fn unique_test_path(prefix: &str) -> PathBuf {
         "refinery-proof-check-{prefix}-{}-{nonce}",
         std::process::id()
     ))
+}
+
+#[test]
+fn discover_query_files_sorts_direct_json_only() -> Result<()> {
+    let dir = unique_test_path("discover-query-files");
+    fs::create_dir_all(dir.join("nested"))?;
+    fs::write(dir.join("b.json"), "{}")?;
+    fs::write(dir.join("a.json"), "{}")?;
+    fs::write(dir.join("notes.txt"), "ignore")?;
+    fs::write(dir.join("nested").join("z.json"), "{}")?;
+
+    let files = discover_query_files(&dir)?;
+    let names = files
+        .iter()
+        .map(|path| {
+            path.file_name()
+                .and_then(|value| value.to_str())
+                .expect("valid file name")
+                .to_string()
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(names, vec!["a.json".to_string(), "b.json".to_string()]);
+    Ok(())
+}
+
+#[test]
+fn comparative_effectiveness_utility_can_be_preserved() -> Result<()> {
+    let report = make_available_report(
+        QueryTemplate::ComparativeEffectivenessDelta,
+        json!({
+            "delta": 1.02,
+            "mean_outcome_exposed": 3.02,
+            "mean_outcome_control": 2.0,
+            "n_exposed": 100.0,
+            "n_control": 100.0
+        }),
+        json!({
+            "delta": 1.0,
+            "mean_outcome_exposed": 3.0,
+            "mean_outcome_control": 2.0,
+            "n_exposed": 100.0,
+            "n_control": 100.0
+        }),
+        json!({}),
+        0.0,
+        10.0,
+    )?;
+
+    let verdict = evaluate_utility(QueryTemplate::ComparativeEffectivenessDelta, &report, None)?;
+    assert_eq!(verdict.status, UtilityVerdictStatus::Preserved);
+    Ok(())
+}
+
+#[test]
+fn dose_response_utility_detects_order_flip() -> Result<()> {
+    let report = make_available_report(
+        QueryTemplate::DoseResponseTrend,
+        json!({
+            "groups": [
+                {"dose_bucket": "low", "n": 20.0, "mean_outcome": 9.0},
+                {"dose_bucket": "medium", "n": 20.0, "mean_outcome": 5.0},
+                {"dose_bucket": "high", "n": 20.0, "mean_outcome": 1.0}
+            ]
+        }),
+        json!({
+            "groups": [
+                {"dose_bucket": "low", "n": 20.0, "mean_outcome": 1.0},
+                {"dose_bucket": "medium", "n": 20.0, "mean_outcome": 5.0},
+                {"dose_bucket": "high", "n": 20.0, "mean_outcome": 9.0}
+            ]
+        }),
+        json!({}),
+        0.0,
+        20.0,
+    )?;
+
+    let verdict = evaluate_utility(QueryTemplate::DoseResponseTrend, &report, None)?;
+    assert_eq!(verdict.status, UtilityVerdictStatus::NotPreserved);
+    assert!(
+        verdict
+            .check_results
+            .iter()
+            .any(|check| check.name == "dose_bucket_ordering"
+                && check.status == UtilityCheckStatus::Failed)
+    );
+    Ok(())
+}
+
+#[test]
+fn feasibility_without_denominators_is_capped_to_borderline() -> Result<()> {
+    let report = make_available_report(
+        QueryTemplate::CohortFeasibilityCount,
+        json!({"count": 105.0}),
+        json!({"count": 100.0}),
+        json!({}),
+        0.0,
+        1.0,
+    )?;
+
+    let verdict = evaluate_utility(QueryTemplate::CohortFeasibilityCount, &report, None)?;
+    assert_eq!(verdict.status, UtilityVerdictStatus::Borderline);
+    Ok(())
+}
+
+#[test]
+fn feasibility_context_can_be_derived_from_raw_nodes() -> Result<()> {
+    let base_dir = unique_test_path("derive-feasibility-context");
+    fs::create_dir_all(&base_dir)?;
+    let raw_nodes = create_prepare_test_nodes(&base_dir)?;
+    let active_nodes = raw_nodes
+        .iter()
+        .map(|node| NodeReport {
+            node_id: node.node_id.clone(),
+            endpoint: format!("http://{}", node.node_id),
+            raw_input_dir: node.input_dir.display().to_string(),
+        })
+        .collect::<Vec<_>>();
+
+    let context = resolve_query_utility_context(
+        QueryTemplate::CohortFeasibilityCount,
+        None,
+        &raw_nodes,
+        &active_nodes,
+        &json!({"condition_codes": ["44054006"]}),
+        refinery_protocol::ClipBounds { min: 0.0, max: 1.0 },
+        NaiveDate::from_ymd_opt(2026, 1, 1).expect("valid date"),
+        None,
+    )?
+    .expect("context should be derived");
+
+    assert_eq!(context.raw_population_in_scope, Some(2.0));
+    assert_eq!(context.federated_population_in_scope, Some(2.0));
+    assert!(
+        context
+            .denominator_source
+            .as_deref()
+            .is_some_and(|source| source.contains("Derived automatically"))
+    );
+    Ok(())
+}
+
+#[test]
+fn feasibility_threshold_can_fail_hard() -> Result<()> {
+    let report = make_available_report(
+        QueryTemplate::CohortFeasibilityCount,
+        json!({"count": 40.0}),
+        json!({"count": 60.0}),
+        json!({}),
+        0.0,
+        1.0,
+    )?;
+    let context = QueryUtilityContext {
+        raw_population_in_scope: Some(100.0),
+        federated_population_in_scope: Some(100.0),
+        feasibility_threshold: Some(0.50),
+        denominator_source: None,
+    };
+
+    let verdict = evaluate_utility(
+        QueryTemplate::CohortFeasibilityCount,
+        &report,
+        Some(&context),
+    )?;
+    assert_eq!(verdict.status, UtilityVerdictStatus::NotPreserved);
+    Ok(())
+}
+
+#[test]
+fn consolidate_seed_status_prefers_not_preserved() {
+    let statuses = vec![
+        SeedVerdictSummary {
+            seed: 42,
+            status: UtilityVerdictStatus::Preserved,
+            primary_absolute_gap: Some(0.01),
+            primary_relative_gap: Some(0.01),
+        },
+        SeedVerdictSummary {
+            seed: 43,
+            status: UtilityVerdictStatus::NotPreserved,
+            primary_absolute_gap: Some(0.3),
+            primary_relative_gap: Some(0.3),
+        },
+    ];
+
+    assert_eq!(
+        consolidate_seed_status(&statuses),
+        UtilityVerdictStatus::NotPreserved
+    );
+}
+
+#[test]
+fn batch_exit_code_marks_borderline_as_warning() -> Result<()> {
+    let compare_report = make_available_report(
+        QueryTemplate::CohortFeasibilityCount,
+        json!({"count": 105.0}),
+        json!({"count": 100.0}),
+        json!({}),
+        0.0,
+        1.0,
+    )?;
+    let utility_verdict =
+        evaluate_utility(QueryTemplate::CohortFeasibilityCount, &compare_report, None)?;
+    let report = BatchReport {
+        request: BatchRequestMetadata {
+            mode: "full".to_string(),
+            template: "cohort_feasibility_count".to_string(),
+            queries_dir: "/tmp".to_string(),
+            as_of_date: "2026-01-01".to_string(),
+            clip_min: 0.0,
+            clip_max: 1.0,
+            dp_seed: 42,
+            repeat_seeds: 1,
+            epsilon: Some(1.0),
+            min_cohort: Some(5),
+            utility_context_file: None,
+        },
+        nodes: vec![],
+        aggregate_utility: AggregateUtilitySummary {
+            total_queries: 1,
+            evaluable_queries: 1,
+            preserved: 0,
+            borderline: 1,
+            not_preserved: 0,
+            suppressed: 0,
+            inconclusive: 0,
+            preservation_rate: Some(0.0),
+            overall_status: AggregateBatchStatus::Borderline,
+        },
+        aggregate_metrics: AggregateMetricSummary {
+            primary_metric_label: "count".to_string(),
+            absolute_gap_mean: Some(5.0),
+            absolute_gap_median: Some(5.0),
+            absolute_gap_max: Some(5.0),
+            relative_gap_mean: Some(0.05),
+            relative_gap_median: Some(0.05),
+            relative_gap_max: Some(0.05),
+            queries_with_mixed_seed_verdicts: None,
+            worst_case_verdict_counts: None,
+        },
+        queries: vec![BatchQueryReport {
+            query_file: "example.json".to_string(),
+            query_path: "/tmp/example.json".to_string(),
+            base_seed: 42,
+            compare_report,
+            utility_verdict,
+            seed_robustness: None,
+        }],
+    };
+
+    assert_eq!(batch_exit_code(&report), 2);
+    Ok(())
+}
+
+#[test]
+fn aggregate_status_can_be_preserved_on_evaluable_queries() -> Result<()> {
+    let preserved_compare = make_available_report(
+        QueryTemplate::CohortFeasibilityCount,
+        json!({"count": 100.0}),
+        json!({"count": 100.0}),
+        json!({}),
+        0.0,
+        1.0,
+    )?;
+    let preserved_verdict = evaluate_utility(
+        QueryTemplate::CohortFeasibilityCount,
+        &preserved_compare,
+        Some(&QueryUtilityContext {
+            raw_population_in_scope: Some(100.0),
+            federated_population_in_scope: Some(100.0),
+            feasibility_threshold: None,
+            denominator_source: None,
+        }),
+    )?;
+
+    let inconclusive_report = ComparisonReport {
+        request: RequestMetadata {
+            mode: "full".to_string(),
+            template: QueryTemplate::CohortFeasibilityCount.as_str().to_string(),
+            clip_min: 0.0,
+            clip_max: 1.0,
+            as_of_date: "2026-01-01".to_string(),
+            params: json!({}),
+            dp_seed: Some(42),
+            epsilon: Some(1.0),
+            min_cohort: Some(5),
+        },
+        nodes: vec![],
+        validation: ValidationSections {
+            smpc_parity: ComparisonSection {
+                status: SectionStatus::Skipped,
+                expectation: None,
+                left_label: "left".to_string(),
+                right_label: "right".to_string(),
+                left_payload: None,
+                right_payload: None,
+                diffs: Vec::new(),
+                rejections: Vec::new(),
+            },
+            coarsening_distortion: ComparisonSection {
+                status: SectionStatus::Skipped,
+                expectation: None,
+                left_label: "left".to_string(),
+                right_label: "right".to_string(),
+                left_payload: None,
+                right_payload: None,
+                diffs: Vec::new(),
+                rejections: Vec::new(),
+            },
+            final_release_utility: ComparisonSection {
+                status: SectionStatus::Inconclusive,
+                expectation: None,
+                left_label: "left".to_string(),
+                right_label: "right".to_string(),
+                left_payload: None,
+                right_payload: None,
+                diffs: Vec::new(),
+                rejections: Vec::new(),
+            },
+        },
+        release_vs_exact_raw: PayloadComparisonSection {
+            status: AnalysisStatus::Inconclusive,
+            left_label: "release".to_string(),
+            right_label: "raw".to_string(),
+            left_payload: None,
+            right_payload: None,
+            compared_left_label: None,
+            compared_right_label: None,
+            compared_left_payload: None,
+            compared_right_payload: None,
+            diffs: Vec::new(),
+            notes: vec!["live query failed".to_string()],
+            rejections: Vec::new(),
+        },
+        template_metrics: TemplateMetricsSection {
+            status: AnalysisStatus::Inconclusive,
+            primary_metric: None,
+            context_metrics: Vec::new(),
+            notes: vec!["metrics unavailable".to_string()],
+            rejections: Vec::new(),
+        },
+    };
+    let inconclusive_verdict = evaluate_utility(
+        QueryTemplate::CohortFeasibilityCount,
+        &inconclusive_report,
+        None,
+    )?;
+
+    let summary = build_aggregate_utility_summary(&[
+        BatchQueryReport {
+            query_file: "preserved.json".to_string(),
+            query_path: "/tmp/preserved.json".to_string(),
+            base_seed: 42,
+            compare_report: preserved_compare,
+            utility_verdict: preserved_verdict,
+            seed_robustness: None,
+        },
+        BatchQueryReport {
+            query_file: "inconclusive.json".to_string(),
+            query_path: "/tmp/inconclusive.json".to_string(),
+            base_seed: 42,
+            compare_report: inconclusive_report,
+            utility_verdict: inconclusive_verdict,
+            seed_robustness: None,
+        },
+    ]);
+
+    assert_eq!(
+        summary.overall_status,
+        AggregateBatchStatus::PreservedOnEvaluableQueries
+    );
+    Ok(())
+}
+
+fn make_available_report(
+    template: QueryTemplate,
+    released_result: serde_json::Value,
+    exact_result: serde_json::Value,
+    params: serde_json::Value,
+    clip_min: f64,
+    clip_max: f64,
+) -> Result<ComparisonReport> {
+    let live_release = refinery_orchestrator::dp_release::GlobalReleaseResult {
+        accepted: true,
+        reason: "released".to_string(),
+        release_mode: refinery_protocol::ReleaseMode::Seeded,
+        released_result: Some(released_result),
+    };
+    let exact_baseline = QueryResult {
+        template_name: template.as_str().to_string(),
+        raw_result: exact_result,
+        cohort_size: 100,
+        sensitivity: 1.0,
+    };
+    let base_section = ComparisonSection {
+        status: SectionStatus::Match,
+        expectation: None,
+        left_label: "left".to_string(),
+        right_label: "right".to_string(),
+        left_payload: None,
+        right_payload: None,
+        diffs: Vec::new(),
+        rejections: Vec::new(),
+    };
+
+    Ok(ComparisonReport {
+        request: RequestMetadata {
+            mode: "full".to_string(),
+            template: template.as_str().to_string(),
+            clip_min,
+            clip_max,
+            as_of_date: "2026-01-01".to_string(),
+            params,
+            dp_seed: Some(42),
+            epsilon: Some(1.0),
+            min_cohort: Some(5),
+        },
+        nodes: vec![],
+        validation: ValidationSections {
+            smpc_parity: base_section.clone(),
+            coarsening_distortion: base_section.clone(),
+            final_release_utility: base_section,
+        },
+        release_vs_exact_raw: build_release_vs_exact_raw_section(
+            Some(&live_release),
+            Some(&exact_baseline),
+            None,
+            &[],
+        )?,
+        template_metrics: build_template_metrics_section(
+            template,
+            Some(&live_release),
+            Some(&exact_baseline),
+            None,
+            &[],
+        )?,
+    })
 }

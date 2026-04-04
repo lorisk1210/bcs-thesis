@@ -5,6 +5,7 @@ use refinery_orchestrator::dp_release::GlobalReleaseResult;
 use refinery_protocol::{QueryResult, QueryTemplate};
 use serde_json::{Map, Value, json};
 
+use crate::compare::LIVE_POST_RELEASE_LABEL;
 use crate::diff::diff_payloads;
 use crate::{
     AnalysisStatus, MetricComparison, NodeRejection, PayloadComparisonSection,
@@ -18,7 +19,7 @@ pub(crate) fn build_release_vs_exact_raw_section(
     endpoints: &[String],
 ) -> Result<PayloadComparisonSection> {
     let mut notes = vec![
-        "Diffs compare the released DP payload against exact_raw_baseline.raw_result.".to_string(),
+        "Diffs compare the released payload against exact_raw_baseline.raw_result.".to_string(),
     ];
 
     match (live_release, exact_baseline) {
@@ -32,7 +33,7 @@ pub(crate) fn build_release_vs_exact_raw_section(
                 ));
                 return Ok(PayloadComparisonSection {
                     status: AnalysisStatus::Suppressed,
-                    left_label: "live_smpc_post_dp_seeded".to_string(),
+                    left_label: LIVE_POST_RELEASE_LABEL.to_string(),
                     right_label: "exact_raw_baseline".to_string(),
                     left_payload,
                     right_payload,
@@ -55,7 +56,7 @@ pub(crate) fn build_release_vs_exact_raw_section(
 
             Ok(PayloadComparisonSection {
                 status: AnalysisStatus::Available,
-                left_label: "live_smpc_post_dp_seeded".to_string(),
+                left_label: LIVE_POST_RELEASE_LABEL.to_string(),
                 right_label: "exact_raw_baseline".to_string(),
                 left_payload,
                 right_payload,
@@ -70,7 +71,7 @@ pub(crate) fn build_release_vs_exact_raw_section(
         }
         (None, Some(exact_baseline)) => Ok(PayloadComparisonSection {
             status: AnalysisStatus::Inconclusive,
-            left_label: "live_smpc_post_dp_seeded".to_string(),
+            left_label: LIVE_POST_RELEASE_LABEL.to_string(),
             right_label: "exact_raw_baseline".to_string(),
             left_payload: None,
             right_payload: Some(serde_json::to_value(exact_baseline)?),
@@ -190,19 +191,25 @@ fn build_template_metrics(
                     "mean_outcome_exposed",
                     required_number(released, "mean_outcome_exposed")?,
                     required_number(exact, "mean_outcome_exposed")?,
-                    Some("Use this with the control mean to see whether the effect gap changed because one arm moved more than the other."),
+                    Some(
+                        "Use this with the control mean to see whether the effect gap changed because one arm moved more than the other.",
+                    ),
                 ),
                 scalar_metric(
                     "mean_outcome_control",
                     required_number(released, "mean_outcome_control")?,
                     required_number(exact, "mean_outcome_control")?,
-                    Some("Control-arm movement helps separate effect distortion from pure count noise."),
+                    Some(
+                        "Control-arm movement helps separate effect distortion from pure count noise.",
+                    ),
                 ),
                 scalar_metric(
                     "exposed_share",
                     share(released_n_exposed, released_n_control),
                     share(exact_n_exposed, exact_n_control),
-                    Some("Arm mix helps explain whether the delta moved because the noisy arm balance shifted."),
+                    Some(
+                        "Arm mix helps explain whether the delta moved because the noisy arm balance shifted.",
+                    ),
                 ),
             ];
             Ok((
@@ -226,7 +233,9 @@ fn build_template_metrics(
                 "n",
                 required_number(released, "n")?,
                 required_number(exact, "n")?,
-                Some("Use the observed-event count as context for how much support the timing estimate has."),
+                Some(
+                    "Use the observed-event count as context for how much support the timing estimate has.",
+                ),
             )];
             Ok((
                 primary,
@@ -246,7 +255,9 @@ fn build_template_metrics(
                 "per_group_mean_outcome",
                 &released_means,
                 &exact_means,
-                Some("Compare subgroup means first to see whether the within-group outcome pattern survives the release."),
+                Some(
+                    "Compare subgroup means first to see whether the within-group outcome pattern survives the release.",
+                ),
             );
             let context_metrics = vec![
                 keyed_metric(
@@ -259,7 +270,9 @@ fn build_template_metrics(
                     "per_group_lift",
                     &lift_map(&released_counts, &released_means),
                     &lift_map(&exact_counts, &exact_means),
-                    Some("Lift centers each subgroup against the overall cohort in the same result."),
+                    Some(
+                        "Lift centers each subgroup against the overall cohort in the same result.",
+                    ),
                 ),
             ];
             Ok((
@@ -280,14 +293,18 @@ fn build_template_metrics(
                 "per_bucket_mean_outcome",
                 &released_means,
                 &exact_means,
-                Some("Bucket means show whether the low-to-high outcome pattern survives the release."),
+                Some(
+                    "Bucket means show whether the low-to-high outcome pattern survives the release.",
+                ),
             );
             let context_metrics = vec![
                 keyed_metric(
                     "bucket_share",
                     &share_map(&released_counts),
                     &share_map(&exact_counts),
-                    Some("Bucket share is context for whether one dose bucket dominates after release."),
+                    Some(
+                        "Bucket share is context for whether one dose bucket dominates after release.",
+                    ),
                 ),
                 scalar_metric(
                     "trend_span",
@@ -320,7 +337,9 @@ fn build_template_metrics(
                     "risk_ratio",
                     ratio(released_exposed, released_control),
                     ratio(exact_exposed, exact_control),
-                    Some("Risk ratio is useful when the relative elevation matters more than the absolute spread."),
+                    Some(
+                        "Risk ratio is useful when the relative elevation matters more than the absolute spread.",
+                    ),
                 ),
                 scalar_metric(
                     "exposed_share",
@@ -332,7 +351,9 @@ fn build_template_metrics(
                         required_number(exact, "n_exposed")?,
                         required_number(exact, "n_control")?,
                     ),
-                    Some("Arm mix shows whether one arm was over- or under-represented after release."),
+                    Some(
+                        "Arm mix shows whether one arm was over- or under-represented after release.",
+                    ),
                 ),
             ];
             Ok((
@@ -371,7 +392,9 @@ fn build_template_metrics(
                         required_number(exact, "n_combo")?,
                         required_number(exact, "n_a_only")?,
                     ),
-                    Some("Combination-arm share shows whether the released cohort mix changed materially."),
+                    Some(
+                        "Combination-arm share shows whether the released cohort mix changed materially.",
+                    ),
                 ),
             ];
             Ok((
@@ -388,7 +411,7 @@ fn build_template_metrics(
 fn skipped_payload_comparison_section() -> PayloadComparisonSection {
     PayloadComparisonSection {
         status: AnalysisStatus::Skipped,
-        left_label: "live_smpc_post_dp_seeded".to_string(),
+        left_label: LIVE_POST_RELEASE_LABEL.to_string(),
         right_label: "exact_raw_baseline".to_string(),
         left_payload: None,
         right_payload: None,
@@ -495,7 +518,10 @@ where
     let mut has_value = false;
 
     for key in keys {
-        let value = match (released.get(&key).copied().flatten(), exact.get(&key).copied().flatten()) {
+        let value = match (
+            released.get(&key).copied().flatten(),
+            exact.get(&key).copied().flatten(),
+        ) {
             (Some(left), Some(right)) => {
                 let result = op(left, right);
                 if result.is_finite() {
@@ -677,9 +703,11 @@ fn map_to_json_value(values: &BTreeMap<String, Option<f64>>) -> Value {
 
 fn sign_note(name: &str, released: Option<f64>, exact: Option<f64>) -> Option<String> {
     match (released, exact) {
-        (Some(released), Some(exact)) if released.abs() <= 1e-12 || exact.abs() <= 1e-12 => Some(
-            format!("The released {name} or exact raw {name} is close to zero, so direction should be interpreted carefully."),
-        ),
+        (Some(released), Some(exact)) if released.abs() <= 1e-12 || exact.abs() <= 1e-12 => {
+            Some(format!(
+                "The released {name} or exact raw {name} is close to zero, so direction should be interpreted carefully."
+            ))
+        }
         (Some(released), Some(exact)) if released.signum() == exact.signum() => Some(format!(
             "The released {name} keeps the same sign as exact raw."
         )),

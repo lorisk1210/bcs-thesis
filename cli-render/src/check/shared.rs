@@ -3,241 +3,14 @@ use std::fmt::Write;
 use serde_json::Value;
 
 use crate::OutputMode;
-use crate::common::{key_value, section_header, status_badge, title};
-use crate::frame::{BOLD, DARK_GRAY, DIM, RESET, frame_cli_output};
+use crate::common::{key_value, section_header, status_badge};
+use crate::frame::{BOLD, DARK_GRAY, DIM, RESET};
 
-pub struct CheckSectionData {
-    pub name: String,
-    pub status: String,
-    pub expectation: Option<String>,
-    pub left_label: String,
-    pub right_label: String,
-    pub left_payload: Option<Value>,
-    pub right_payload: Option<Value>,
-    pub diffs: Vec<CheckDiffEntry>,
-    pub rejections: Vec<CheckRejectionEntry>,
-}
+use super::data::{
+    CheckMetricData, CheckPayloadComparisonData, CheckSectionData, CheckTemplateMetricsData,
+};
 
-pub struct CheckPayloadComparisonData {
-    pub status: String,
-    pub left_label: String,
-    pub right_label: String,
-    pub left_payload: Option<Value>,
-    pub right_payload: Option<Value>,
-    pub compared_left_label: Option<String>,
-    pub compared_right_label: Option<String>,
-    pub compared_left_payload: Option<Value>,
-    pub compared_right_payload: Option<Value>,
-    pub diffs: Vec<CheckDiffEntry>,
-    pub notes: Vec<String>,
-    pub rejections: Vec<CheckRejectionEntry>,
-}
-
-pub struct CheckMetricData {
-    pub name: String,
-    pub released_value: Value,
-    pub exact_raw_value: Value,
-    pub difference: Option<Value>,
-    pub absolute_gap: Option<Value>,
-    pub relative_gap: Option<Value>,
-    pub note: Option<String>,
-}
-
-pub struct CheckTemplateMetricsData {
-    pub status: String,
-    pub primary_metric: Option<CheckMetricData>,
-    pub context_metrics: Vec<CheckMetricData>,
-    pub notes: Vec<String>,
-    pub rejections: Vec<CheckRejectionEntry>,
-}
-
-pub struct CheckDiffEntry {
-    pub path: String,
-    pub left: Value,
-    pub right: Value,
-}
-
-pub struct CheckRejectionEntry {
-    pub node_id: String,
-    pub endpoint: String,
-    pub reason: String,
-}
-
-pub struct CheckPrepareReportData {
-    pub prepared_dir: String,
-    pub as_of_date: String,
-    pub nodes: Vec<CheckPreparedNodeData>,
-}
-
-pub struct CheckPreparedNodeData {
-    pub node_id: String,
-    pub raw_input_dir: String,
-    pub coarsened_db_path: String,
-    pub exact_db_path: String,
-}
-
-pub struct CheckCompareReportData {
-    pub template: String,
-    pub mode: String,
-    pub as_of_date: String,
-    pub clip_min: f64,
-    pub clip_max: f64,
-    pub dp_seed: Option<u64>,
-    pub epsilon: Option<f64>,
-    pub min_cohort: Option<usize>,
-    pub nodes: Vec<CheckNodeReport>,
-    pub validation_sections: Vec<CheckSectionData>,
-    pub release_vs_exact_raw: CheckPayloadComparisonData,
-    pub template_metrics: CheckTemplateMetricsData,
-}
-
-pub struct CheckNodeReport {
-    pub node_id: String,
-    pub endpoint: String,
-    pub raw_input_dir: String,
-}
-
-pub fn render_check_prepare_report(mode: OutputMode, r: &CheckPrepareReportData) -> String {
-    let inner = if mode == OutputMode::Plain {
-        let mut out = String::new();
-        let _ = writeln!(out, "prepared_dir: {}", r.prepared_dir);
-        let _ = writeln!(out, "as_of_date: {}", r.as_of_date);
-        out.push_str("nodes:\n");
-        for node in &r.nodes {
-            let _ = writeln!(out, "  - {}", node.node_id);
-            let _ = writeln!(out, "    raw_input_dir: {}", node.raw_input_dir);
-            let _ = writeln!(out, "    coarsened_db: {}", node.coarsened_db_path);
-            let _ = writeln!(out, "    exact_db: {}", node.exact_db_path);
-        }
-        out
-    } else {
-        let t = title(mode, "proof-check prepare");
-        let mut out = format!("{t}\n\n");
-        let _ = writeln!(out, "{}", key_value(mode, "prepared_dir", &r.prepared_dir));
-        let _ = writeln!(out, "{}", key_value(mode, "as_of_date", &r.as_of_date));
-
-        if !r.nodes.is_empty() {
-            let _ = writeln!(out);
-            let _ = writeln!(out, "{}", section_header(mode, "Nodes"));
-            for node in &r.nodes {
-                let _ = writeln!(out, "  {BOLD}{}{RESET}", node.node_id);
-                let _ = writeln!(
-                    out,
-                    "{}",
-                    key_value(mode, "raw_input_dir", &node.raw_input_dir)
-                );
-                let _ = writeln!(
-                    out,
-                    "{}",
-                    key_value(mode, "coarsened_db", &node.coarsened_db_path)
-                );
-                let _ = writeln!(out, "{}", key_value(mode, "exact_db", &node.exact_db_path));
-                let _ = writeln!(out);
-            }
-        }
-        out
-    };
-    frame_cli_output(mode, inner)
-}
-
-pub fn render_check_compare_report(mode: OutputMode, r: &CheckCompareReportData) -> String {
-    let inner = if mode == OutputMode::Plain {
-        let mut out = String::new();
-        let _ = writeln!(out, "template: {}", r.template);
-        let _ = writeln!(out, "mode: {}", r.mode);
-        let _ = writeln!(out, "as_of_date: {}", r.as_of_date);
-        let _ = writeln!(out, "clip: [{:.4}, {:.4}]", r.clip_min, r.clip_max);
-        if let Some(dp_seed) = r.dp_seed {
-            let _ = writeln!(out, "dp_seed: {dp_seed}");
-        }
-        if let Some(epsilon) = r.epsilon {
-            let _ = writeln!(out, "epsilon: {epsilon:.4}");
-        }
-        if let Some(min_cohort) = r.min_cohort {
-            let _ = writeln!(out, "min_cohort: {min_cohort}");
-        }
-        if !r.nodes.is_empty() {
-            out.push_str("nodes:\n");
-            for node in &r.nodes {
-                let _ = writeln!(
-                    out,
-                    "  - {} => {} ({})",
-                    node.node_id, node.endpoint, node.raw_input_dir
-                );
-            }
-        }
-        out.push_str("---\n");
-        out.push_str(&render_payload_comparison_plain(
-            "release_vs_exact_raw",
-            &r.release_vs_exact_raw,
-        ));
-        out.push_str("---\n");
-        out.push_str("validation:\n");
-        for section in &r.validation_sections {
-            out.push_str(&render_validation_section_plain(section, "  "));
-        }
-        out.push_str("---\n");
-        out.push_str(&render_template_metrics_plain(&r.template_metrics));
-        out
-    } else {
-        let t = title(mode, "proof-check compare");
-        let mut out = format!("{t}\n\n");
-        let _ = writeln!(out, "{}", key_value(mode, "template", &r.template));
-        let _ = writeln!(out, "{}", key_value(mode, "mode", &r.mode));
-        let _ = writeln!(out, "{}", key_value(mode, "as_of_date", &r.as_of_date));
-        let _ = writeln!(
-            out,
-            "{}",
-            key_value(
-                mode,
-                "clip",
-                &format!("[{:.4}, {:.4}]", r.clip_min, r.clip_max),
-            )
-        );
-        if let Some(dp_seed) = r.dp_seed {
-            let _ = writeln!(out, "{}", key_value(mode, "dp_seed", &dp_seed.to_string()));
-        }
-        if let Some(epsilon) = r.epsilon {
-            let _ = writeln!(out, "{}", key_value(mode, "epsilon", &format!("{epsilon:.4}")));
-        }
-        if let Some(min_cohort) = r.min_cohort {
-            let _ = writeln!(out, "{}", key_value(mode, "min_cohort", &min_cohort.to_string()));
-        }
-
-        if !r.nodes.is_empty() {
-            let _ = writeln!(out);
-            let _ = writeln!(out, "{}", section_header(mode, "Nodes"));
-            for node in &r.nodes {
-                let _ = writeln!(
-                    out,
-                    "    {DARK_GRAY}•{RESET} {BOLD}{}{RESET} {DIM}=>{RESET} {} {DIM}({}){RESET}",
-                    node.node_id, node.endpoint, node.raw_input_dir
-                );
-            }
-        }
-
-        let _ = writeln!(out, "__SEPARATOR__");
-        out.push_str(&render_payload_comparison_pretty(
-            mode,
-            "Release Vs Exact Raw",
-            &r.release_vs_exact_raw,
-        ));
-
-        let _ = writeln!(out, "__SEPARATOR__");
-        let _ = writeln!(out, "{}", section_header(mode, "Validation"));
-        for section in &r.validation_sections {
-            let _ = writeln!(out);
-            out.push_str(&render_validation_section_pretty(mode, section));
-        }
-
-        let _ = writeln!(out, "__SEPARATOR__");
-        out.push_str(&render_template_metrics_pretty(mode, &r.template_metrics));
-        out
-    };
-    frame_cli_output(mode, inner)
-}
-
-fn render_validation_section_plain(section: &CheckSectionData, indent: &str) -> String {
+pub fn render_validation_section_plain(section: &CheckSectionData, indent: &str) -> String {
     let mut out = String::new();
     let _ = writeln!(out, "{indent}{}:", section.name);
     let _ = writeln!(out, "{indent}  status: {}", section.status);
@@ -281,7 +54,7 @@ fn render_validation_section_plain(section: &CheckSectionData, indent: &str) -> 
     out
 }
 
-fn render_validation_section_pretty(mode: OutputMode, section: &CheckSectionData) -> String {
+pub fn render_validation_section_pretty(mode: OutputMode, section: &CheckSectionData) -> String {
     let mut out = String::new();
     let badge = status_badge(mode, &section.status);
     let _ = writeln!(out, "    {BOLD}{}{RESET}  {badge}", section.name);
@@ -306,11 +79,7 @@ fn render_validation_section_pretty(mode: OutputMode, section: &CheckSectionData
     if !section.rejections.is_empty() {
         let _ = writeln!(out, "    {DARK_GRAY}•{RESET} {BOLD}rejections{RESET}");
         for r in &section.rejections {
-            let _ = writeln!(
-                out,
-                "      {} @ {}: {}",
-                r.node_id, r.endpoint, r.reason
-            );
+            let _ = writeln!(out, "      {} @ {}: {}", r.node_id, r.endpoint, r.reason);
         }
     }
     if !section.diffs.is_empty() {
@@ -326,10 +95,7 @@ fn render_validation_section_pretty(mode: OutputMode, section: &CheckSectionData
     out
 }
 
-fn render_payload_comparison_plain(
-    name: &str,
-    section: &CheckPayloadComparisonData,
-) -> String {
+pub fn render_payload_comparison_plain(name: &str, section: &CheckPayloadComparisonData) -> String {
     let mut out = String::new();
     let _ = writeln!(out, "{name}:");
     let _ = writeln!(out, "  status: {}", section.status);
@@ -362,7 +128,7 @@ fn render_payload_comparison_plain(
     out
 }
 
-fn render_payload_comparison_pretty(
+pub fn render_payload_comparison_pretty(
     mode: OutputMode,
     title_text: &str,
     section: &CheckPayloadComparisonData,
@@ -401,7 +167,7 @@ fn render_payload_comparison_pretty(
     out
 }
 
-fn render_template_metrics_plain(section: &CheckTemplateMetricsData) -> String {
+pub fn render_template_metrics_plain(section: &CheckTemplateMetricsData) -> String {
     let mut out = String::new();
     let _ = writeln!(out, "template_metrics:");
     let _ = writeln!(out, "  status: {}", section.status);
@@ -428,7 +194,7 @@ fn render_template_metrics_plain(section: &CheckTemplateMetricsData) -> String {
     out
 }
 
-fn render_template_metrics_pretty(
+pub fn render_template_metrics_pretty(
     mode: OutputMode,
     section: &CheckTemplateMetricsData,
 ) -> String {
@@ -458,6 +224,48 @@ fn render_template_metrics_pretty(
         }
     }
     out
+}
+
+pub fn render_labeled_payload_plain(label: &str, payload: &Value, indent: &str) -> String {
+    let mut out = String::new();
+    let _ = writeln!(out, "{indent}{label}:");
+    for (path, value) in flatten_value(payload) {
+        let _ = writeln!(out, "{indent}  {path}: {value}");
+    }
+    out
+}
+
+pub fn render_labeled_payload_pretty(label: &str, payload: &Value, indent: &str) -> String {
+    let mut out = String::new();
+    let _ = writeln!(out, "{indent}{BOLD}{label}{RESET}");
+    for (path, value) in flatten_value(payload) {
+        let _ = writeln!(
+            out,
+            "{indent}  {DARK_GRAY}•{RESET} {DIM}{path}:{RESET} {value}"
+        );
+    }
+    out
+}
+
+pub fn indent_block(block: &str, indent: &str) -> String {
+    block
+        .lines()
+        .map(|line| {
+            if line.is_empty() {
+                String::new()
+            } else {
+                format!("{indent}{line}")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n"
+}
+
+pub fn format_optional_float(value: Option<f64>) -> String {
+    value
+        .map(|value| format!("{value:.6}"))
+        .unwrap_or_else(|| "n/a".to_string())
 }
 
 fn render_metric_plain(metric: &CheckMetricData, indent: &str) -> String {
@@ -499,7 +307,11 @@ fn render_metric_plain(metric: &CheckMetricData, indent: &str) -> String {
 
 fn render_metric_pretty(metric: &CheckMetricData) -> String {
     let mut out = String::new();
-    let _ = writeln!(out, "      {DARK_GRAY}•{RESET} {BOLD}{}{RESET}", metric.name);
+    let _ = writeln!(
+        out,
+        "      {DARK_GRAY}•{RESET} {BOLD}{}{RESET}",
+        metric.name
+    );
     out.push_str(&render_labeled_payload_pretty(
         "released_value",
         &metric.released_value,
@@ -511,13 +323,25 @@ fn render_metric_pretty(metric: &CheckMetricData) -> String {
         "        ",
     ));
     if let Some(ref difference) = metric.difference {
-        out.push_str(&render_labeled_payload_pretty("difference", difference, "        "));
+        out.push_str(&render_labeled_payload_pretty(
+            "difference",
+            difference,
+            "        ",
+        ));
     }
     if let Some(ref absolute_gap) = metric.absolute_gap {
-        out.push_str(&render_labeled_payload_pretty("absolute_gap", absolute_gap, "        "));
+        out.push_str(&render_labeled_payload_pretty(
+            "absolute_gap",
+            absolute_gap,
+            "        ",
+        ));
     }
     if let Some(ref relative_gap) = metric.relative_gap {
-        out.push_str(&render_labeled_payload_pretty("relative_gap", relative_gap, "        "));
+        out.push_str(&render_labeled_payload_pretty(
+            "relative_gap",
+            relative_gap,
+            "        ",
+        ));
     }
     let _ = writeln!(out);
     out
@@ -547,24 +371,6 @@ fn displayed_payload_pair_right(section: &CheckPayloadComparisonData) -> Option<
                 .as_ref()
                 .map(|payload| (section.right_label.as_str(), payload))
         })
-}
-
-fn render_labeled_payload_plain(label: &str, payload: &Value, indent: &str) -> String {
-    let mut out = String::new();
-    let _ = writeln!(out, "{indent}{label}:");
-    for (path, value) in flatten_value(payload) {
-        let _ = writeln!(out, "{indent}  {path}: {value}");
-    }
-    out
-}
-
-fn render_labeled_payload_pretty(label: &str, payload: &Value, indent: &str) -> String {
-    let mut out = String::new();
-    let _ = writeln!(out, "{indent}{BOLD}{label}{RESET}");
-    for (path, value) in flatten_value(payload) {
-        let _ = writeln!(out, "{indent}  {DARK_GRAY}•{RESET} {DIM}{path}:{RESET} {value}");
-    }
-    out
 }
 
 fn flatten_value(value: &Value) -> Vec<(String, String)> {

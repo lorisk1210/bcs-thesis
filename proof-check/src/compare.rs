@@ -3,10 +3,12 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use anyhow::{Result, anyhow};
 use chrono::{NaiveDate, Utc};
 use refinery_orchestrator::config::{GlobalPrivacyConfig, load_privacy_config};
-use refinery_orchestrator::dp_release::{GlobalReleaseResult, release_result_with_seed};
+use refinery_orchestrator::dp_release::{
+    GlobalReleaseResult, release_result, release_result_with_seed,
+};
 use refinery_orchestrator::jobs::FederatedJob;
 use refinery_orchestrator::protocol_runner::run_job;
-use refinery_protocol::{QueryResult, QueryTemplate};
+use refinery_protocol::{QueryResult, QueryTemplate, ReleaseMode};
 use serde::Serialize;
 use serde_json::Value;
 
@@ -16,15 +18,15 @@ use crate::baseline::{
     prepare_nodes_from_metadata,
 };
 use crate::diff::diff_payloads;
-use crate::insights::{
-    build_release_vs_exact_raw_section, build_template_metrics_section,
-};
+use crate::insights::{build_release_vs_exact_raw_section, build_template_metrics_section};
 use crate::{
     CompareRequest, ComparisonReport, ComparisonSection, DistortionExpectation, NodeRejection,
     NodeReport, RequestMetadata, SectionStatus, ValidationSections,
 };
 
 static CHECKER_JOB_COUNTER: AtomicU64 = AtomicU64::new(0);
+pub(crate) const LIVE_POST_RELEASE_LABEL: &str = "live_smpc_post_release";
+pub(crate) const EXACT_POST_RELEASE_LABEL: &str = "exact_raw_post_release";
 
 pub async fn run_compare(request: CompareRequest) -> Result<ComparisonReport> {
     let privacy_config = if request.mode.requires_live_nodes() {
@@ -36,7 +38,8 @@ pub async fn run_compare(request: CompareRequest) -> Result<ComparisonReport> {
         Some(prepared_dir) => {
             let metadata = load_prepared_metadata(prepared_dir)?;
             if request.mode.requires_live_nodes() {
-                prepare_nodes_from_metadata(&request.node_endpoints, &metadata, &request.tls).await?
+                prepare_nodes_from_metadata(&request.node_endpoints, &metadata, &request.tls)
+                    .await?
             } else {
                 load_nodes_from_metadata(&metadata)
             }
@@ -57,7 +60,9 @@ pub async fn run_compare(request: CompareRequest) -> Result<ComparisonReport> {
         clip_max: request.clip.max,
         as_of_date: request.as_of_date.to_string(),
         params: request.params.clone(),
-        dp_seed: privacy_config.as_ref().map(|_| request.dp_seed),
+        dp_seed: privacy_config.as_ref().and_then(|config| {
+            (config.release_mode != ReleaseMode::Raw).then_some(request.dp_seed)
+        }),
         epsilon: privacy_config.as_ref().map(|config| config.epsilon),
         min_cohort: privacy_config.as_ref().map(|config| config.min_cohort),
     };
@@ -130,7 +135,7 @@ pub async fn run_compare(request: CompareRequest) -> Result<ComparisonReport> {
         live_result
             .as_ref()
             .zip(privacy_config.as_ref())
-            .map(|(result, config)| release_result_with_seed(result, config, request.dp_seed))
+            .map(|(result, config)| release_result_for_proof_check(result, config, request.dp_seed))
             .transpose()?
     } else {
         None
@@ -140,7 +145,7 @@ pub async fn run_compare(request: CompareRequest) -> Result<ComparisonReport> {
         exact_baseline
             .as_ref()
             .zip(privacy_config.as_ref())
-            .map(|(result, config)| release_result_with_seed(result, config, request.dp_seed))
+            .map(|(result, config)| release_result_for_proof_check(result, config, request.dp_seed))
             .transpose()?
     } else {
         None
@@ -181,19 +186,16 @@ pub async fn run_compare(request: CompareRequest) -> Result<ComparisonReport> {
                 build_final_release_utility_section(live_release, exact_release)?
             }
             _ => build_inconclusive_section(
-                "live_smpc_post_dp_seeded",
-                "exact_raw_post_dp_seeded",
+                LIVE_POST_RELEASE_LABEL,
+                EXACT_POST_RELEASE_LABEL,
                 None,
-                exact_release
-                    .as_ref()
-                    .map(serialize_payload)
-                    .transpose()?,
+                exact_release.as_ref().map(serialize_payload).transpose()?,
                 missing_live_reason(&live_error),
                 &request.node_endpoints,
             ),
         }
     } else {
-        skipped_section("live_smpc_post_dp_seeded", "exact_raw_post_dp_seeded")
+        skipped_section(LIVE_POST_RELEASE_LABEL, EXACT_POST_RELEASE_LABEL)
     };
 
     let release_vs_exact_raw = if request.mode.includes_release_vs_exact_raw() {
@@ -216,13 +218,7 @@ pub async fn run_compare(request: CompareRequest) -> Result<ComparisonReport> {
             &request.node_endpoints,
         )?
     } else {
-        build_template_metrics_section(
-            request.template,
-            None,
-            None,
-            None,
-            &request.node_endpoints,
-        )?
+        build_template_metrics_section(request.template, None, None, None, &request.node_endpoints)?
     };
 
     Ok(ComparisonReport {
@@ -236,6 +232,19 @@ pub async fn run_compare(request: CompareRequest) -> Result<ComparisonReport> {
         release_vs_exact_raw,
         template_metrics,
     })
+}
+
+pub(crate) fn release_result_for_proof_check(
+    query_result: &QueryResult,
+    config: &GlobalPrivacyConfig,
+    dp_seed: u64,
+) -> Result<GlobalReleaseResult> {
+    match config.release_mode {
+        ReleaseMode::Raw => release_result(query_result, config),
+        ReleaseMode::Dp | ReleaseMode::Seeded => {
+            release_result_with_seed(query_result, config, dp_seed)
+        }
+    }
 }
 
 pub fn default_as_of_date() -> NaiveDate {
@@ -329,8 +338,8 @@ pub(crate) fn build_final_release_utility_section(
             SectionStatus::Mismatch
         },
         expectation: None,
-        left_label: "live_smpc_post_dp_seeded".to_string(),
-        right_label: "exact_raw_post_dp_seeded".to_string(),
+        left_label: LIVE_POST_RELEASE_LABEL.to_string(),
+        right_label: EXACT_POST_RELEASE_LABEL.to_string(),
         left_payload: Some(left_payload),
         right_payload: Some(right_payload),
         diffs,

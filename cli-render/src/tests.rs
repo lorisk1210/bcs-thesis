@@ -2,8 +2,11 @@ use std::collections::BTreeMap;
 use std::env;
 
 use crate::check::{
+    CheckAggregateMetricData, CheckAggregateUtilityData, CheckBatchQueryData, CheckBatchReportData,
     CheckCompareReportData, CheckPayloadComparisonData, CheckPrepareReportData,
-    CheckPreparedNodeData, CheckSectionData, CheckTemplateMetricsData,
+    CheckPreparedNodeData, CheckSectionData, CheckSeedRobustnessData, CheckSeedVerdictData,
+    CheckTemplateMetricsData, CheckUtilityCheckData, CheckUtilityMetricData,
+    CheckUtilityVerdictData,
 };
 use crate::common::key_value;
 use crate::frame::{display_len_ignore_ansi, wrap_ansi_line, wrap_lines_for_frame};
@@ -23,12 +26,18 @@ fn resolve_mode_defaults_to_pretty() {
 
 #[test]
 fn resolve_mode_plain_from_env() {
-    assert_eq!(resolve_output_mode_for_tty(Some("plain"), true), OutputMode::Plain);
+    assert_eq!(
+        resolve_output_mode_for_tty(Some("plain"), true),
+        OutputMode::Plain
+    );
 }
 
 #[test]
 fn resolve_mode_ignores_unknown_values() {
-    assert_eq!(resolve_output_mode_for_tty(Some("fancy"), true), OutputMode::Pretty);
+    assert_eq!(
+        resolve_output_mode_for_tty(Some("fancy"), true),
+        OutputMode::Pretty
+    );
 }
 
 #[test]
@@ -279,6 +288,130 @@ fn plain_check_compare_report_section_status() {
 }
 
 #[test]
+fn plain_check_batch_report_contains_sections() {
+    let data = CheckBatchReportData {
+        template: "cohort_feasibility_count".to_string(),
+        mode: "full".to_string(),
+        queries_dir: "/tmp/queries".to_string(),
+        as_of_date: "2026-01-01".to_string(),
+        clip_min: 0.0,
+        clip_max: 1.0,
+        dp_seed: 42,
+        repeat_seeds: 2,
+        epsilon: Some(1.0),
+        min_cohort: Some(5),
+        utility_context_file: Some("/tmp/context.json".to_string()),
+        nodes: vec![],
+        aggregate_utility: CheckAggregateUtilityData {
+            overall_status: "borderline".to_string(),
+            total_queries: 1,
+            evaluable_queries: 1,
+            preserved: 0,
+            borderline: 1,
+            not_preserved: 0,
+            suppressed: 0,
+            inconclusive: 0,
+            preservation_rate: Some(0.0),
+        },
+        aggregate_metrics: CheckAggregateMetricData {
+            primary_metric_label: "count".to_string(),
+            absolute_gap_mean: Some(5.0),
+            absolute_gap_median: Some(5.0),
+            absolute_gap_max: Some(5.0),
+            relative_gap_mean: Some(0.05),
+            relative_gap_median: Some(0.05),
+            relative_gap_max: Some(0.05),
+            queries_with_mixed_seed_verdicts: Some(1),
+            worst_case_verdict_counts: Some(BTreeMap::from([("borderline".to_string(), 1usize)])),
+        },
+        queries: vec![CheckBatchQueryData {
+            query_file: "example.json".to_string(),
+            query_path: "/tmp/queries/example.json".to_string(),
+            base_seed: 42,
+            final_status: "borderline".to_string(),
+            release_vs_exact_raw: CheckPayloadComparisonData {
+                status: "available".to_string(),
+                left_label: "release".to_string(),
+                right_label: "raw".to_string(),
+                left_payload: None,
+                right_payload: None,
+                compared_left_label: None,
+                compared_right_label: None,
+                compared_left_payload: None,
+                compared_right_payload: None,
+                diffs: vec![],
+                notes: vec![],
+                rejections: vec![],
+            },
+            validation_sections: vec![CheckSectionData {
+                name: "smpc_parity".to_string(),
+                status: "match".to_string(),
+                expectation: None,
+                left_label: "left".to_string(),
+                right_label: "right".to_string(),
+                left_payload: None,
+                right_payload: None,
+                diffs: vec![],
+                rejections: vec![],
+            }],
+            template_metrics: CheckTemplateMetricsData {
+                status: "available".to_string(),
+                primary_metric: None,
+                context_metrics: vec![],
+                notes: vec![],
+                rejections: vec![],
+            },
+            utility_verdict: CheckUtilityVerdictData {
+                status: "borderline".to_string(),
+                primary_metric: Some(CheckUtilityMetricData {
+                    name: "count".to_string(),
+                    released_value: Some(105.0),
+                    exact_raw_value: Some(100.0),
+                    difference: Some(5.0),
+                    absolute_gap: Some(5.0),
+                    relative_gap: Some(0.05),
+                }),
+                context_metric: None,
+                thresholds_applied: vec!["fallback".to_string()],
+                check_results: vec![CheckUtilityCheckData {
+                    name: "prevalence_available".to_string(),
+                    kind: "soft".to_string(),
+                    status: "skipped".to_string(),
+                    detail: "missing denominators".to_string(),
+                }],
+                notes: vec!["capped".to_string()],
+            },
+            seed_robustness: Some(CheckSeedRobustnessData {
+                base_seed: 42,
+                total_seeds: 2,
+                mixed_verdicts: true,
+                worst_status: "borderline".to_string(),
+                verdict_counts: BTreeMap::from([("borderline".to_string(), 2usize)]),
+                seed_verdicts: vec![CheckSeedVerdictData {
+                    seed: 42,
+                    status: "borderline".to_string(),
+                    primary_absolute_gap: Some(5.0),
+                    primary_relative_gap: Some(0.05),
+                }],
+                primary_absolute_gap_min: Some(5.0),
+                primary_absolute_gap_median: Some(5.0),
+                primary_absolute_gap_max: Some(5.0),
+                primary_relative_gap_min: Some(0.05),
+                primary_relative_gap_median: Some(0.05),
+                primary_relative_gap_max: Some(0.05),
+            }),
+        }],
+    };
+
+    let out = render_check_batch_report(OutputMode::Plain, &data);
+    assert!(out.contains("aggregate_utility:"));
+    assert!(out.contains("aggregate_metrics:"));
+    assert!(out.contains("query_results:"));
+    assert!(out.contains("utility_verdict:"));
+    assert!(out.contains("seed_robustness:"));
+}
+
+#[test]
 fn plain_error_matches_legacy_style() {
     let out = render_error(OutputMode::Plain, "refinery-node", "boom");
     assert_eq!(out, "error: boom\n");
@@ -288,7 +421,11 @@ fn plain_error_matches_legacy_style() {
 fn wraps_long_lines_inside_requested_width() {
     let wrapped = wrap_ansi_line("this is a very long line that should wrap cleanly", 12);
     assert!(wrapped.len() > 1);
-    assert!(wrapped.iter().all(|line| display_len_ignore_ansi(line) <= 12));
+    assert!(
+        wrapped
+            .iter()
+            .all(|line| display_len_ignore_ansi(line) <= 12)
+    );
 }
 
 #[test]
@@ -297,7 +434,11 @@ fn wraps_ansi_prefixed_unbroken_lines_without_blank_output() {
     let wrapped = wrap_lines_for_frame(&[&line], 20);
     assert!(wrapped.len() > 1);
     assert!(wrapped.iter().all(|line| display_len_ignore_ansi(line) > 0));
-    assert!(wrapped.iter().all(|line| display_len_ignore_ansi(line) <= 20));
+    assert!(
+        wrapped
+            .iter()
+            .all(|line| display_len_ignore_ansi(line) <= 20)
+    );
 }
 
 #[test]
