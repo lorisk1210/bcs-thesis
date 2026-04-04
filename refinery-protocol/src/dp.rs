@@ -13,7 +13,11 @@ pub fn count_noised_metrics(value: &Value) -> usize {
 }
 
 pub fn is_count_like_key(key: &str) -> bool {
-    key == "count" || key == "n" || key.starts_with("n_") || key.ends_with("_count")
+    key == "count"
+        || key == "n"
+        || key == "population_in_scope"
+        || key.starts_with("n_")
+        || key.ends_with("_count")
 }
 
 pub fn should_noise_key(key: &str) -> bool {
@@ -131,11 +135,12 @@ mod tests {
     fn counts_only_supported_metrics() {
         let value = json!({
             "count": 10,
+            "population_in_scope": 20,
             "delta": 1.5,
             "meta": {"ignored": 2, "mean_value": 3.0},
             "groups": [{"n": 2, "outcome_sum": 4.0}]
         });
-        assert_eq!(count_noised_metrics(&value), 4);
+        assert_eq!(count_noised_metrics(&value), 5);
     }
 
     #[test]

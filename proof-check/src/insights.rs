@@ -160,18 +160,32 @@ fn build_template_metrics(
     match template {
         QueryTemplate::CohortFeasibilityCount => {
             let primary = scalar_metric(
-                "count",
-                required_number(released, "count")?,
-                required_number(exact, "count")?,
+                "prevalence",
+                required_number(released, "prevalence")?,
+                required_number(exact, "prevalence")?,
                 Some(
-                    "Count is the only in-template utility metric here; prevalence would need an external denominator.",
+                    "Prevalence is the primary feasibility signal because it normalizes for different population sizes.",
                 ),
             );
             Ok((
                 primary,
-                Vec::new(),
                 vec![
-                    "For cohort feasibility, treat count as a fallback utility check. Prevalence would be more meaningful but proof-check does not currently load an external population denominator.".to_string(),
+                    scalar_metric(
+                        "count",
+                        required_number(released, "count")?,
+                        required_number(exact, "count")?,
+                        Some("Matched cohort size remains useful context for absolute study power."),
+                    ),
+                    scalar_metric(
+                        "population_in_scope",
+                        required_number(released, "population_in_scope")?,
+                        required_number(exact, "population_in_scope")?,
+                        Some("The in-scope denominator explains whether prevalence moved because the available study population changed."),
+                    ),
+                ],
+                vec![
+                    "For cohort feasibility, use prevalence as the primary utility metric. Count and in-scope population are supporting context.".to_string(),
+                    "The release derives prevalence from separately noised count and population_in_scope values.".to_string(),
                 ],
             ))
         }
