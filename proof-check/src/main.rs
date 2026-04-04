@@ -1,29 +1,25 @@
 // src/main.rs
 // CLI entrypoint for proof-check comparisons.
 
-// Standard library imports
+use std::path::PathBuf;
 use std::process;
 
-// Third-party library imports
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use clap::{Parser, Subcommand, ValueEnum};
 use cli_render::{
-    CheckCompareReportData, CheckDiffEntry, CheckMetricData, CheckNodeReport,
-    CheckPayloadComparisonData, CheckPrepareReportData, CheckPreparedNodeData, CheckRejectionEntry,
-    CheckSectionData, CheckTemplateMetricsData, render_check_compare_report,
-    render_check_prepare_report, render_error, resolve_output_mode,
+    render_check_batch_report, render_check_compare_report, render_check_prepare_report,
+    render_error, resolve_output_mode,
 };
 use refinery_orchestrator::client::ClientTlsOptions;
 use refinery_protocol::{ClipBounds, QueryTemplate};
 
-// Local module imports
 use proof_check::{
-    CompareMode, CompareRequest, PrepareRequest, default_as_of_date, exit_code,
-    parse_raw_node_spec, prepare_baselines, run_compare,
+    BatchRequest, CompareMode, CompareRequest, PrepareRequest, batch_exit_code, batch_report_data,
+    compare_report_data, default_as_of_date, parse_raw_node_spec, prepare_baselines,
+    prepare_report_data, run_batch, run_compare,
 };
 use refinery_node::app;
 
-// Comparison modes exposed on the CLI.
 #[derive(Debug, Clone, Copy, ValueEnum)]
 enum CliMode {
     Full,
@@ -32,19 +28,17 @@ enum CliMode {
     FinalReleaseUtility,
 }
 
-// Output formats supported by the CLI.
 #[derive(Debug, Clone, Copy, ValueEnum)]
 enum OutputFormat {
     Text,
     Json,
 }
 
-// Available proof-check CLI subcommands.
 #[derive(Debug, Subcommand)]
 enum Commands {
     Prepare {
         #[arg(long)]
-        prepared_dir: std::path::PathBuf,
+        prepared_dir: PathBuf,
         #[arg(long, required = true)]
         raw_node: Vec<String>,
         #[arg(long)]
@@ -56,11 +50,11 @@ enum Commands {
         #[arg(long)]
         template: QueryTemplate,
         #[arg(long)]
-        params_file: std::path::PathBuf,
+        params_file: PathBuf,
         #[arg(long)]
         node: Vec<String>,
         #[arg(long)]
-        prepared_dir: Option<std::path::PathBuf>,
+        prepared_dir: Option<PathBuf>,
         #[arg(long)]
         raw_node: Vec<String>,
         #[arg(long, default_value_t = 0.0)]
@@ -76,13 +70,44 @@ enum Commands {
         #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
         format: OutputFormat,
         #[arg(long)]
-        ca_cert: Option<std::path::PathBuf>,
+        ca_cert: Option<PathBuf>,
+        #[arg(long)]
+        tls_domain_name: Option<String>,
+    },
+    Batch {
+        #[arg(long)]
+        template: QueryTemplate,
+        #[arg(long)]
+        queries_dir: PathBuf,
+        #[arg(long)]
+        node: Vec<String>,
+        #[arg(long)]
+        prepared_dir: Option<PathBuf>,
+        #[arg(long)]
+        raw_node: Vec<String>,
+        #[arg(long, default_value_t = 0.0)]
+        clip_min: f64,
+        #[arg(long, default_value_t = 300.0)]
+        clip_max: f64,
+        #[arg(long, value_enum, default_value_t = CliMode::Full)]
+        mode: CliMode,
+        #[arg(long)]
+        as_of_date: Option<chrono::NaiveDate>,
+        #[arg(long, default_value_t = 42)]
+        dp_seed: u64,
+        #[arg(long, default_value_t = 1)]
+        repeat_seeds: usize,
+        #[arg(long)]
+        utility_context_file: Option<PathBuf>,
+        #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+        format: OutputFormat,
+        #[arg(long)]
+        ca_cert: Option<PathBuf>,
         #[arg(long)]
         tls_domain_name: Option<String>,
     },
 }
 
-// Top-level CLI definition for proof-check.
 #[derive(Debug, Parser)]
 #[command(name = "proof-check")]
 #[command(version)]
@@ -92,7 +117,6 @@ struct Cli {
     command: Commands,
 }
 
-// Main: Executes the CLI and exits with the report-derived exit code.
 #[tokio::main]
 async fn main() {
     refinery_node::config::load_dotenv();
@@ -107,7 +131,6 @@ async fn main() {
     process::exit(code);
 }
 
-// Parses CLI inputs, runs the comparison, and prints the selected output format.
 async fn run() -> Result<i32> {
     let cli = Cli::parse();
 
@@ -117,43 +140,7 @@ async fn run() -> Result<i32> {
             raw_node,
             as_of_date,
             format,
-        } => {
-            let raw_nodes = raw_node
-                .iter()
-                .map(|spec| parse_raw_node_spec(spec))
-                .collect::<Result<Vec<_>>>()?;
-            let report = prepare_baselines(PrepareRequest {
-                prepared_dir,
-                raw_nodes,
-                as_of_date: as_of_date.unwrap_or_else(default_as_of_date),
-            })?;
-
-            match format {
-                OutputFormat::Text => {
-                    let mode = resolve_output_mode();
-                    let data = CheckPrepareReportData {
-                        prepared_dir: report.prepared_dir.clone(),
-                        as_of_date: report.as_of_date.clone(),
-                        nodes: report
-                            .nodes
-                            .iter()
-                            .map(|n| CheckPreparedNodeData {
-                                node_id: n.node_id.clone(),
-                                raw_input_dir: n.raw_input_dir.clone(),
-                                coarsened_db_path: n.coarsened_db_path.clone(),
-                                exact_db_path: n.exact_db_path.clone(),
-                            })
-                            .collect(),
-                    };
-                    print!("{}", render_check_prepare_report(mode, &data));
-                }
-                OutputFormat::Json => {
-                    println!("{}", serde_json::to_string_pretty(&report)?);
-                }
-            }
-
-            Ok(0)
-        }
+        } => handle_prepare(prepared_dir, raw_node, as_of_date, format),
         Commands::Compare {
             template,
             params_file,
@@ -169,226 +156,237 @@ async fn run() -> Result<i32> {
             ca_cert,
             tls_domain_name,
         } => {
-            if prepared_dir.is_some() && !raw_node.is_empty() {
-                return Err(anyhow::anyhow!(
-                    "use either --prepared-dir or --raw-node, not both"
-                ));
-            }
-            if prepared_dir.is_none() && raw_node.is_empty() {
-                return Err(anyhow::anyhow!(
-                    "compare requires either --prepared-dir or at least one --raw-node"
-                ));
-            }
-            let compare_mode = match mode {
-                CliMode::Full => CompareMode::Full,
-                CliMode::SmpcParity => CompareMode::SmpcParity,
-                CliMode::CoarseningDistortion => CompareMode::CoarseningDistortion,
-                CliMode::FinalReleaseUtility => CompareMode::FinalReleaseUtility,
-            };
-            if compare_mode.requires_live_nodes() && node.is_empty() {
-                let mode_name = match compare_mode {
-                    CompareMode::Full => "full",
-                    CompareMode::SmpcParity => "smpc_parity",
-                    CompareMode::CoarseningDistortion => "coarsening_distortion",
-                    CompareMode::FinalReleaseUtility => "final_release_utility",
-                };
-                return Err(anyhow::anyhow!(
-                    "mode {mode_name} requires at least one --node endpoint"
-                ));
-            }
-            let params = app::load_params_file(&params_file)?;
-            let raw_nodes = raw_node
-                .iter()
-                .map(|spec| parse_raw_node_spec(spec))
-                .collect::<Result<Vec<_>>>()?;
-            let report = run_compare(CompareRequest {
-                mode: compare_mode,
+            handle_compare(
                 template,
-                params,
-                clip: ClipBounds {
-                    min: clip_min,
-                    max: clip_max,
-                },
-                node_endpoints: node,
+                params_file,
+                node,
                 prepared_dir,
-                raw_nodes,
-                as_of_date: as_of_date.unwrap_or_else(default_as_of_date),
+                raw_node,
+                clip_min,
+                clip_max,
+                mode,
+                as_of_date,
                 dp_seed,
-                tls: ClientTlsOptions {
-                    ca_cert_path: ca_cert,
-                    domain_name: tls_domain_name,
-                },
-            })
-            .await?;
-
-            match format {
-                OutputFormat::Text => {
-                    let output_mode = resolve_output_mode();
-                    let validation_sections = vec![
-                        to_section_data("smpc_parity", &report.validation.smpc_parity),
-                        to_section_data(
-                            "coarsening_distortion",
-                            &report.validation.coarsening_distortion,
-                        ),
-                        to_section_data(
-                            "final_release_utility",
-                            &report.validation.final_release_utility,
-                        ),
-                    ];
-                    let data = CheckCompareReportData {
-                        template: report.request.template.clone(),
-                        mode: report.request.mode.clone(),
-                        as_of_date: report.request.as_of_date.clone(),
-                        clip_min: report.request.clip_min,
-                        clip_max: report.request.clip_max,
-                        dp_seed: report.request.dp_seed,
-                        epsilon: report.request.epsilon,
-                        min_cohort: report.request.min_cohort,
-                        nodes: report
-                            .nodes
-                            .iter()
-                            .map(|n| CheckNodeReport {
-                                node_id: n.node_id.clone(),
-                                endpoint: n.endpoint.clone(),
-                                raw_input_dir: n.raw_input_dir.clone(),
-                            })
-                            .collect(),
-                        validation_sections,
-                        release_vs_exact_raw: to_payload_comparison_data(
-                            &report.release_vs_exact_raw,
-                        ),
-                        template_metrics: to_template_metrics_data(&report.template_metrics),
-                    };
-                    print!("{}", render_check_compare_report(output_mode, &data));
-                }
-                OutputFormat::Json => {
-                    println!("{}", serde_json::to_string_pretty(&report)?);
-                }
-            }
-
-            Ok(exit_code(&report))
+                format,
+                ca_cert,
+                tls_domain_name,
+            )
+            .await
+        }
+        Commands::Batch {
+            template,
+            queries_dir,
+            node,
+            prepared_dir,
+            raw_node,
+            clip_min,
+            clip_max,
+            mode,
+            as_of_date,
+            dp_seed,
+            repeat_seeds,
+            utility_context_file,
+            format,
+            ca_cert,
+            tls_domain_name,
+        } => {
+            handle_batch(
+                template,
+                queries_dir,
+                node,
+                prepared_dir,
+                raw_node,
+                clip_min,
+                clip_max,
+                mode,
+                as_of_date,
+                dp_seed,
+                repeat_seeds,
+                utility_context_file,
+                format,
+                ca_cert,
+                tls_domain_name,
+            )
+            .await
         }
     }
 }
 
-fn to_section_data(name: &str, section: &proof_check::ComparisonSection) -> CheckSectionData {
-    CheckSectionData {
-        name: name.to_string(),
-        status: section_status_str(section.status),
-        expectation: section.expectation.map(expectation_str),
-        left_label: section.left_label.clone(),
-        right_label: section.right_label.clone(),
-        left_payload: section.left_payload.clone(),
-        right_payload: section.right_payload.clone(),
-        diffs: section
-            .diffs
-            .iter()
-            .map(|d| CheckDiffEntry {
-                path: d.path.clone(),
-                left: d.left.clone(),
-                right: d.right.clone(),
-            })
-            .collect(),
-        rejections: section
-            .rejections
-            .iter()
-            .map(|r| CheckRejectionEntry {
-                node_id: r.node_id.clone(),
-                endpoint: r.endpoint.clone(),
-                reason: r.reason.clone(),
-            })
-            .collect(),
+fn handle_prepare(
+    prepared_dir: PathBuf,
+    raw_node: Vec<String>,
+    as_of_date: Option<chrono::NaiveDate>,
+    format: OutputFormat,
+) -> Result<i32> {
+    let raw_nodes = parse_raw_nodes(&raw_node)?;
+    let report = prepare_baselines(PrepareRequest {
+        prepared_dir,
+        raw_nodes,
+        as_of_date: as_of_date.unwrap_or_else(default_as_of_date),
+    })?;
+
+    match format {
+        OutputFormat::Text => {
+            let output_mode = resolve_output_mode();
+            let data = prepare_report_data(&report);
+            print!("{}", render_check_prepare_report(output_mode, &data));
+        }
+        OutputFormat::Json => {
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        }
+    }
+
+    Ok(0)
+}
+
+async fn handle_compare(
+    template: QueryTemplate,
+    params_file: PathBuf,
+    node: Vec<String>,
+    prepared_dir: Option<PathBuf>,
+    raw_node: Vec<String>,
+    clip_min: f64,
+    clip_max: f64,
+    mode: CliMode,
+    as_of_date: Option<chrono::NaiveDate>,
+    dp_seed: u64,
+    format: OutputFormat,
+    ca_cert: Option<PathBuf>,
+    tls_domain_name: Option<String>,
+) -> Result<i32> {
+    let compare_mode = parse_compare_mode(mode);
+    validate_compare_inputs(compare_mode, &prepared_dir, &raw_node, &node)?;
+
+    let params = app::load_params_file(&params_file)?;
+    let raw_nodes = parse_raw_nodes(&raw_node)?;
+    let report = run_compare(CompareRequest {
+        mode: compare_mode,
+        template,
+        params,
+        clip: build_clip(clip_min, clip_max),
+        node_endpoints: node,
+        prepared_dir,
+        raw_nodes,
+        as_of_date: as_of_date.unwrap_or_else(default_as_of_date),
+        dp_seed,
+        tls: tls_options(ca_cert, tls_domain_name),
+    })
+    .await?;
+
+    match format {
+        OutputFormat::Text => {
+            let output_mode = resolve_output_mode();
+            let data = compare_report_data(&report);
+            print!("{}", render_check_compare_report(output_mode, &data));
+        }
+        OutputFormat::Json => {
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        }
+    }
+
+    Ok(proof_check::exit_code(&report))
+}
+
+async fn handle_batch(
+    template: QueryTemplate,
+    queries_dir: PathBuf,
+    node: Vec<String>,
+    prepared_dir: Option<PathBuf>,
+    raw_node: Vec<String>,
+    clip_min: f64,
+    clip_max: f64,
+    mode: CliMode,
+    as_of_date: Option<chrono::NaiveDate>,
+    dp_seed: u64,
+    repeat_seeds: usize,
+    utility_context_file: Option<PathBuf>,
+    format: OutputFormat,
+    ca_cert: Option<PathBuf>,
+    tls_domain_name: Option<String>,
+) -> Result<i32> {
+    let compare_mode = parse_compare_mode(mode);
+    validate_compare_inputs(compare_mode, &prepared_dir, &raw_node, &node)?;
+
+    let raw_nodes = parse_raw_nodes(&raw_node)?;
+    let report = run_batch(BatchRequest {
+        mode: compare_mode,
+        template,
+        queries_dir,
+        clip: build_clip(clip_min, clip_max),
+        node_endpoints: node,
+        prepared_dir,
+        raw_nodes,
+        as_of_date: as_of_date.unwrap_or_else(default_as_of_date),
+        dp_seed,
+        repeat_seeds,
+        utility_context_file,
+        tls: tls_options(ca_cert, tls_domain_name),
+    })
+    .await?;
+
+    match format {
+        OutputFormat::Text => {
+            let output_mode = resolve_output_mode();
+            let data = batch_report_data(&report);
+            print!("{}", render_check_batch_report(output_mode, &data));
+        }
+        OutputFormat::Json => {
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        }
+    }
+
+    Ok(batch_exit_code(&report))
+}
+
+fn parse_compare_mode(mode: CliMode) -> CompareMode {
+    match mode {
+        CliMode::Full => CompareMode::Full,
+        CliMode::SmpcParity => CompareMode::SmpcParity,
+        CliMode::CoarseningDistortion => CompareMode::CoarseningDistortion,
+        CliMode::FinalReleaseUtility => CompareMode::FinalReleaseUtility,
     }
 }
 
-fn to_payload_comparison_data(
-    section: &proof_check::PayloadComparisonSection,
-) -> CheckPayloadComparisonData {
-    CheckPayloadComparisonData {
-        status: analysis_status_str(section.status),
-        left_label: section.left_label.clone(),
-        right_label: section.right_label.clone(),
-        left_payload: section.left_payload.clone(),
-        right_payload: section.right_payload.clone(),
-        compared_left_label: section.compared_left_label.clone(),
-        compared_right_label: section.compared_right_label.clone(),
-        compared_left_payload: section.compared_left_payload.clone(),
-        compared_right_payload: section.compared_right_payload.clone(),
-        diffs: section
-            .diffs
-            .iter()
-            .map(|d| CheckDiffEntry {
-                path: d.path.clone(),
-                left: d.left.clone(),
-                right: d.right.clone(),
-            })
-            .collect(),
-        notes: section.notes.clone(),
-        rejections: section
-            .rejections
-            .iter()
-            .map(|r| CheckRejectionEntry {
-                node_id: r.node_id.clone(),
-                endpoint: r.endpoint.clone(),
-                reason: r.reason.clone(),
-            })
-            .collect(),
+fn validate_compare_inputs(
+    compare_mode: CompareMode,
+    prepared_dir: &Option<PathBuf>,
+    raw_node: &[String],
+    node: &[String],
+) -> Result<()> {
+    if prepared_dir.is_some() && !raw_node.is_empty() {
+        return Err(anyhow!("use either --prepared-dir or --raw-node, not both"));
+    }
+    if prepared_dir.is_none() && raw_node.is_empty() {
+        return Err(anyhow!(
+            "comparison requires either --prepared-dir or at least one --raw-node"
+        ));
+    }
+    if compare_mode.requires_live_nodes() && node.is_empty() {
+        return Err(anyhow!(
+            "mode {} requires at least one --node endpoint",
+            compare_mode.as_str()
+        ));
+    }
+    Ok(())
+}
+
+fn parse_raw_nodes(raw_node: &[String]) -> Result<Vec<proof_check::RawNodeInput>> {
+    raw_node
+        .iter()
+        .map(|spec| parse_raw_node_spec(spec))
+        .collect::<Result<Vec<_>>>()
+}
+
+fn build_clip(clip_min: f64, clip_max: f64) -> ClipBounds {
+    ClipBounds {
+        min: clip_min,
+        max: clip_max,
     }
 }
 
-fn to_template_metrics_data(
-    section: &proof_check::TemplateMetricsSection,
-) -> CheckTemplateMetricsData {
-    CheckTemplateMetricsData {
-        status: analysis_status_str(section.status),
-        primary_metric: section.primary_metric.as_ref().map(to_metric_data),
-        context_metrics: section.context_metrics.iter().map(to_metric_data).collect(),
-        notes: section.notes.clone(),
-        rejections: section
-            .rejections
-            .iter()
-            .map(|r| CheckRejectionEntry {
-                node_id: r.node_id.clone(),
-                endpoint: r.endpoint.clone(),
-                reason: r.reason.clone(),
-            })
-            .collect(),
+fn tls_options(ca_cert: Option<PathBuf>, tls_domain_name: Option<String>) -> ClientTlsOptions {
+    ClientTlsOptions {
+        ca_cert_path: ca_cert,
+        domain_name: tls_domain_name,
     }
-}
-
-fn to_metric_data(metric: &proof_check::MetricComparison) -> CheckMetricData {
-    CheckMetricData {
-        name: metric.name.clone(),
-        released_value: metric.released_value.clone(),
-        exact_raw_value: metric.exact_raw_value.clone(),
-        difference: metric.difference.clone(),
-        absolute_gap: metric.absolute_gap.clone(),
-        relative_gap: metric.relative_gap.clone(),
-        note: metric.note.clone(),
-    }
-}
-
-fn section_status_str(status: proof_check::SectionStatus) -> String {
-    match status {
-        proof_check::SectionStatus::Match => "match",
-        proof_check::SectionStatus::Mismatch => "mismatch",
-        proof_check::SectionStatus::Inconclusive => "inconclusive",
-        proof_check::SectionStatus::ExpectedDistortion => "expected_distortion",
-        proof_check::SectionStatus::UnexpectedDistortion => "unexpected_distortion",
-        proof_check::SectionStatus::Skipped => "skipped",
-    }
-    .to_string()
-}
-
-fn expectation_str(e: proof_check::DistortionExpectation) -> String {
-    match e {
-        proof_check::DistortionExpectation::ShouldMatch => "should_match",
-        proof_check::DistortionExpectation::DistortionPossible => "distortion_possible",
-        proof_check::DistortionExpectation::DistortionExpected => "distortion_expected",
-    }
-    .to_string()
-}
-
-fn analysis_status_str(status: proof_check::AnalysisStatus) -> String {
-    status.as_str().to_string()
 }
