@@ -8,9 +8,11 @@ use std::process;
 use anyhow::Result;
 use clap::{Parser, Subcommand, ValueEnum};
 use cli_render::{
-    CheckCompareReportData, CheckDiffEntry, CheckNodeReport, CheckPrepareReportData,
-    CheckPreparedNodeData, CheckRejectionEntry, CheckSectionData, render_check_compare_report,
-    render_check_prepare_report, render_error, resolve_output_mode,
+    CheckCompareReportData, CheckDiffEntry, CheckMetricData, CheckNodeReport,
+    CheckPayloadComparisonData, CheckPrepareReportData, CheckPreparedNodeData,
+    CheckRejectionEntry, CheckSectionData, CheckTemplateMetricsData,
+    render_check_compare_report, render_check_prepare_report, render_error,
+    resolve_output_mode,
 };
 use refinery_orchestrator::client::ClientTlsOptions;
 use refinery_protocol::{ClipBounds, QueryTemplate};
@@ -223,10 +225,16 @@ async fn run() -> Result<i32> {
             match format {
                 OutputFormat::Text => {
                     let output_mode = resolve_output_mode();
-                    let sections = vec![
-                        to_section_data("smpc_parity", &report.smpc_parity),
-                        to_section_data("coarsening_distortion", &report.coarsening_distortion),
-                        to_section_data("final_release_utility", &report.final_release_utility),
+                    let validation_sections = vec![
+                        to_section_data("smpc_parity", &report.validation.smpc_parity),
+                        to_section_data(
+                            "coarsening_distortion",
+                            &report.validation.coarsening_distortion,
+                        ),
+                        to_section_data(
+                            "final_release_utility",
+                            &report.validation.final_release_utility,
+                        ),
                     ];
                     let data = CheckCompareReportData {
                         template: report.request.template.clone(),
@@ -246,7 +254,11 @@ async fn run() -> Result<i32> {
                                 raw_input_dir: n.raw_input_dir.clone(),
                             })
                             .collect(),
-                        sections,
+                        validation_sections,
+                        release_vs_exact_raw: to_payload_comparison_data(
+                            &report.release_vs_exact_raw,
+                        ),
+                        template_metrics: to_template_metrics_data(&report.template_metrics),
                     };
                     print!("{}", render_check_compare_report(output_mode, &data));
                 }
@@ -293,6 +305,77 @@ fn to_section_data(
     }
 }
 
+fn to_payload_comparison_data(
+    section: &proof_check::PayloadComparisonSection,
+) -> CheckPayloadComparisonData {
+    CheckPayloadComparisonData {
+        status: analysis_status_str(section.status),
+        left_label: section.left_label.clone(),
+        right_label: section.right_label.clone(),
+        left_payload: section.left_payload.clone(),
+        right_payload: section.right_payload.clone(),
+        compared_left_label: section.compared_left_label.clone(),
+        compared_right_label: section.compared_right_label.clone(),
+        compared_left_payload: section.compared_left_payload.clone(),
+        compared_right_payload: section.compared_right_payload.clone(),
+        diffs: section
+            .diffs
+            .iter()
+            .map(|d| CheckDiffEntry {
+                path: d.path.clone(),
+                left: d.left.clone(),
+                right: d.right.clone(),
+            })
+            .collect(),
+        notes: section.notes.clone(),
+        rejections: section
+            .rejections
+            .iter()
+            .map(|r| CheckRejectionEntry {
+                node_id: r.node_id.clone(),
+                endpoint: r.endpoint.clone(),
+                reason: r.reason.clone(),
+            })
+            .collect(),
+    }
+}
+
+fn to_template_metrics_data(
+    section: &proof_check::TemplateMetricsSection,
+) -> CheckTemplateMetricsData {
+    CheckTemplateMetricsData {
+        status: analysis_status_str(section.status),
+        primary_metric: section.primary_metric.as_ref().map(to_metric_data),
+        context_metrics: section
+            .context_metrics
+            .iter()
+            .map(to_metric_data)
+            .collect(),
+        notes: section.notes.clone(),
+        rejections: section
+            .rejections
+            .iter()
+            .map(|r| CheckRejectionEntry {
+                node_id: r.node_id.clone(),
+                endpoint: r.endpoint.clone(),
+                reason: r.reason.clone(),
+            })
+            .collect(),
+    }
+}
+
+fn to_metric_data(metric: &proof_check::MetricComparison) -> CheckMetricData {
+    CheckMetricData {
+        name: metric.name.clone(),
+        released_value: metric.released_value.clone(),
+        exact_raw_value: metric.exact_raw_value.clone(),
+        difference: metric.difference.clone(),
+        absolute_gap: metric.absolute_gap.clone(),
+        relative_gap: metric.relative_gap.clone(),
+        note: metric.note.clone(),
+    }
+}
+
 fn section_status_str(status: proof_check::SectionStatus) -> String {
     match status {
         proof_check::SectionStatus::Match => "match",
@@ -312,4 +395,8 @@ fn expectation_str(e: proof_check::DistortionExpectation) -> String {
         proof_check::DistortionExpectation::DistortionExpected => "distortion_expected",
     }
     .to_string()
+}
+
+fn analysis_status_str(status: proof_check::AnalysisStatus) -> String {
+    status.as_str().to_string()
 }

@@ -8,6 +8,7 @@ use chrono::NaiveDate;
 use duckdb::Connection;
 use refinery_node::{app, ingest::TransformMode};
 use refinery_orchestrator::config::GlobalPrivacyConfig;
+use refinery_orchestrator::dp_release::release_result_with_seed;
 use refinery_protocol::{QueryResult, QueryTemplate};
 use serde_json::json;
 
@@ -20,6 +21,7 @@ use crate::compare::{
     serialize_payload,
 };
 use crate::diff::diff_payloads;
+use crate::insights::{build_release_vs_exact_raw_section, build_template_metrics_section};
 use crate::*;
 
 #[test]
@@ -93,7 +95,11 @@ fn final_release_utility_matches_for_identical_inputs() {
         dp_seed: None,
     };
 
-    let section = build_final_release_utility_section(&result, &result, &config, 42)
+    let live_release =
+        release_result_with_seed(&result, &config, 42).expect("seeded release should work");
+    let exact_release =
+        release_result_with_seed(&result, &config, 42).expect("seeded release should work");
+    let section = build_final_release_utility_section(&live_release, &exact_release)
         .expect("utility section should build");
     assert_eq!(section.status, SectionStatus::Match);
     assert!(section.diffs.is_empty());
@@ -123,7 +129,11 @@ fn final_release_utility_detects_distortion() {
         dp_seed: None,
     };
 
-    let section = build_final_release_utility_section(&live_result, &exact_result, &config, 42)
+    let live_release =
+        release_result_with_seed(&live_result, &config, 42).expect("seeded release should work");
+    let exact_release =
+        release_result_with_seed(&exact_result, &config, 42).expect("seeded release should work");
+    let section = build_final_release_utility_section(&live_release, &exact_release)
         .expect("utility section should build");
     assert_eq!(section.status, SectionStatus::Mismatch);
     assert!(!section.diffs.is_empty());
@@ -154,16 +164,39 @@ fn exit_code_prioritizes_failure_over_inconclusive() {
             min_cohort: Some(5),
         },
         nodes: Vec::new(),
-        smpc_parity: base_section.clone(),
-        coarsening_distortion: base_section.clone(),
-        final_release_utility: base_section.clone(),
+        validation: ValidationSections {
+            smpc_parity: base_section.clone(),
+            coarsening_distortion: base_section.clone(),
+            final_release_utility: base_section.clone(),
+        },
+        release_vs_exact_raw: PayloadComparisonSection {
+            status: AnalysisStatus::Skipped,
+            left_label: "release".to_string(),
+            right_label: "raw".to_string(),
+            left_payload: None,
+            right_payload: None,
+            compared_left_label: None,
+            compared_right_label: None,
+            compared_left_payload: None,
+            compared_right_payload: None,
+            diffs: Vec::new(),
+            notes: Vec::new(),
+            rejections: Vec::new(),
+        },
+        template_metrics: TemplateMetricsSection {
+            status: AnalysisStatus::Skipped,
+            primary_metric: None,
+            context_metrics: Vec::new(),
+            notes: Vec::new(),
+            rejections: Vec::new(),
+        },
     };
     assert_eq!(exit_code(&report), 0);
 
-    report.smpc_parity.status = SectionStatus::Inconclusive;
+    report.validation.smpc_parity.status = SectionStatus::Inconclusive;
     assert_eq!(exit_code(&report), 2);
 
-    report.final_release_utility.status = SectionStatus::Mismatch;
+    report.validation.final_release_utility.status = SectionStatus::Mismatch;
     assert_eq!(exit_code(&report), 1);
 }
 
@@ -186,6 +219,80 @@ fn serialize_release_result_preserves_rejection_reason() {
     })
     .expect("release payload should serialize");
     assert_eq!(payload["reason"], "below threshold");
+}
+
+#[test]
+fn release_vs_exact_raw_compares_released_payload_to_exact_raw_result() {
+    let live_release = refinery_orchestrator::dp_release::GlobalReleaseResult {
+        accepted: true,
+        reason: "released".to_string(),
+        release_mode: refinery_protocol::ReleaseMode::Seeded,
+        released_result: Some(json!({"count": 21.0})),
+    };
+    let exact_baseline = QueryResult {
+        template_name: "cohort_feasibility_count".to_string(),
+        raw_result: json!({"count": 20}),
+        cohort_size: 20,
+        sensitivity: 1.0,
+    };
+
+    let section = build_release_vs_exact_raw_section(
+        Some(&live_release),
+        Some(&exact_baseline),
+        None,
+        &[],
+    )
+    .expect("release-vs-raw section should build");
+
+    assert_eq!(section.status, AnalysisStatus::Available);
+    assert_eq!(section.compared_left_label.as_deref(), Some("released_result"));
+    assert_eq!(section.compared_right_label.as_deref(), Some("exact_raw_result"));
+    assert!(section.diffs.iter().any(|diff| diff.path == "$.count"));
+}
+
+#[test]
+fn template_metrics_for_comparative_effectiveness_include_primary_and_context_metrics() {
+    let live_release = refinery_orchestrator::dp_release::GlobalReleaseResult {
+        accepted: true,
+        reason: "released".to_string(),
+        release_mode: refinery_protocol::ReleaseMode::Seeded,
+        released_result: Some(json!({
+            "delta": 0.7745871303011584,
+            "mean_outcome_control": 29.39140652545,
+            "mean_outcome_exposed": 31.660282191023033,
+            "n_control": 70.91503057097873,
+            "n_exposed": 251.21784814104254
+        })),
+    };
+    let exact_baseline = QueryResult {
+        template_name: "comparative_effectiveness_delta".to_string(),
+        raw_result: json!({
+            "delta": 0.3081133090981574,
+            "mean_outcome_control": 28.627956978520547,
+            "mean_outcome_exposed": 28.936070287618705,
+            "n_control": 73,
+            "n_exposed": 278
+        }),
+        cohort_size: 351,
+        sensitivity: 0.8547008547008547,
+    };
+
+    let section = build_template_metrics_section(
+        QueryTemplate::ComparativeEffectivenessDelta,
+        Some(&live_release),
+        Some(&exact_baseline),
+        None,
+        &[],
+    )
+    .expect("template metrics section should build");
+
+    assert_eq!(section.status, AnalysisStatus::Available);
+    let primary = section.primary_metric.expect("primary metric should exist");
+    assert_eq!(primary.name, "delta");
+    assert!(section
+        .context_metrics
+        .iter()
+        .any(|metric| metric.name == "exposed_share"));
 }
 
 #[test]

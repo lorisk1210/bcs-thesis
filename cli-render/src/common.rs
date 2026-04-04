@@ -51,6 +51,8 @@ pub(crate) fn status_badge(mode: OutputMode, status: &str) -> String {
     let (display, fg, bg) = match status {
         "released" => ("RELEASED", GREEN, BG_GREEN),
         "rejected" => ("REJECTED", RED, BG_RED),
+        "available" => ("AVAILABLE", GREEN, BG_GREEN),
+        "suppressed" => ("SUPPRESSED", YELLOW, BG_YELLOW),
         "match" => ("MATCH", GREEN, BG_GREEN),
         "mismatch" => ("MISMATCH", RED, BG_RED),
         "unexpected_distortion" => ("UNEXPECTED DISTORTION", RED, BG_RED),
