@@ -35,14 +35,17 @@ Across templates, four generic acceptance tests are relevant:
 
 ### 1. `cohort_feasibility_count`
 
-Released value:
+Released values:
 
 - `count`
+- `population_in_scope`
+- `prevalence`
 
 Best comparison:
 
 - Compare prevalence, not the raw count.
-- Formula:
+- The template already releases prevalence, derived from the additive numerator and denominator.
+- Internally:
   - `raw_prevalence = raw_count / raw_population_in_scope`
   - `fed_prevalence = fed_count / federated_population_in_scope`
 
@@ -63,7 +66,8 @@ Interpretation:
 
 Caveat:
 
-- The template only releases `count`, so the population denominator must come from site metadata, a patient census, or a separate baseline query.
+- Differential privacy should be applied to `count` and `population_in_scope`, and `prevalence` should then be derived from the noised pair as post-processing.
+- Do not average site-level percentages directly. Aggregate the numerator and denominator first, then divide.
 
 Utility-preserving deviation:
 

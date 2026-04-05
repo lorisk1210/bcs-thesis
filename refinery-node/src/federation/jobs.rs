@@ -269,7 +269,7 @@ mod tests {
             protocol_name: refinery_protocol::SMPC_PROTOCOL_NAME.to_string(),
             protocol_version: refinery_protocol::SMPC_PROTOCOL_VERSION.to_string(),
             schema_id: "schema".to_string(),
-            slot_labels: vec!["count".to_string()],
+            slot_labels: vec!["count".to_string(), "population_in_scope".to_string()],
             share_packets: Vec::new(),
             recipient_node_id: "node-a".to_string(),
         }
@@ -326,7 +326,7 @@ mod tests {
                 smpc_state: Some(SmpcJobState {
                     job_context_hash: "hash".to_string(),
                     schema_id: "schema".to_string(),
-                    slot_labels: vec!["count".to_string()],
+                    slot_labels: vec!["count".to_string(), "population_in_scope".to_string()],
                     protocol_name: refinery_protocol::SMPC_PROTOCOL_NAME.to_string(),
                     protocol_version: refinery_protocol::SMPC_PROTOCOL_VERSION.to_string(),
                     participant_keys: Default::default(),

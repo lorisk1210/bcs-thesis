@@ -135,7 +135,11 @@ mod tests {
     fn seeded_release_is_deterministic() {
         let query_result = QueryResult {
             template_name: "cohort_feasibility_count".to_string(),
-            raw_result: json!({"count": 20}),
+            raw_result: json!({
+                "count": 20,
+                "population_in_scope": 40,
+                "prevalence": 0.5
+            }),
             cohort_size: 20,
             sensitivity: 1.0,
         };
@@ -162,7 +166,11 @@ mod tests {
     fn raw_release_returns_exact_payload() {
         let query_result = QueryResult {
             template_name: "cohort_feasibility_count".to_string(),
-            raw_result: json!({"count": 20}),
+            raw_result: json!({
+                "count": 20,
+                "population_in_scope": 40,
+                "prevalence": 0.5
+            }),
             cohort_size: 20,
             sensitivity: 1.0,
         };

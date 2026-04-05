@@ -412,6 +412,100 @@ fn plain_check_batch_report_contains_sections() {
 }
 
 #[test]
+fn pretty_check_batch_report_separates_query_sections() {
+    let data = CheckBatchReportData {
+        template: "cohort_feasibility_count".to_string(),
+        mode: "final_release_utility".to_string(),
+        queries_dir: "/tmp/queries".to_string(),
+        as_of_date: "2026-01-01".to_string(),
+        clip_min: 0.0,
+        clip_max: 1.0,
+        dp_seed: 42,
+        repeat_seeds: 1,
+        epsilon: Some(1.0),
+        min_cohort: Some(5),
+        utility_context_file: None,
+        nodes: vec![],
+        aggregate_utility: CheckAggregateUtilityData {
+            overall_status: "preserved".to_string(),
+            total_queries: 1,
+            evaluable_queries: 1,
+            preserved: 1,
+            borderline: 0,
+            not_preserved: 0,
+            suppressed: 0,
+            inconclusive: 0,
+            preservation_rate: Some(1.0),
+        },
+        aggregate_metrics: CheckAggregateMetricData {
+            primary_metric_label: "prevalence".to_string(),
+            absolute_gap_mean: Some(0.0),
+            absolute_gap_median: Some(0.0),
+            absolute_gap_max: Some(0.0),
+            relative_gap_mean: Some(0.0),
+            relative_gap_median: Some(0.0),
+            relative_gap_max: Some(0.0),
+            queries_with_mixed_seed_verdicts: None,
+            worst_case_verdict_counts: None,
+        },
+        queries: vec![CheckBatchQueryData {
+            query_file: "example.json".to_string(),
+            query_path: "/tmp/queries/example.json".to_string(),
+            base_seed: 42,
+            final_status: "preserved".to_string(),
+            release_vs_exact_raw: CheckPayloadComparisonData {
+                status: "available".to_string(),
+                left_label: "release".to_string(),
+                right_label: "raw".to_string(),
+                left_payload: None,
+                right_payload: None,
+                compared_left_label: Some("released_result".to_string()),
+                compared_right_label: Some("exact_raw_result".to_string()),
+                compared_left_payload: Some(serde_json::json!({"count": 100})),
+                compared_right_payload: Some(serde_json::json!({"count": 100})),
+                diffs: vec![],
+                notes: vec![],
+                rejections: vec![],
+            },
+            validation_sections: vec![],
+            template_metrics: CheckTemplateMetricsData {
+                status: "available".to_string(),
+                primary_metric: None,
+                context_metrics: vec![],
+                notes: vec![],
+                rejections: vec![],
+            },
+            utility_verdict: CheckUtilityVerdictData {
+                status: "preserved".to_string(),
+                primary_metric: Some(CheckUtilityMetricData {
+                    name: "prevalence".to_string(),
+                    released_value: Some(1.0),
+                    exact_raw_value: Some(1.0),
+                    difference: Some(0.0),
+                    absolute_gap: Some(0.0),
+                    relative_gap: Some(0.0),
+                }),
+                context_metric: None,
+                thresholds_applied: vec![
+                    "Moderate to common cohorts: relative prevalence error within 10%".to_string(),
+                ],
+                check_results: vec![],
+                notes: vec![],
+            },
+            seed_robustness: None,
+        }],
+    };
+
+    let out = render_check_batch_report(OutputMode::Pretty, &data);
+    let relative_gap_line = out
+        .lines()
+        .find(|line| line.contains("relative_gap:"))
+        .expect("relative gap line should exist");
+    assert!(!relative_gap_line.contains("Utility Verdict"));
+    assert!(out.lines().any(|line| line.contains("Utility Verdict")));
+}
+
+#[test]
 fn plain_error_matches_legacy_style() {
     let out = render_error(OutputMode::Plain, "refinery-node", "boom");
     assert_eq!(out, "error: boom\n");

@@ -7,13 +7,18 @@ This note explains what each allowlisted query template does, what it returns, a
 What it does:
 - Filters patients by optional age, gender, condition, and medication criteria.
 - Counts distinct patients who match the requested cohort definition.
+- Computes the broader in-scope population using the same age and gender filters but without the condition and medication filters.
+- Derives cohort prevalence as `count / population_in_scope`.
 
 What it returns:
 - `count`
+- `population_in_scope`
+- `prevalence`
 
 Goal:
-- Answer a feasibility question such as "How many patients match this study screen?"
+- Answer a feasibility question such as "What share of the in-scope population matches this study screen?"
 - This is mainly used to estimate whether a cohort is large enough to support follow-up analysis.
+- `count` remains useful context for minimum-cohort checks and study power.
 
 ## `comparative-effectiveness-delta`
 
