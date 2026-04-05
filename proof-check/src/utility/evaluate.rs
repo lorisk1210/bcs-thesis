@@ -155,12 +155,22 @@ fn evaluate_cohort_feasibility(
     let mut acc = EvaluationAccumulator::new();
     let raw_count = required_number(exact_payload, "count")?;
     let fed_count = required_number(released_payload, "count")?;
+    let raw_prevalence_in_payload = exact_payload.get("prevalence").and_then(Value::as_f64);
+    let fed_prevalence_in_payload = released_payload.get("prevalence").and_then(Value::as_f64);
 
-    if let Some(context) = context.filter(|context| has_feasibility_denominators(context)) {
-        let raw_population = context.raw_population_in_scope.unwrap_or_default();
-        let fed_population = context.federated_population_in_scope.unwrap_or_default();
-        let raw_prevalence = raw_count / raw_population;
-        let fed_prevalence = fed_count / fed_population;
+    let derived_prevalence = context
+        .filter(|candidate| has_feasibility_denominators(candidate))
+        .map(|candidate| {
+            (
+                raw_count / candidate.raw_population_in_scope.unwrap_or_default(),
+                fed_count / candidate.federated_population_in_scope.unwrap_or_default(),
+            )
+        });
+
+    if let Some((raw_prevalence, fed_prevalence)) = raw_prevalence_in_payload
+        .zip(fed_prevalence_in_payload)
+        .or(derived_prevalence)
+    {
         let difference = fed_prevalence - raw_prevalence;
         let absolute_gap = (fed_prevalence - raw_prevalence).abs();
         let relative_gap = safe_relative_gap(fed_prevalence, raw_prevalence);
@@ -172,6 +182,14 @@ fn evaluate_cohort_feasibility(
             difference: Some(difference),
             absolute_gap: Some(absolute_gap),
             relative_gap,
+        });
+        acc.context_metric = Some(UtilityMetricSummary {
+            name: "count".to_string(),
+            released_value: Some(fed_count),
+            exact_raw_value: Some(raw_count),
+            difference: Some(fed_count - raw_count),
+            absolute_gap: Some((fed_count - raw_count).abs()),
+            relative_gap: safe_relative_gap(fed_count, raw_count),
         });
 
         let low_prevalence = raw_prevalence < 0.10;
@@ -201,7 +219,7 @@ fn evaluate_cohort_feasibility(
             ),
         ));
 
-        if let Some(threshold) = context.feasibility_threshold {
+        if let Some(threshold) = context.and_then(|candidate| candidate.feasibility_threshold) {
             let raw_side = raw_prevalence >= threshold;
             let fed_side = fed_prevalence >= threshold;
             acc.thresholds_applied.push(format!(
@@ -229,8 +247,15 @@ fn evaluate_cohort_feasibility(
                 "No feasibility_threshold provided in utility context.".to_string(),
             ));
         }
-        if let Some(source) = context.denominator_source.as_deref() {
-            acc.notes.push(source.to_string());
+        if raw_prevalence_in_payload
+            .zip(fed_prevalence_in_payload)
+            .is_none()
+        {
+            if let Some(source) =
+                context.and_then(|candidate| candidate.denominator_source.as_deref())
+            {
+                acc.notes.push(source.to_string());
+            }
         }
         acc.notes.push(format!(
             "Contribution share (raw_count / fed_count) = {}.",
@@ -241,17 +266,27 @@ fn evaluate_cohort_feasibility(
             .template_metrics
             .primary_metric
             .as_ref()
-            .ok_or_else(|| anyhow!("count fallback requested but primary metric is missing"))?;
+            .ok_or_else(|| {
+                anyhow!("prevalence fallback requested but primary metric is missing")
+            })?;
         acc.primary_metric = Some(metric_summary(primary_metric));
+        acc.context_metric = Some(UtilityMetricSummary {
+            name: "count".to_string(),
+            released_value: Some(fed_count),
+            exact_raw_value: Some(raw_count),
+            difference: Some(fed_count - raw_count),
+            absolute_gap: Some((fed_count - raw_count).abs()),
+            relative_gap: safe_relative_gap(fed_count, raw_count),
+        });
         acc.thresholds_applied.push(
-            "Denominator context is missing, so utility falls back to count-based evidence and cannot exceed borderline."
+            "Prevalence must be present in the compared payloads, or derivable from denominator context, to evaluate cohort feasibility directly."
                 .to_string(),
         );
         acc.check_results.push(utility_check(
             "prevalence_available",
             UtilityCheckKind::Soft,
             UtilityCheckStatus::Skipped,
-            "raw_population_in_scope and federated_population_in_scope were not both provided."
+            "prevalence was missing from the released and/or exact payload, and denominator context was insufficient."
                 .to_string(),
         ));
         acc.notes.push(

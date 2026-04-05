@@ -17,7 +17,10 @@ use crate::query::{ClipBounds, QueryTemplate};
 
 const TWO_ARM_COUNT_SLOTS: &[usize] = &[0, 1];
 
-const COHORT_FEASIBILITY_FIELDS: &[ScalarFieldSpec] = &[ScalarFieldSpec::count("count")];
+const COHORT_FEASIBILITY_FIELDS: &[ScalarFieldSpec] = &[
+    ScalarFieldSpec::count("count"),
+    ScalarFieldSpec::count("population_in_scope"),
+];
 const COMPARATIVE_EFFECTIVENESS_FIELDS: &[ScalarFieldSpec] = &[
     ScalarFieldSpec::count("n_exposed"),
     ScalarFieldSpec::count("n_control"),
@@ -44,15 +47,19 @@ const DDI_INCIDENCE_FIELDS: &[ScalarFieldSpec] = &[
 
 const COHORT_FEASIBILITY_SPEC: ScalarTemplateSpec = ScalarTemplateSpec {
     fields: COHORT_FEASIBILITY_FIELDS,
-    render: ScalarRenderKind::Count,
+    render: ScalarRenderKind::FeasibilityPrevalence {
+        prevalence_label: "prevalence",
+    },
     cohort_size: ScalarCohortSize::Single(0),
     sensitivity: ScalarSensitivityKind::Count,
+    schema_version: 2,
 };
 const COMPARATIVE_EFFECTIVENESS_SPEC: ScalarTemplateSpec = ScalarTemplateSpec {
     fields: COMPARATIVE_EFFECTIVENESS_FIELDS,
     render: ScalarRenderKind::ComparativeDelta,
     cohort_size: ScalarCohortSize::Sum(TWO_ARM_COUNT_SLOTS),
     sensitivity: ScalarSensitivityKind::ClippedMean,
+    schema_version: 1,
 };
 const TIME_TO_EVENT_SPEC: ScalarTemplateSpec = ScalarTemplateSpec {
     fields: TIME_TO_EVENT_FIELDS,
@@ -61,6 +68,7 @@ const TIME_TO_EVENT_SPEC: ScalarTemplateSpec = ScalarTemplateSpec {
     },
     cohort_size: ScalarCohortSize::Single(0),
     sensitivity: ScalarSensitivityKind::TimeToEvent { max_days_index: 2 },
+    schema_version: 1,
 };
 const AE_INCIDENCE_SPEC: ScalarTemplateSpec = ScalarTemplateSpec {
     fields: AE_INCIDENCE_FIELDS,
@@ -70,6 +78,7 @@ const AE_INCIDENCE_SPEC: ScalarTemplateSpec = ScalarTemplateSpec {
     },
     cohort_size: ScalarCohortSize::Sum(TWO_ARM_COUNT_SLOTS),
     sensitivity: ScalarSensitivityKind::InverseCount,
+    schema_version: 1,
 };
 const DDI_INCIDENCE_SPEC: ScalarTemplateSpec = ScalarTemplateSpec {
     fields: DDI_INCIDENCE_FIELDS,
@@ -79,6 +88,7 @@ const DDI_INCIDENCE_SPEC: ScalarTemplateSpec = ScalarTemplateSpec {
     },
     cohort_size: ScalarCohortSize::Sum(TWO_ARM_COUNT_SLOTS),
     sensitivity: ScalarSensitivityKind::InverseCount,
+    schema_version: 1,
 };
 
 #[derive(Clone, Copy)]
@@ -87,6 +97,7 @@ struct ScalarTemplateSpec {
     render: ScalarRenderKind,
     cohort_size: ScalarCohortSize,
     sensitivity: ScalarSensitivityKind,
+    schema_version: u8,
 }
 
 #[derive(Clone, Copy)]
@@ -131,7 +142,9 @@ enum ScalarCodec {
 
 #[derive(Clone, Copy)]
 enum ScalarRenderKind {
-    Count,
+    FeasibilityPrevalence {
+        prevalence_label: &'static str,
+    },
     ComparativeDelta,
     Mean {
         mean_label: &'static str,
@@ -159,7 +172,7 @@ enum ScalarSensitivityKind {
 pub(crate) fn schema_for_query(template: QueryTemplate) -> Option<StatisticsSchema> {
     scalar_template_spec(template).map(|spec| StatisticsSchema {
         template,
-        schema_id: format!("{}:v1", template.as_str()),
+        schema_id: format!("{}:v{}", template.as_str(), spec.schema_version),
         slot_labels: spec
             .fields
             .iter()
@@ -200,9 +213,15 @@ pub(crate) fn decode_stats(template: QueryTemplate, slots: &[u64]) -> Option<Res
 
 pub(crate) fn render_result(template: QueryTemplate, stats: &Value) -> Option<Result<Value>> {
     scalar_template_spec(template).map(|spec| match spec.render {
-        ScalarRenderKind::Count => Ok(json!({
-            spec.fields[0].label: required_u64(stats, spec.fields[0].label)?
-        })),
+        ScalarRenderKind::FeasibilityPrevalence { prevalence_label } => {
+            let count = required_u64(stats, spec.fields[0].label)?;
+            let population = required_u64(stats, spec.fields[1].label)?;
+            Ok(json!({
+                spec.fields[0].label: count,
+                spec.fields[1].label: population,
+                prevalence_label: safe_rate(count as f64, population)
+            }))
+        }
         ScalarRenderKind::ComparativeDelta => {
             let left_n = required_u64(stats, spec.fields[0].label)?;
             let right_n = required_u64(stats, spec.fields[1].label)?;

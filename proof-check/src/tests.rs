@@ -688,18 +688,18 @@ fn dose_response_utility_detects_order_flip() -> Result<()> {
 }
 
 #[test]
-fn feasibility_without_denominators_is_capped_to_borderline() -> Result<()> {
+fn feasibility_payload_prevalence_is_evaluable_without_external_denominators() -> Result<()> {
     let report = make_available_report(
         QueryTemplate::CohortFeasibilityCount,
-        json!({"count": 105.0}),
-        json!({"count": 100.0}),
+        feasibility_payload(102.0, 200.0),
+        feasibility_payload(100.0, 200.0),
         json!({}),
         0.0,
         1.0,
     )?;
 
     let verdict = evaluate_utility(QueryTemplate::CohortFeasibilityCount, &report, None)?;
-    assert_eq!(verdict.status, UtilityVerdictStatus::Borderline);
+    assert_eq!(verdict.status, UtilityVerdictStatus::Preserved);
     Ok(())
 }
 
@@ -744,8 +744,8 @@ fn feasibility_context_can_be_derived_from_raw_nodes() -> Result<()> {
 fn feasibility_threshold_can_fail_hard() -> Result<()> {
     let report = make_available_report(
         QueryTemplate::CohortFeasibilityCount,
-        json!({"count": 40.0}),
-        json!({"count": 60.0}),
+        feasibility_payload(40.0, 100.0),
+        feasibility_payload(60.0, 100.0),
         json!({}),
         0.0,
         1.0,
@@ -793,8 +793,8 @@ fn consolidate_seed_status_prefers_not_preserved() {
 fn batch_exit_code_marks_borderline_as_warning() -> Result<()> {
     let compare_report = make_available_report(
         QueryTemplate::CohortFeasibilityCount,
-        json!({"count": 105.0}),
-        json!({"count": 100.0}),
+        feasibility_payload(120.0, 200.0),
+        feasibility_payload(100.0, 200.0),
         json!({}),
         0.0,
         1.0,
@@ -828,13 +828,13 @@ fn batch_exit_code_marks_borderline_as_warning() -> Result<()> {
             overall_status: AggregateBatchStatus::Borderline,
         },
         aggregate_metrics: AggregateMetricSummary {
-            primary_metric_label: "count".to_string(),
-            absolute_gap_mean: Some(5.0),
-            absolute_gap_median: Some(5.0),
-            absolute_gap_max: Some(5.0),
-            relative_gap_mean: Some(0.05),
-            relative_gap_median: Some(0.05),
-            relative_gap_max: Some(0.05),
+            primary_metric_label: "prevalence".to_string(),
+            absolute_gap_mean: Some(0.1),
+            absolute_gap_median: Some(0.1),
+            absolute_gap_max: Some(0.1),
+            relative_gap_mean: Some(0.2),
+            relative_gap_median: Some(0.2),
+            relative_gap_max: Some(0.2),
             queries_with_mixed_seed_verdicts: None,
             worst_case_verdict_counts: None,
         },
@@ -856,8 +856,8 @@ fn batch_exit_code_marks_borderline_as_warning() -> Result<()> {
 fn aggregate_status_can_be_preserved_on_evaluable_queries() -> Result<()> {
     let preserved_compare = make_available_report(
         QueryTemplate::CohortFeasibilityCount,
-        json!({"count": 100.0}),
-        json!({"count": 100.0}),
+        feasibility_payload(100.0, 200.0),
+        feasibility_payload(100.0, 200.0),
         json!({}),
         0.0,
         1.0,
@@ -1034,5 +1034,17 @@ fn make_available_report(
             None,
             &[],
         )?,
+    })
+}
+
+fn feasibility_payload(count: f64, population_in_scope: f64) -> serde_json::Value {
+    json!({
+        "count": count,
+        "population_in_scope": population_in_scope,
+        "prevalence": if population_in_scope > 0.0 {
+            Some(count / population_in_scope)
+        } else {
+            None::<f64>
+        },
     })
 }
