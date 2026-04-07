@@ -190,17 +190,27 @@ fn build_template_metrics(
             ))
         }
         QueryTemplate::ComparativeEffectivenessDelta => {
-            let primary = scalar_metric(
-                "delta",
-                required_number(released, "delta")?,
-                required_number(exact, "delta")?,
-                Some("This is the main treatment-effect estimate for the template."),
+            let primary = scalar_metric_without_relative_gap(
+                "delta_percent",
+                required_number(released, "delta_percent")?,
+                required_number(exact, "delta_percent")?,
+                Some(
+                    "This is the main relative treatment-effect estimate for the template, defined as (mean_outcome_exposed / mean_outcome_control - 1) * 100 before DP noise. Its absolute gap is the percentage-point distance between released and exact raw values.",
+                ),
             );
             let released_n_exposed = required_number(released, "n_exposed")?;
             let released_n_control = required_number(released, "n_control")?;
             let exact_n_exposed = required_number(exact, "n_exposed")?;
             let exact_n_control = required_number(exact, "n_control")?;
             let context_metrics = vec![
+                scalar_metric(
+                    "delta",
+                    required_number(released, "delta")?,
+                    required_number(exact, "delta")?,
+                    Some(
+                        "Absolute delta keeps the original outcome-unit difference between exposed and control means as supporting context.",
+                    ),
+                ),
                 scalar_metric(
                     "mean_outcome_exposed",
                     required_number(released, "mean_outcome_exposed")?,
@@ -230,9 +240,16 @@ fn build_template_metrics(
                 primary,
                 context_metrics,
                 vec![
-                    "Use delta as the primary utility metric. Then inspect exposed_share and the two arm means to decide whether differences come from arm-mix noise or from movement in the treatment effect itself.".to_string(),
-                    sign_note("delta", required_number(released, "delta")?, required_number(exact, "delta")?)
-                        .unwrap_or_else(|| "Delta could not be interpreted directionally because one side is null.".to_string()),
+                    "Use delta_percent as the primary utility metric. It is defined as (mean_outcome_exposed / mean_outcome_control - 1) * 100 before DP noise, so it is already expressed in percentage points.".to_string(),
+                    "Use absolute delta, exposed_share, and the two arm means as supporting context to understand whether movement came from effect size, arm balance, or both.".to_string(),
+                    sign_note(
+                        "delta_percent",
+                        required_number(released, "delta_percent")?,
+                        required_number(exact, "delta_percent")?,
+                    )
+                    .unwrap_or_else(|| {
+                        "delta_percent could not be interpreted directionally because one side is null.".to_string()
+                    }),
                 ],
             ))
         }
@@ -483,6 +500,17 @@ fn scalar_metric(
         relative_gap,
         note: note.map(ToString::to_string),
     }
+}
+
+fn scalar_metric_without_relative_gap(
+    name: &str,
+    released: Option<f64>,
+    exact: Option<f64>,
+    note: Option<&str>,
+) -> MetricComparison {
+    let mut metric = scalar_metric(name, released, exact, note);
+    metric.relative_gap = None;
+    metric
 }
 
 fn keyed_metric(

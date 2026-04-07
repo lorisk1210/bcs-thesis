@@ -23,6 +23,7 @@ pub fn is_count_like_key(key: &str) -> bool {
 pub fn should_noise_key(key: &str) -> bool {
     is_count_like_key(key)
         || key == "delta"
+        || key == "delta_percent"
         || key.starts_with("mean_")
         || key.starts_with("incidence_")
 }
@@ -137,10 +138,11 @@ mod tests {
             "count": 10,
             "population_in_scope": 20,
             "delta": 1.5,
+            "delta_percent": 15.0,
             "meta": {"ignored": 2, "mean_value": 3.0},
             "groups": [{"n": 2, "outcome_sum": 4.0}]
         });
-        assert_eq!(count_noised_metrics(&value), 5);
+        assert_eq!(count_noised_metrics(&value), 6);
     }
 
     #[test]
