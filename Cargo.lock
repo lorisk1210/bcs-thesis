@@ -769,6 +769,7 @@ dependencies = [
  "axum",
  "chrono",
  "clap",
+ "cli-render",
  "duckdb",
  "serde",
  "serde_urlencoded",

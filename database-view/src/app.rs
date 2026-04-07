@@ -7,6 +7,7 @@ use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::response::Html;
 use axum::routing::get;
+use cli_render::{OutputMode, render_running};
 use serde::Deserialize;
 
 use crate::db;
@@ -29,7 +30,7 @@ struct TableQuery {
     page: Option<usize>,
 }
 
-pub async fn serve(bind: SocketAddr, data_dir: PathBuf) -> Result<()> {
+pub async fn serve(bind: SocketAddr, data_dir: PathBuf, mode: OutputMode) -> Result<()> {
     let state = AppState { data_dir };
     let app = Router::new()
         .route("/", get(index))
@@ -39,9 +40,20 @@ pub async fn serve(bind: SocketAddr, data_dir: PathBuf) -> Result<()> {
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind(bind).await?;
-    println!(
-        "Database viewer running at http://{}",
-        listener.local_addr()?
+    let local_addr = listener.local_addr()?;
+    let endpoint = format!("http://localhost:{}", local_addr.port());
+    let bind_addr = local_addr.to_string();
+    print!(
+        "{}",
+        render_running(
+            mode,
+            "database-view",
+            "Running successfully",
+            &[
+                ("url", endpoint.as_str()),
+                ("bind", bind_addr.as_str()),
+            ],
+        )
     );
     axum::serve(listener, app).await?;
     Ok(())

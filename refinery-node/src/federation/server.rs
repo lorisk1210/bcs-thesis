@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
+use cli_render::{OutputMode, render_running};
 use refinery_protocol::QueryTemplate;
 use refinery_protocol::grpc::node_service_server::{NodeService, NodeServiceServer};
 use refinery_protocol::grpc::{
@@ -47,7 +48,7 @@ struct NodeGrpcService {
     state: NodeState,
 }
 
-pub async fn serve(config: NodeServerConfig) -> Result<()> {
+pub async fn serve(config: NodeServerConfig, mode: OutputMode) -> Result<()> {
     let addr: SocketAddr = config
         .bind_addr
         .parse()
@@ -67,6 +68,19 @@ pub async fn serve(config: NodeServerConfig) -> Result<()> {
         builder = builder.tls_config(tls)?;
     }
 
+    let endpoint = service.state.config.bind_addr.clone();
+    print!(
+        "{}",
+        render_running(
+            mode,
+            "refinery-node serve",
+            "Running successfully",
+            &[
+                ("bind", endpoint.as_str()),
+                ("node_id", service.state.config.node_id.as_str()),
+            ],
+        )
+    );
     builder
         .add_service(NodeServiceServer::new(service))
         .serve(addr)

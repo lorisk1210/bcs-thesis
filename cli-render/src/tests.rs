@@ -63,6 +63,32 @@ fn pretty_init_contains_ansi() {
 }
 
 #[test]
+fn plain_running_status_contains_headline_and_details() {
+    let out = render_running(
+        OutputMode::Plain,
+        "database-view",
+        "Running successfully",
+        &[("endpoint", "http://127.0.0.1:8080")],
+    );
+    assert!(out.contains("Running successfully"));
+    assert!(out.contains("endpoint: http://127.0.0.1:8080"));
+}
+
+#[test]
+fn pretty_running_status_is_framed() {
+    let out = render_running(
+        OutputMode::Pretty,
+        "refinery-node serve",
+        "Running successfully",
+        &[("bind", "127.0.0.1:50051")],
+    );
+    assert!(out.contains("\x1b["));
+    assert!(out.contains("Running successfully"));
+    assert!(out.contains('┌'));
+    assert!(out.contains('└'));
+}
+
+#[test]
 fn plain_ingest_report_shows_metrics() {
     let data = IngestReportData {
         files_scanned: 10,

@@ -5,6 +5,7 @@ mod mode;
 mod node;
 mod orchestrator;
 mod organize;
+mod service;
 
 #[cfg(test)]
 mod tests;
@@ -34,6 +35,7 @@ pub use organize::{
     render_organize_query_prompt_label, render_organize_query_selector,
     render_organize_query_templates, render_partition,
 };
+pub use service::render_running;
 
 use common::{badge, key_value, title};
 use frame::{BG_RED, RED, frame_cli_output};

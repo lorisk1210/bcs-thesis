@@ -3,6 +3,7 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use clap::Parser;
+use cli_render::resolve_output_mode;
 
 #[derive(Debug, Parser)]
 #[command(name = "database-view")]
@@ -18,5 +19,5 @@ struct Cli {
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
-    database_view::serve(cli.bind, cli.data_dir).await
+    database_view::serve(cli.bind, cli.data_dir, resolve_output_mode()).await
 }

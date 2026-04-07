@@ -13,3 +13,4 @@ serde.workspace = true
 serde_urlencoded = "0.7.1"
 tokio = { workspace = true, features = ["net"] }
 walkdir.workspace = true
+cli-render = { path = "../cli-render" }

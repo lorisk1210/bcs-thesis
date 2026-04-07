@@ -232,7 +232,8 @@ async fn run() -> Result<()> {
             tls_key,
             client_ca_cert,
         } => {
-            serve(NodeServerConfig {
+            serve(
+                NodeServerConfig {
                 node_id,
                 db_path: db,
                 input_dir,
@@ -242,7 +243,9 @@ async fn run() -> Result<()> {
                     key_path: tls_key,
                     client_ca_cert_path: client_ca_cert,
                 },
-            })
+                },
+                mode,
+            )
             .await?;
         }
     }
