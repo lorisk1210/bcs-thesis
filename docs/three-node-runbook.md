@@ -43,6 +43,8 @@ REFINERY_MIN_COHORT=25
 REFINERY_TOTAL_BUDGET=10.0
 REFINERY_MIN_PARTICIPATING_NODES=3
 REFINERY_ORCHESTRATOR_DB=data/orchestrator.duckdb
+# optional: set to true to disable ingest-time coarsening for local comparisons
+# REFINERY_DISABLE_DATA_COARSENING=true
 ```
 
 Important:
