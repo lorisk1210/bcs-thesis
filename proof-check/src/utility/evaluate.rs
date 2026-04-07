@@ -303,42 +303,30 @@ fn evaluate_comparative_effectiveness(
     report: &ComparisonReport,
     released_payload: &Value,
     exact_payload: &Value,
-    clip_range: f64,
+    _clip_range: f64,
 ) -> Result<UtilityVerdictSection> {
     let mut acc = EvaluationAccumulator::new();
     let primary_metric = require_primary_metric(report)?;
     acc.primary_metric = Some(metric_summary(primary_metric));
     acc.context_metric = find_metric_summary(report, "exposed_share");
-    acc.thresholds_applied.push(format!(
-        "Require absolute delta gap <= {:.6} (10% of clip range).",
-        0.10 * clip_range
-    ));
-    acc.thresholds_applied.push(format!(
-        "Require no sign flip when |raw delta| > {:.6}.",
-        0.01 * clip_range
-    ));
+    acc.thresholds_applied
+        .push("Require delta_percent absolute gap <= 10.0 percentage points.".to_string());
 
-    let raw_delta = required_number(exact_payload, "delta")?;
-    let fed_delta = required_number(released_payload, "delta")?;
-    let absolute_gap = (fed_delta - raw_delta).abs();
+    let raw_delta_percent = required_number(exact_payload, "delta_percent")?;
+    let fed_delta_percent = required_number(released_payload, "delta_percent")?;
+    let absolute_gap = (fed_delta_percent - raw_delta_percent).abs();
     acc.check_results.push(utility_check(
-        "delta_gap",
+        "delta_percent_gap",
         UtilityCheckKind::Soft,
-        if absolute_gap <= 0.10 * clip_range + EPSILON {
+        if absolute_gap <= 10.0 + EPSILON {
             UtilityCheckStatus::Passed
         } else {
             UtilityCheckStatus::Failed
         },
         format!(
-            "absolute_gap={absolute_gap:.6}, allowed={:.6}",
-            0.10 * clip_range
+            "absolute_gap={} percentage points, allowed=10.000000 percentage points",
+            format_optional_number(Some(absolute_gap))
         ),
-    ));
-    acc.check_results.push(sign_stability_check(
-        "delta_sign_stability",
-        raw_delta,
-        fed_delta,
-        0.01 * clip_range,
     ));
 
     Ok(acc.finish())

@@ -20,6 +20,13 @@ Goal:
 - This is mainly used to estimate whether a cohort is large enough to support follow-up analysis.
 - `count` remains useful context for minimum-cohort checks and study power.
 
+Inputs / Parameters:
+- Optional `min_age` (integer)
+- Optional `max_age` (integer)
+- Optional `gender` (string)
+- Optional `condition_codes` (string list)
+- Optional `medication_codes` (string list)
+
 ## `comparative-effectiveness-delta`
 
 What it does:
@@ -39,6 +46,15 @@ Goal:
 - Estimate whether one medication is associated with a higher or lower average outcome than another.
 - This is the template for treatment-vs-comparator effect size, not raw cohort sizing.
 
+Inputs / Parameters:
+- Required `exposed_medication_code` (string)
+- Required `control_medication_code` (string)
+- Required `outcome_observation_code` (string)
+- Optional `min_age` (integer)
+- Optional `max_age` (integer)
+- Optional `gender` (string)
+- Optional `condition_codes` (string list)
+
 ## `time-to-event-proxy`
 
 What it does:
@@ -55,6 +71,15 @@ Goal:
 - Approximate how quickly an event tends to occur after a treatment starts.
 - This is useful for timing questions such as whether an outcome appears sooner or later in the observed population.
 
+Inputs / Parameters:
+- Required `index_medication_code` (string)
+- Required `event_condition_code` (string)
+- Optional `max_days` (integer)
+- Optional `min_age` (integer)
+- Optional `max_age` (integer)
+- Optional `gender` (string)
+- Optional `condition_codes` (string list)
+
 ## `subgroup-effect-estimate`
 
 What it does:
@@ -69,6 +94,16 @@ What it returns:
 Goal:
 - Check whether the observed outcome looks different across subpopulations.
 - This is meant for heterogeneity analysis: not just whether there is an effect, but whether it changes by subgroup.
+
+Inputs / Parameters:
+- Required `medication_code` (string)
+- Required `outcome_observation_code` (string)
+- Optional `subgroup` (string, typically `gender` or `age_bucket`)
+- Optional `age_cutoffs` (integer list, used when subgrouping by age buckets)
+- Optional `min_age` (integer)
+- Optional `max_age` (integer)
+- Optional `gender` (string)
+- Optional `condition_codes` (string list)
 
 ## `dose-response-trend`
 
@@ -88,6 +123,10 @@ Goal:
 - Show whether outcome levels change as exposure frequency increases.
 - This is intended to capture a simple dose- or intensity-response pattern rather than a formal causal estimate.
 
+Inputs / Parameters:
+- Required `medication_code` (string)
+- Required `outcome_observation_code` (string)
+
 ## `ae-incidence-signal-proxy`
 
 What it does:
@@ -104,6 +143,11 @@ What it returns:
 Goal:
 - Flag whether a medication may be associated with a higher adverse-event rate than a comparator.
 - This is a safety-signal screen, not a full pharmacovigilance or causal adjudication workflow.
+
+Inputs / Parameters:
+- Required `exposed_medication_code` (string)
+- Required `control_medication_code` (string)
+- Required `ae_condition_code` (string)
 
 ## `ddi-signal-proxy`
 
@@ -122,6 +166,11 @@ What it returns:
 Goal:
 - Detect whether adding medication B to medication A is associated with a higher adverse-event rate.
 - This is a drug-drug interaction screening template for identifying possible combination-risk signals.
+
+Inputs / Parameters:
+- Required `medication_a_code` (string)
+- Required `medication_b_code` (string)
+- Required `ae_condition_code` (string)
 
 ## Notes
 

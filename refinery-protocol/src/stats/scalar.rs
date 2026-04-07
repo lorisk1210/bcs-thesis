@@ -237,6 +237,12 @@ pub(crate) fn render_result(template: QueryTemplate, stats: &Value) -> Option<Re
                 "delta": match (left_mean, right_mean) {
                     (Some(left), Some(right)) => Some(left - right),
                     _ => None,
+                },
+                "delta_percent": match (left_mean, right_mean) {
+                    (Some(left), Some(right)) if right.abs() > f64::EPSILON => {
+                        Some(((left / right) - 1.0) * 100.0)
+                    }
+                    _ => None,
                 }
             }))
         }
