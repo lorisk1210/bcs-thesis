@@ -58,19 +58,21 @@ pub fn render_index(page: &DatabaseListPage) -> String {
             r#"
             <section class="panel">
               <h2>DuckDB files in <code>{}</code></h2>
-              <table>
-                <thead>
-                  <tr>
-                    <th>Database</th>
-                    <th>Type</th>
-                    <th>Size</th>
-                    <th>Modified</th>
-                    <th>Relations</th>
-                    <th>Status</th>
-                  </tr>
-                </thead>
-                <tbody>{rows}</tbody>
-              </table>
+              <div class="table-scroll">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Database</th>
+                      <th>Type</th>
+                      <th>Size</th>
+                      <th>Modified</th>
+                      <th>Relations</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>{rows}</tbody>
+                </table>
+              </div>
             </section>
             "#,
             escape_html(&page.data_dir_display)
@@ -144,18 +146,20 @@ pub fn render_database_overview(page: &DatabaseOverview) -> String {
         <section class="cards">{cards}</section>
         <section class="panel">
           <h2>Relations</h2>
-          <table>
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Kind</th>
-                <th>Category</th>
-                <th>Rows</th>
-                <th>Columns</th>
-              </tr>
-            </thead>
-            <tbody>{relation_rows}</tbody>
-          </table>
+          <div class="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Kind</th>
+                  <th>Category</th>
+                  <th>Rows</th>
+                  <th>Columns</th>
+                </tr>
+              </thead>
+              <tbody>{relation_rows}</tbody>
+            </table>
+          </div>
         </section>
         "#,
         file_name = escape_html(&page.file_name),
@@ -260,28 +264,32 @@ pub fn render_table_page(page: &TablePage) -> String {
         </section>
         <section class="panel">
           <h2>Schema</h2>
-          <table>
-            <thead>
-              <tr>
-                <th>Column</th>
-                <th>Type</th>
-                <th>Nullable</th>
-              </tr>
-            </thead>
-            <tbody>{schema_rows}</tbody>
-          </table>
+          <div class="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Column</th>
+                  <th>Type</th>
+                  <th>Nullable</th>
+                </tr>
+              </thead>
+              <tbody>{schema_rows}</tbody>
+            </table>
+          </div>
         </section>
         <section class="panel">
           <div class="panel-head">
             <h2>Rows</h2>
             <div class="muted">Page {page_number} · {page_size} rows per page</div>
           </div>
-          <table>
-            <thead>
-              <tr>{header_cells}</tr>
-            </thead>
-            <tbody>{row_cells}</tbody>
-          </table>
+          <div class="table-scroll">
+            <table class="data-table">
+              <thead>
+                <tr>{header_cells}</tr>
+              </thead>
+              <tbody>{row_cells}</tbody>
+            </table>
+          </div>
           <div class="pager">{previous_link}{next_link}</div>
         </section>
         "#,
@@ -424,15 +432,29 @@ fn render_page(title: &str, subtitle: &str, body: &str) -> String {
         color: #7e2316;
       }}
       table {{
-        width: 100%;
         border-collapse: collapse;
         font-size: 0.95rem;
+        min-width: 100%;
+      }}
+      .table-scroll {{
+        overflow-x: auto;
+        overflow-y: hidden;
+        -webkit-overflow-scrolling: touch;
+        padding-bottom: 4px;
+      }}
+      .table-scroll > table {{
+        width: max-content;
+      }}
+      .data-table td,
+      .data-table th {{
+        white-space: nowrap;
       }}
       th, td {{
         text-align: left;
         padding: 10px 12px;
         vertical-align: top;
         border-top: 1px solid var(--line);
+        overflow-wrap: anywhere;
       }}
       thead th {{
         border-top: none;
