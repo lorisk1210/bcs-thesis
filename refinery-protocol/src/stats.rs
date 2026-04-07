@@ -417,6 +417,36 @@ mod tests {
     }
 
     #[test]
+    fn comparative_effectiveness_delta_is_rendered_as_relative_lift() {
+        let aggregated = LocalStatistics::from_stats_value(
+            QueryTemplate::ComparativeEffectivenessDelta,
+            &json!({}),
+            json!({
+                "n_exposed": 2,
+                "n_control": 4,
+                "outcome_sum_exposed": 30.0,
+                "outcome_sum_control": 40.0
+            }),
+            6,
+        )
+        .expect("local stats should encode");
+
+        let rendered = render_query_result(
+            &aggregated,
+            ClipBounds {
+                min: 0.0,
+                max: 100.0,
+            },
+        )
+        .expect("result should render");
+
+        assert_eq!(rendered.raw_result["mean_outcome_exposed"], json!(15.0));
+        assert_eq!(rendered.raw_result["mean_outcome_control"], json!(10.0));
+        assert_eq!(rendered.raw_result["delta"], json!(5.0));
+        assert_eq!(rendered.raw_result["delta_percent"], json!(50.0));
+    }
+
+    #[test]
     fn canonical_round_trip_supports_all_templates() {
         let cases = vec![
             (

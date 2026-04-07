@@ -270,8 +270,13 @@ fn release_vs_exact_raw_compares_released_payload_to_exact_raw_result() {
     };
 
     let section =
-        build_release_vs_exact_raw_section(Some(&live_release), Some(&exact_baseline), None, &[])
-            .expect("release-vs-raw section should build");
+        build_release_vs_exact_raw_section(
+            Some(&live_release),
+            Some(&exact_baseline),
+            None,
+            &[],
+        )
+        .expect("release-vs-raw section should build");
 
     assert_eq!(section.status, AnalysisStatus::Available);
     assert_eq!(
@@ -293,7 +298,8 @@ fn template_metrics_for_comparative_effectiveness_include_primary_and_context_me
         reason: "released".to_string(),
         release_mode: refinery_protocol::ReleaseMode::Seeded,
         released_result: Some(json!({
-            "delta": 0.7745871303011584,
+            "delta": 2.268875665573033,
+            "delta_percent": 7.745871303011584,
             "mean_outcome_control": 29.39140652545,
             "mean_outcome_exposed": 31.660282191023033,
             "n_control": 70.91503057097873,
@@ -304,6 +310,7 @@ fn template_metrics_for_comparative_effectiveness_include_primary_and_context_me
         template_name: "comparative_effectiveness_delta".to_string(),
         raw_result: json!({
             "delta": 0.3081133090981574,
+            "delta_percent": 1.0762493716744267,
             "mean_outcome_control": 28.627956978520547,
             "mean_outcome_exposed": 28.936070287618705,
             "n_control": 73,
@@ -324,7 +331,14 @@ fn template_metrics_for_comparative_effectiveness_include_primary_and_context_me
 
     assert_eq!(section.status, AnalysisStatus::Available);
     let primary = section.primary_metric.expect("primary metric should exist");
-    assert_eq!(primary.name, "delta");
+    assert_eq!(primary.name, "delta_percent");
+    assert!(primary.relative_gap.is_none());
+    assert!(
+        section
+            .context_metrics
+            .iter()
+            .any(|metric| metric.name == "delta")
+    );
     assert!(
         section
             .context_metrics
@@ -630,6 +644,7 @@ fn comparative_effectiveness_utility_can_be_preserved() -> Result<()> {
         QueryTemplate::ComparativeEffectivenessDelta,
         json!({
             "delta": 1.02,
+            "delta_percent": 51.0,
             "mean_outcome_exposed": 3.02,
             "mean_outcome_control": 2.0,
             "n_exposed": 100.0,
@@ -637,6 +652,7 @@ fn comparative_effectiveness_utility_can_be_preserved() -> Result<()> {
         }),
         json!({
             "delta": 1.0,
+            "delta_percent": 50.0,
             "mean_outcome_exposed": 3.0,
             "mean_outcome_control": 2.0,
             "n_exposed": 100.0,
