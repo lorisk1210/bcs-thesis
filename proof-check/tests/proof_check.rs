@@ -11,22 +11,7 @@ use refinery_orchestrator::config::GlobalPrivacyConfig;
 use refinery_protocol::{QueryResult, QueryTemplate};
 use serde_json::json;
 
-use crate::baseline::{
-    PreparedDirectoryMetadata, PreparedNodeMetadata, prepared_metadata_path, remove_if_exists,
-    safe_node_file_stem, write_prepared_metadata,
-};
-use crate::batch::{build_aggregate_utility_summary, discover_query_files};
-use crate::compare::{
-    EXACT_POST_RELEASE_LABEL, LIVE_POST_RELEASE_LABEL, build_final_release_utility_section,
-    checker_job_id, classify_distortion_expectation, release_result_for_proof_check,
-    serialize_payload,
-};
-use crate::diff::diff_payloads;
-use crate::insights::{build_release_vs_exact_raw_section, build_template_metrics_section};
-use crate::utility::{
-    QueryUtilityContext, consolidate_seed_status, evaluate_utility, resolve_query_utility_context,
-};
-use crate::*;
+use proof_check::*;
 
 #[test]
 fn raw_node_spec_requires_equals() {

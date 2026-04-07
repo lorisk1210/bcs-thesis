@@ -401,7 +401,7 @@ fn pick_count(counts: &HashMap<&str, u64>, candidates: &[&str]) -> String {
         .to_string()
 }
 
-fn detect_database_kind<'a>(relation_names: impl IntoIterator<Item = &'a str>) -> DatabaseKind {
+pub fn detect_database_kind<'a>(relation_names: impl IntoIterator<Item = &'a str>) -> DatabaseKind {
     let names: Vec<&str> = relation_names.into_iter().collect();
     if names
         .iter()
@@ -426,7 +426,7 @@ fn detect_database_kind<'a>(relation_names: impl IntoIterator<Item = &'a str>) -
     DatabaseKind::Unknown
 }
 
-fn categorize_relation(relation_name: &str) -> TableCategory {
+pub fn categorize_relation(relation_name: &str) -> TableCategory {
     if relation_name.starts_with("bronze_") {
         TableCategory::Bronze
     } else if relation_name.starts_with("feature_") {
@@ -533,7 +533,7 @@ fn strip_to_relative(root: &Path, absolute_path: &Path) -> ViewerResult<String> 
     Ok(display_path(relative))
 }
 
-fn quote_identifier(identifier: &str) -> String {
+pub fn quote_identifier(identifier: &str) -> String {
     format!("\"{}\"", identifier.replace('"', "\"\""))
 }
 
@@ -638,46 +638,4 @@ struct ResolvedDatabase {
     file_name: String,
     size_bytes: u64,
     modified_at: Option<DateTime<Local>>,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{categorize_relation, detect_database_kind, quote_identifier};
-    use crate::models::{DatabaseKind, TableCategory};
-
-    #[test]
-    fn quote_identifier_escapes_embedded_quotes() {
-        assert_eq!(quote_identifier("bad\"name"), "\"bad\"\"name\"");
-    }
-
-    #[test]
-    fn detect_node_database_from_core_tables() {
-        assert_eq!(
-            detect_database_kind(["patient_dim", "condition_fact"]),
-            DatabaseKind::RefineryNode
-        );
-    }
-
-    #[test]
-    fn detect_orchestrator_database_from_ledger_tables() {
-        assert_eq!(
-            detect_database_kind(["federated_job_ledger"]),
-            DatabaseKind::OrchestratorLedger
-        );
-    }
-
-    #[test]
-    fn categorize_known_relation_groups() {
-        assert_eq!(categorize_relation("bronze_patient"), TableCategory::Bronze);
-        assert_eq!(categorize_relation("condition_fact"), TableCategory::Core);
-        assert_eq!(
-            categorize_relation("feature_patient_summary"),
-            TableCategory::Feature
-        );
-        assert_eq!(categorize_relation("query_audit"), TableCategory::Audit);
-        assert_eq!(
-            categorize_relation("federated_release_ledger"),
-            TableCategory::Ledger
-        );
-    }
 }

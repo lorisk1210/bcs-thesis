@@ -308,7 +308,7 @@ pub(crate) fn run_dual_ingest(
     Ok(report)
 }
 
-pub(crate) fn run_fresh_ingest_with_files(
+pub fn run_fresh_ingest_with_files(
     conn: &mut Connection,
     opts: &IngestOptions,
     files: &[PathBuf],

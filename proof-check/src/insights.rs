@@ -12,7 +12,7 @@ use crate::{
     TemplateMetricsSection,
 };
 
-pub(crate) fn build_release_vs_exact_raw_section(
+pub fn build_release_vs_exact_raw_section(
     live_release: Option<&GlobalReleaseResult>,
     exact_baseline: Option<&QueryResult>,
     live_error: Option<&str>,
@@ -95,7 +95,7 @@ pub(crate) fn build_release_vs_exact_raw_section(
     }
 }
 
-pub(crate) fn build_template_metrics_section(
+pub fn build_template_metrics_section(
     template: QueryTemplate,
     live_release: Option<&GlobalReleaseResult>,
     exact_baseline: Option<&QueryResult>,

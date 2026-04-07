@@ -24,7 +24,7 @@ pub(crate) fn title(mode: OutputMode, text: &str) -> String {
     }
 }
 
-pub(crate) fn key_value(mode: OutputMode, key: &str, value: &str) -> String {
+pub fn key_value(mode: OutputMode, key: &str, value: &str) -> String {
     match mode {
         OutputMode::Pretty => format!("    {DARK_GRAY}•{RESET} {DIM}{key}:{RESET} {value}"),
         OutputMode::Plain => format!("  {key}: {value}"),

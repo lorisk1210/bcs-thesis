@@ -215,31 +215,3 @@ fn table_has_column(conn: &Connection, table_name: &str, column_name: &str) -> R
     )?;
     Ok(count > 0)
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn init_ledger_schema_creates_release_audit_columns() {
-        let conn = Connection::open_in_memory().expect("in-memory duckdb should open");
-        init_ledger_schema(&conn).expect("ledger schema should initialize");
-
-        assert!(
-            table_has_column(&conn, "federated_job_ledger", "released_result_json")
-                .expect("column lookup should work")
-        );
-        assert!(
-            table_has_column(&conn, "federated_job_ledger", "release_mode")
-                .expect("column lookup should work")
-        );
-        assert!(
-            table_has_column(&conn, "federated_release_ledger", "released_result_json")
-                .expect("column lookup should work")
-        );
-        assert!(
-            table_has_column(&conn, "federated_release_ledger", "release_mode")
-                .expect("column lookup should work")
-        );
-    }
-}

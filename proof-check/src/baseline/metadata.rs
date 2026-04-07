@@ -5,18 +5,18 @@ use anyhow::{Context, Result, anyhow};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct PreparedDirectoryMetadata {
-    pub(crate) version: u32,
-    pub(crate) as_of_date: String,
-    pub(crate) nodes: Vec<PreparedNodeMetadata>,
+pub struct PreparedDirectoryMetadata {
+    pub version: u32,
+    pub as_of_date: String,
+    pub nodes: Vec<PreparedNodeMetadata>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct PreparedNodeMetadata {
-    pub(crate) node_id: String,
-    pub(crate) raw_input_dir: String,
-    pub(crate) coarsened_db_path: String,
-    pub(crate) exact_db_path: String,
+pub struct PreparedNodeMetadata {
+    pub node_id: String,
+    pub raw_input_dir: String,
+    pub coarsened_db_path: String,
+    pub exact_db_path: String,
 }
 
 pub(crate) fn load_prepared_metadata(prepared_dir: &Path) -> Result<PreparedDirectoryMetadata> {
@@ -42,7 +42,7 @@ pub(crate) fn load_prepared_metadata(prepared_dir: &Path) -> Result<PreparedDire
     Ok(metadata)
 }
 
-pub(crate) fn write_prepared_metadata(
+pub fn write_prepared_metadata(
     prepared_dir: &Path,
     metadata: &PreparedDirectoryMetadata,
 ) -> Result<()> {
@@ -57,11 +57,11 @@ pub(crate) fn write_prepared_metadata(
     Ok(())
 }
 
-pub(crate) fn prepared_metadata_path(prepared_dir: &Path) -> PathBuf {
+pub fn prepared_metadata_path(prepared_dir: &Path) -> PathBuf {
     prepared_dir.join("metadata.json")
 }
 
-pub(crate) fn remove_if_exists(path: &Path) -> Result<()> {
+pub fn remove_if_exists(path: &Path) -> Result<()> {
     if path.exists() {
         fs::remove_file(path)
             .with_context(|| format!("failed to remove existing file {}", path.display()))?;
@@ -69,7 +69,7 @@ pub(crate) fn remove_if_exists(path: &Path) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn safe_node_file_stem(node_id: &str) -> String {
+pub fn safe_node_file_stem(node_id: &str) -> String {
     let value = node_id
         .chars()
         .map(|ch| {

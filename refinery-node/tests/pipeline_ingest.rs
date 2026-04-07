@@ -5,16 +5,13 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use anyhow::Result;
 use chrono::NaiveDate;
 use duckdb::Connection;
-use serde_json::json;
-
-use crate::{db, materialize, normalize};
-
-use super::{
-    IngestOptions, IngestReport, TransformMode,
-    fresh::run_fresh_ingest_with_files,
-    incremental::run_incremental_ingest_with_files,
-    shared::{Pseudonymizer, discover_input_files},
+use refinery_node::db;
+use refinery_node::ingest::{
+    IngestOptions, IngestReport, Pseudonymizer, TransformMode, discover_input_files,
+    run_fresh_ingest_with_files, run_incremental_ingest_with_files,
 };
+use refinery_node::{materialize, normalize};
+use serde_json::json;
 
 const PIPELINE_TABLES: &[&str] = &[
     "bronze_patient",

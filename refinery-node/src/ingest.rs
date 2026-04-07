@@ -9,8 +9,6 @@ mod bronze;
 mod fresh;
 mod incremental;
 mod shared;
-#[cfg(test)]
-mod tests;
 
 #[derive(Debug, Clone)]
 pub struct IngestOptions {
@@ -35,6 +33,10 @@ pub enum TransformMode {
     Coarsened,
     Exact,
 }
+
+pub use fresh::run_fresh_ingest_with_files;
+pub use incremental::run_incremental_ingest_with_files;
+pub use shared::{Pseudonymizer, discover_input_files};
 
 pub fn run_ingest(conn: &mut Connection, opts: &IngestOptions) -> Result<IngestReport> {
     let files = shared::discover_input_files(&opts.input_dir, opts.max_files)?;

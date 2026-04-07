@@ -15,20 +15,20 @@ use super::{
     bronze::{BronzeRecord, extract_bronze_record},
 };
 
-pub(crate) struct Pseudonymizer {
+pub struct Pseudonymizer {
     secret: String,
     cache: HashMap<String, String>,
 }
 
 impl Pseudonymizer {
-    pub(crate) fn new(secret: impl Into<String>) -> Self {
+    pub fn new(secret: impl Into<String>) -> Self {
         Self {
             secret: secret.into(),
             cache: HashMap::new(),
         }
     }
 
-    pub(crate) fn pseudonymize(&mut self, raw_id: &str) -> Result<String> {
+    pub fn pseudonymize(&mut self, raw_id: &str) -> Result<String> {
         if let Some(existing) = self.cache.get(raw_id) {
             return Ok(existing.clone());
         }
@@ -39,8 +39,7 @@ impl Pseudonymizer {
         Ok(pseudonymized)
     }
 
-    #[cfg(test)]
-    pub(crate) fn cache_len(&self) -> usize {
+    pub fn cache_len(&self) -> usize {
         self.cache.len()
     }
 }
@@ -58,7 +57,7 @@ pub(crate) trait RecordWriter {
     fn flush(&mut self) -> Result<()>;
 }
 
-pub(crate) fn discover_input_files(
+pub fn discover_input_files(
     input_dir: &Path,
     max_files: Option<usize>,
 ) -> Result<Vec<PathBuf>> {
