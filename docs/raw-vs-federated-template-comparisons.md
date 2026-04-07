@@ -95,16 +95,20 @@ Released values:
 
 Best comparison:
 
-- Compare the effect estimate directly:
-  - `raw_delta` vs `fed_delta`
+- Compare the relative effect estimate directly:
+  - `raw_delta_percent` vs `fed_delta_percent`
+- Compute it the same way on both sides:
+  - `delta_percent = (delta / mean_outcome_control) * 100`
 
 Why this is the right comparison:
 
-- `delta` is already scale-free because it compares arm means instead of raw totals.
-- It is the main answer the template is trying to produce.
+- `delta_percent` scales the arm difference by the control-arm mean, making results easier to compare across different outcome units and baseline levels.
+- It is the key comparison metric for analyst-facing raw-vs-federated interpretation.
 
 Useful secondary comparisons:
 
+- Absolute delta:
+  - `raw_delta` vs `fed_delta`
 - Arm-specific means:
   - `raw_mean_outcome_exposed` vs `fed_mean_outcome_exposed`
   - `raw_mean_outcome_control` vs `fed_mean_outcome_control`
@@ -114,7 +118,7 @@ Useful secondary comparisons:
 
 Interpretation:
 
-- If the delta differs, the next question is whether the difference comes from treatment effect behavior or just from a different arm composition.
+- If `delta_percent` differs, the next question is whether the difference comes from treatment effect behavior or just from a different arm composition.
 - The arm mix is especially useful when one site overrepresents exposed or control patients.
 
 What not to compare directly:
@@ -125,15 +129,15 @@ Utility-preserving deviation:
 
 - The result keeps value if the treatment effect conclusion does not change.
 - A practical rule is:
-  - absolute error in `delta` within 10% of the clip range
-  - and no sign flip unless the raw `delta` is already near zero
-- If the raw effect is small, require a stronger stability check:
-  - `|fed_delta - raw_delta| < 0.25 * |raw_delta|` only when `raw_delta` is materially different from zero
+  - absolute error in `delta_percent` within 1.5 percentage points
+  - and no sign flip unless the raw `delta_percent` is already near zero
+- If the raw relative effect is small, require a stronger stability check:
+  - `|fed_delta_percent - raw_delta_percent| < 0.25 * |raw_delta_percent|` only when `raw_delta_percent` is materially different from zero
 
 Why this still has value:
 
 - Comparative effectiveness is useful when it preserves whether exposed performs better, worse, or similarly to control.
-- If the delta changes slightly but the direction and rough effect size class remain the same, the result still supports the same interpretation.
+- If `delta_percent` changes slightly but the direction and rough effect size class remain the same, the result still supports the same interpretation.
 
 ### 3. `time_to_event_proxy`
 
@@ -391,7 +395,7 @@ If these comparisons need to be reported consistently across templates, use this
 Examples:
 
 - Cohort feasibility: primary metric = prevalence; context metric = contribution share
-- Comparative effectiveness: primary metric = delta; context metric = exposed share
+- Comparative effectiveness: primary metric = delta_percent; context metric = exposed share
 - Time to event: primary metric = mean days to event; context metric = event share
 - Subgroup effect: primary metric = per-group mean outcome; context metric = per-group share
 - Dose response: primary metric = trend span or bucket means; context metric = bucket share
@@ -401,7 +405,7 @@ Examples:
 ## Bottom line
 
 - `cohort_feasibility_count`: compare prevalence
-- `comparative_effectiveness_delta`: compare delta
+- `comparative_effectiveness_delta`: compare delta_percent
 - `time_to_event_proxy`: compare mean days to event
 - `subgroup_effect_estimate`: compare subgroup means plus subgroup shares
 - `dose_response_trend`: compare bucket means plus trend shape
