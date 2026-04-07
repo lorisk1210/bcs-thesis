@@ -47,7 +47,8 @@ pub fn run_ingest(
     input_dir: PathBuf,
     max_files: Option<usize>,
 ) -> Result<IngestReport> {
-    run_ingest_with_mode(conn, input_dir, max_files, TransformMode::Coarsened)
+    let transform_mode = config::load_ingest_transform_mode()?;
+    run_ingest_with_mode(conn, input_dir, max_files, transform_mode)
 }
 
 // Runs ingestion using an explicit transform mode.
@@ -79,11 +80,12 @@ pub fn run_pipeline(
     input_dir: &Path,
     max_files: Option<usize>,
 ) -> Result<PipelineRunSummary> {
+    let transform_mode = config::load_ingest_transform_mode()?;
     run_pipeline_with_options(
         db_path,
         input_dir,
         max_files,
-        TransformMode::Coarsened,
+        transform_mode,
         Utc::now().date_naive(),
     )
 }
