@@ -5,7 +5,7 @@ members = [
     "refinery-node",
     "organize",
     "refinery-orchestrator",
-    "refinery-protocol",
+    "refinery-protocol", "database-view",
 ]
 resolver = "2"
 
