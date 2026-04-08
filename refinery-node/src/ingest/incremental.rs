@@ -259,7 +259,7 @@ impl RecordWriter for IncrementalWriter<'_> {
     }
 }
 
-pub(crate) fn run_incremental_ingest_with_files(
+pub fn run_incremental_ingest_with_files(
     conn: &mut Connection,
     opts: &IngestOptions,
     files: &[PathBuf],

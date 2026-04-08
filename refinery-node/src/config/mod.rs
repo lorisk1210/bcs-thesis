@@ -16,7 +16,7 @@ mod ingest_settings;
 
 use crate::privacy::PrivacyConfig;
 
-pub use ingest_settings::load_ingest_transform_mode;
+pub use ingest_settings::{load_ingest_transform_mode, resolve_ingest_transform_mode};
 
 // SMPC configuration derived from environment variables.
 #[derive(Debug, Clone)]

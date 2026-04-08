@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Result, anyhow};
 
-pub(crate) fn discover_query_files(dir: &Path) -> Result<Vec<PathBuf>> {
+pub fn discover_query_files(dir: &Path) -> Result<Vec<PathBuf>> {
     if !dir.exists() {
         return Err(anyhow!("queries_dir does not exist: {}", dir.display()));
     }

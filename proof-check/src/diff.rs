@@ -4,7 +4,7 @@ use serde_json::{Map, Value, json};
 
 use crate::DiffEntry;
 
-pub(crate) fn diff_payloads(left: &Value, right: &Value) -> Vec<DiffEntry> {
+pub fn diff_payloads(left: &Value, right: &Value) -> Vec<DiffEntry> {
     let mut diffs = Vec::new();
     compare_json("$", left, right, &mut diffs);
     diffs

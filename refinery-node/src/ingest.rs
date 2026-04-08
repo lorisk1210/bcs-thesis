@@ -9,8 +9,6 @@ mod bronze;
 mod fresh;
 mod incremental;
 mod shared;
-#[cfg(test)]
-mod tests;
 
 #[derive(Debug, Clone)]
 pub struct IngestOptions {
@@ -59,4 +57,24 @@ pub fn run_dual_ingest(
         node_secret,
         max_files,
     )
+}
+
+pub fn discover_input_files(input_dir: &Path, max_files: Option<usize>) -> Result<Vec<PathBuf>> {
+    shared::discover_input_files(input_dir, max_files)
+}
+
+pub fn run_fresh_ingest(
+    conn: &mut Connection,
+    opts: &IngestOptions,
+    files: &[PathBuf],
+) -> Result<IngestReport> {
+    fresh::run_fresh_ingest_with_files(conn, opts, files)
+}
+
+pub fn run_incremental_ingest(
+    conn: &mut Connection,
+    opts: &IngestOptions,
+    files: &[PathBuf],
+) -> Result<IngestReport> {
+    incremental::run_incremental_ingest_with_files(conn, opts, files)
 }

@@ -38,11 +38,6 @@ impl Pseudonymizer {
         self.cache.insert(raw_id.to_string(), pseudonymized.clone());
         Ok(pseudonymized)
     }
-
-    #[cfg(test)]
-    pub(crate) fn cache_len(&self) -> usize {
-        self.cache.len()
-    }
 }
 
 pub(crate) trait RecordWriter {

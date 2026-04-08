@@ -16,6 +16,3 @@ pub(crate) use resolve::{
     PreparedNode, load_nodes_from_metadata, load_nodes_from_raw, prepare_nodes,
     prepare_nodes_from_metadata,
 };
-
-#[cfg(test)]
-pub(crate) use metadata::prepared_metadata_path;

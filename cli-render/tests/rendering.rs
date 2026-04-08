@@ -1,23 +1,7 @@
 use std::collections::BTreeMap;
 use std::env;
 
-use crate::check::{
-    CheckAggregateMetricData, CheckAggregateUtilityData, CheckBatchQueryData, CheckBatchReportData,
-    CheckCompareReportData, CheckPayloadComparisonData, CheckPrepareReportData,
-    CheckPreparedNodeData, CheckSectionData, CheckSeedRobustnessData, CheckSeedVerdictData,
-    CheckTemplateMetricsData, CheckUtilityCheckData, CheckUtilityMetricData,
-    CheckUtilityVerdictData,
-};
-use crate::common::key_value;
-use crate::frame::{display_len_ignore_ansi, wrap_ansi_line, wrap_lines_for_frame};
-use crate::node::{
-    IngestReportData, InspectTableData, NodeQueryRejectedData, NodeQueryReleasedData,
-};
-use crate::orchestrator::{
-    NodeStatusData, OrchestratorQueryRejectedData, OrchestratorQueryReleasedData,
-};
-use crate::organize::{OrganizeQueryCreatedData, OrganizeQueryTemplatesData, PartitionData};
-use crate::*;
+use cli_render::*;
 
 #[test]
 fn resolve_mode_defaults_to_pretty() {

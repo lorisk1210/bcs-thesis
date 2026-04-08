@@ -5,16 +5,13 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use anyhow::Result;
 use chrono::NaiveDate;
 use duckdb::Connection;
-use serde_json::json;
-
-use crate::{db, materialize, normalize};
-
-use super::{
-    IngestOptions, IngestReport, TransformMode,
-    fresh::run_fresh_ingest_with_files,
-    incremental::run_incremental_ingest_with_files,
-    shared::{Pseudonymizer, discover_input_files},
+use refinery_node::fhir::pseudonymize_patient_id;
+use refinery_node::ingest::{
+    IngestOptions, IngestReport, TransformMode, discover_input_files, run_fresh_ingest,
+    run_incremental_ingest,
 };
+use refinery_node::{db, materialize, normalize};
+use serde_json::json;
 
 const PIPELINE_TABLES: &[&str] = &[
     "bronze_patient",
@@ -54,8 +51,7 @@ fn fresh_ingest_matches_incremental_reference() -> Result<()> {
 
         let mut reference_conn = db::open_connection(&reference_db)?;
         db::init_schema(&reference_conn)?;
-        let reference_report =
-            run_incremental_ingest_with_files(&mut reference_conn, &opts, &files)?;
+        let reference_report = run_incremental_ingest(&mut reference_conn, &opts, &files)?;
         normalize::run_normalize(&reference_conn)?;
         materialize::run_materialize_as_of(
             &reference_conn,
@@ -64,7 +60,7 @@ fn fresh_ingest_matches_incremental_reference() -> Result<()> {
 
         let mut fresh_conn = db::open_connection(&fresh_db)?;
         db::init_schema(&fresh_conn)?;
-        let fresh_report = run_fresh_ingest_with_files(&mut fresh_conn, &opts, &files)?;
+        let fresh_report = run_fresh_ingest(&mut fresh_conn, &opts, &files)?;
         normalize::run_normalize(&fresh_conn)?;
         materialize::run_materialize_as_of(
             &fresh_conn,
@@ -78,19 +74,14 @@ fn fresh_ingest_matches_incremental_reference() -> Result<()> {
 }
 
 #[test]
-fn pseudonymizer_caches_and_rejects_empty_ids() {
-    let mut pseudonymizer = Pseudonymizer::new("unit-test-secret");
-    let first = pseudonymizer
-        .pseudonymize("patient-1")
+fn pseudonymization_is_deterministic_and_rejects_empty_ids() {
+    let first = pseudonymize_patient_id("unit-test-secret", "patient-1")
         .expect("first pseudonymization should succeed");
-    let second = pseudonymizer
-        .pseudonymize("patient-1")
-        .expect("cached pseudonymization should succeed");
+    let second = pseudonymize_patient_id("unit-test-secret", "patient-1")
+        .expect("second pseudonymization should succeed");
 
     assert_eq!(first, second);
-    assert_eq!(pseudonymizer.cache_len(), 1);
-    assert!(pseudonymizer.pseudonymize("").is_err());
-    assert_eq!(pseudonymizer.cache_len(), 1);
+    assert!(pseudonymize_patient_id("unit-test-secret", "").is_none());
 }
 
 fn assert_reports_match(left: &IngestReport, right: &IngestReport) {
