@@ -1,5 +1,5 @@
 // src/main.rs
-// CLI entrypoint for proof-check comparisons.
+// CLI entrypoint for proof-value comparisons.
 
 use std::path::PathBuf;
 use std::process;
@@ -13,7 +13,7 @@ use cli_render::{
 use refinery_orchestrator::client::ClientTlsOptions;
 use refinery_protocol::{ClipBounds, QueryTemplate};
 
-use proof_check::{
+use proof_value::{
     BatchRequest, CompareMode, CompareRequest, PrepareRequest, batch_exit_code, batch_report_data,
     compare_report_data, default_as_of_date, parse_raw_node_spec, prepare_baselines,
     prepare_report_data, run_batch, run_compare,
@@ -109,7 +109,7 @@ enum Commands {
 }
 
 #[derive(Debug, Parser)]
-#[command(name = "proof-check")]
+#[command(name = "proof-value")]
 #[command(version)]
 #[command(about = "Compare live federated results against coarsened and exact raw-data baselines")]
 struct Cli {
@@ -124,7 +124,7 @@ async fn main() {
     let code = match run().await {
         Ok(code) => code,
         Err(err) => {
-            eprint!("{}", render_error(mode, "proof-check", &format!("{err:#}")));
+            eprint!("{}", render_error(mode, "proof-value", &format!("{err:#}")));
             3
         }
     };
@@ -284,7 +284,7 @@ async fn handle_compare(
         }
     }
 
-    Ok(proof_check::exit_code(&report))
+    Ok(proof_value::exit_code(&report))
 }
 
 async fn handle_batch(
@@ -370,7 +370,7 @@ fn validate_compare_inputs(
     Ok(())
 }
 
-fn parse_raw_nodes(raw_node: &[String]) -> Result<Vec<proof_check::RawNodeInput>> {
+fn parse_raw_nodes(raw_node: &[String]) -> Result<Vec<proof_value::RawNodeInput>> {
     raw_node
         .iter()
         .map(|spec| parse_raw_node_spec(spec))

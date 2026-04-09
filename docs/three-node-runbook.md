@@ -8,10 +8,10 @@ It covers:
 - confirming the shared `.env` settings
 - generating the split node datasets with `organize`
 - rebuilding all three node databases
-- optionally rebuilding `proof-check` prepared baselines
+- optionally rebuilding `proof-value` prepared baselines
 - starting three local node servers with different SMPC private keys
 - running orchestrator status and a federated query
-- running the full `proof-check` comparison
+- running the full `proof-value` comparison
 
 ## 1. Build the workspace
 
@@ -27,7 +27,7 @@ If you only want to build the binaries used below:
 cargo build -p refinery-node --release
 cargo build -p organize --release
 cargo build -p refinery-orchestrator --release
-cargo build -p proof-check --release
+cargo build -p proof-value --release
 ```
 
 ## 2. Confirm the shared environment
@@ -138,10 +138,10 @@ cargo run -p refinery-node --release -- inspect --db data/node-c.duckdb --top 10
 
 ## 8. Rebuild prepared checker baselines
 
-Run this if you want a fresh `proof-check` prepared baseline directory:
+Run this if you want a fresh `proof-value` prepared baseline directory:
 
 ```bash
-cargo run -p proof-check --release -- prepare \
+cargo run -p proof-value --release -- prepare \
   --prepared-dir data/check-baselines \
   --raw-node node-a=input/nodes/node-a \
   --raw-node node-b=input/nodes/node-b \
@@ -215,12 +215,12 @@ cargo run -p refinery-orchestrator --release -- query \
   --params-file examples/queries/cohort_feasibility_count/01_all_patients.json
 ```
 
-## 12. Run the full `proof-check` comparison
+## 12. Run the full `proof-value` comparison
 
 If you ran `prepare`, use the prepared baseline directory:
 
 ```bash
-cargo run -p proof-check --release -- compare \
+cargo run -p proof-value --release -- compare \
   --template cohort-feasibility-count \
   --params-file examples/queries/cohort_feasibility_count/01_all_patients.json \
   --node http://127.0.0.1:50051 \
@@ -234,7 +234,7 @@ cargo run -p proof-check --release -- compare \
 If you did not run `prepare`, compare directly against the raw split folders:
 
 ```bash
-cargo run -p proof-check --release -- compare \
+cargo run -p proof-value --release -- compare \
   --template cohort-feasibility-count \
   --params-file examples/queries/cohort_feasibility_count/01_all_patients.json \
   --node http://127.0.0.1:50051 \
@@ -249,7 +249,7 @@ cargo run -p proof-check --release -- compare \
 
 ## Notes
 
-- `proof-check --mode full` runs:
+- `proof-value --mode full` runs:
   - `smpc_parity`
   - `coarsening_distortion`
   - `final_release_utility`

@@ -7,7 +7,7 @@ use std::sync::Mutex;
 use anyhow::Result;
 use chrono::NaiveDate;
 use common::{create_prepare_test_nodes, snapshot_prepared_dbs, unique_test_path};
-use proof_check::{PrepareRequest, parse_raw_node_spec, prepare_baselines};
+use proof_value::{PrepareRequest, parse_raw_node_spec, prepare_baselines};
 
 static ENV_LOCK: Mutex<()> = Mutex::new(());
 

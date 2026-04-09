@@ -5,7 +5,7 @@ use chrono::NaiveDate;
 use common::{
     create_prepare_test_nodes, feasibility_payload, make_available_report, unique_test_path,
 };
-use proof_check::{
+use proof_value::{
     NodeReport, QueryUtilityContext, SeedVerdictSummary, UtilityCheckStatus, UtilityVerdictStatus,
     consolidate_seed_status, evaluate_utility, resolve_query_utility_context,
 };
