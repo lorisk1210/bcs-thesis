@@ -1,5 +1,5 @@
 [package]
-name = "proof-check"
+name = "proof-value"
 version.workspace = true
 edition.workspace = true
 

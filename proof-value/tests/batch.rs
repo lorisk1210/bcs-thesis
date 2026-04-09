@@ -4,7 +4,7 @@ use std::fs;
 
 use anyhow::Result;
 use common::{feasibility_payload, inconclusive_report, make_available_report, unique_test_path};
-use proof_check::{
+use proof_value::{
     AggregateBatchStatus, AggregateMetricSummary, AggregateUtilitySummary, BatchQueryReport,
     BatchReport, BatchRequestMetadata, QueryUtilityContext, batch_exit_code,
     build_aggregate_utility_summary, discover_query_files, evaluate_utility,

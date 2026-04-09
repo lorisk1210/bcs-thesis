@@ -1,7 +1,7 @@
 mod common;
 
 use common::make_available_report;
-use proof_check::{
+use proof_value::{
     AnalysisStatus, build_release_vs_exact_raw_section, build_template_metrics_section,
 };
 use refinery_orchestrator::dp_release::GlobalReleaseResult;
