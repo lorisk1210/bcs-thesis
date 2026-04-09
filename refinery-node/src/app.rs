@@ -91,7 +91,7 @@ pub fn run_pipeline(
 }
 
 // Runs the full local node pipeline with explicit ingest and materialization options.
-pub fn run_pipeline_with_options(
+fn run_pipeline_with_options(
     db_path: &Path,
     input_dir: &Path,
     max_files: Option<usize>,
@@ -113,25 +113,6 @@ pub fn run_pipeline_with_options(
         normalized: true,
         materialized: true,
     })
-}
-
-// Runs one shared fresh-build ingest pass that produces both coarsened and exact databases.
-pub fn run_dual_pipeline_with_options(
-    coarsened_db_path: &Path,
-    exact_db_path: &Path,
-    input_dir: &Path,
-    max_files: Option<usize>,
-    as_of_date: NaiveDate,
-) -> Result<()> {
-    run_dual_pipeline_with_modes(
-        coarsened_db_path,
-        TransformMode::Coarsened,
-        exact_db_path,
-        TransformMode::Exact,
-        input_dir,
-        max_files,
-        as_of_date,
-    )
 }
 
 pub fn run_dual_pipeline_with_modes(

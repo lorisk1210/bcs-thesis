@@ -20,7 +20,7 @@ pub use ingest_settings::{load_ingest_transform_mode, resolve_ingest_transform_m
 
 // SMPC configuration derived from environment variables.
 #[derive(Debug, Clone)]
-pub struct SmpcConfig {
+pub(crate) struct SmpcConfig {
     pub private_key_bytes: Option<[u8; 32]>,
     pub min_participating_nodes: usize,
 }
@@ -31,7 +31,7 @@ pub fn load_dotenv() {
 }
 
 // Loads the node secret from the environment variables.
-pub fn load_node_secret() -> Result<String> {
+pub(crate) fn load_node_secret() -> Result<String> {
     required_env("REFINERY_NODE_SECRET")
 }
 
@@ -68,7 +68,7 @@ pub fn load_privacy_config() -> Result<PrivacyConfig> {
 }
 
 // Loads the node SMPC configuration from environment variables.
-pub fn load_smpc_config() -> Result<SmpcConfig> {
+pub(crate) fn load_smpc_config() -> Result<SmpcConfig> {
     let private_key_bytes = match env::var("REFINERY_SMPC_PRIVATE_KEY_HEX") {
         Ok(value) => {
             let decoded = hex::decode(value.trim())
