@@ -43,25 +43,7 @@ pub fn run_ingest(conn: &mut Connection, opts: &IngestOptions) -> Result<IngestR
     }
 }
 
-pub fn run_dual_ingest(
-    coarsened_conn: &mut Connection,
-    exact_conn: &mut Connection,
-    input_dir: &Path,
-    node_secret: &str,
-    max_files: Option<usize>,
-) -> Result<IngestReport> {
-    run_dual_ingest_with_modes(
-        coarsened_conn,
-        TransformMode::Coarsened,
-        exact_conn,
-        TransformMode::Exact,
-        input_dir,
-        node_secret,
-        max_files,
-    )
-}
-
-pub fn run_dual_ingest_with_modes(
+pub(crate) fn run_dual_ingest_with_modes(
     first_conn: &mut Connection,
     first_mode: TransformMode,
     second_conn: &mut Connection,
