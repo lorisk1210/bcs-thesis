@@ -7,7 +7,8 @@ use serde::Serialize;
 
 // Local module imports
 use refinery_protocol::{
-    QueryResult, ReleaseMode, release_query_result, release_query_result_with_rng,
+    QueryResult, ReleaseMode, grouped_release_rejection_reason, release_query_result,
+    release_query_result_with_rng,
 };
 use serde_json::Value;
 
@@ -76,8 +77,16 @@ fn release_result_for_mode(
         });
     }
 
-    let released_result =
-        release_query_result(query_result, config.epsilon, release_mode, dp_seed)?;
+    if let Some(reason) = grouped_release_rejection_reason(query_result, config.min_cohort)? {
+        return Ok(GlobalReleaseResult {
+            accepted: false,
+            reason,
+            release_mode,
+            released_result: None,
+        });
+    }
+
+    let released_result = release_query_result(query_result, config.epsilon, release_mode, dp_seed)?;
 
     Ok(GlobalReleaseResult {
         accepted: true,
@@ -107,6 +116,15 @@ where
                 "global cohort size {} is below minimum {}",
                 query_result.cohort_size, config.min_cohort
             ),
+            release_mode,
+            released_result: None,
+        });
+    }
+
+    if let Some(reason) = grouped_release_rejection_reason(query_result, config.min_cohort)? {
+        return Ok(GlobalReleaseResult {
+            accepted: false,
+            reason,
             release_mode,
             released_result: None,
         });

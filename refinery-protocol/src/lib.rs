@@ -13,7 +13,10 @@ pub mod stats;
 
 // Re-exports for the most common protocol types.
 pub use query::{ClipBounds, QueryExecutionRequest, QueryResult, QueryTemplate};
-pub use release::{ReleaseMode, release_query_result, release_query_result_with_rng};
+pub use release::{
+    ReleaseMode, grouped_release_rejection_reason, release_query_result,
+    release_query_result_with_rng,
+};
 pub use slot_vector::{decode_slot_bytes, encode_slot_bytes, sum_slot_vectors};
 pub use smpc::{
     PRIVATE_KEY_LENGTH, PUBLIC_KEY_LENGTH, SMPC_AGGREGATE_SHARE_ROUND_NAME, SMPC_PROTOCOL_NAME,

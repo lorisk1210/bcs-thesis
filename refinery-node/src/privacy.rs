@@ -5,7 +5,9 @@
 use anyhow::{Result, anyhow};
 use chrono::Utc;
 use duckdb::{Connection, Transaction, params};
-use refinery_protocol::{QueryResult, ReleaseMode, release_query_result};
+use refinery_protocol::{
+    QueryResult, ReleaseMode, grouped_release_rejection_reason, release_query_result,
+};
 use serde_json::Value;
 
 // Struct for the privacy configuration
@@ -133,12 +135,31 @@ pub fn enforce_and_release(
         });
     }
 
-    let released_result = release_query_result(
-        query_result,
-        config.epsilon,
-        config.release_mode,
-        config.dp_seed,
-    )?;
+    if let Some(reason) = grouped_release_rejection_reason(query_result, config.min_cohort)? {
+        write_rejection(
+            &tx,
+            &release_id,
+            query_fingerprint,
+            &query_result.template_name,
+            config.recorded_epsilon(),
+            query_result.cohort_size,
+            &reason,
+            config.release_mode,
+        )?;
+        tx.commit()?;
+        return Ok(ReleaseResult {
+            release_id,
+            accepted: false,
+            reason,
+            release_mode: config.release_mode,
+            released_result: None,
+            budget_spent: spent,
+            budget_remaining: (config.total_budget - spent).max(0.0),
+        });
+    }
+
+    let released_result =
+        release_query_result(query_result, config.epsilon, config.release_mode, config.dp_seed)?;
     let recorded_epsilon = config.recorded_epsilon();
 
     tx.execute(

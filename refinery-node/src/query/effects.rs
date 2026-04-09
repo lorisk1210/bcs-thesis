@@ -212,7 +212,12 @@ pub(super) fn execute_dose_response(
             SUM(outcome_mean) AS outcome_sum
         FROM joined
         GROUP BY dose_bucket
-        ORDER BY dose_bucket
+        ORDER BY CASE dose_bucket
+            WHEN 'low' THEN 1
+            WHEN 'medium' THEN 2
+            WHEN 'high' THEN 3
+            ELSE 4
+        END
         "#,
         clip_min = clip.min,
         clip_max = clip.max,
