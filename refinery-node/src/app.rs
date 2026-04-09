@@ -123,22 +123,44 @@ pub fn run_dual_pipeline_with_options(
     max_files: Option<usize>,
     as_of_date: NaiveDate,
 ) -> Result<()> {
-    let node_secret = config::load_node_secret()?;
-    let mut coarsened_conn = open_initialized_connection(coarsened_db_path)?;
-    let mut exact_conn = open_initialized_connection(exact_db_path)?;
+    run_dual_pipeline_with_modes(
+        coarsened_db_path,
+        TransformMode::Coarsened,
+        exact_db_path,
+        TransformMode::Exact,
+        input_dir,
+        max_files,
+        as_of_date,
+    )
+}
 
-    ingest::run_dual_ingest(
-        &mut coarsened_conn,
-        &mut exact_conn,
+pub fn run_dual_pipeline_with_modes(
+    first_db_path: &Path,
+    first_transform_mode: TransformMode,
+    second_db_path: &Path,
+    second_transform_mode: TransformMode,
+    input_dir: &Path,
+    max_files: Option<usize>,
+    as_of_date: NaiveDate,
+) -> Result<()> {
+    let node_secret = config::load_node_secret()?;
+    let mut first_conn = open_initialized_connection(first_db_path)?;
+    let mut second_conn = open_initialized_connection(second_db_path)?;
+
+    ingest::run_dual_ingest_with_modes(
+        &mut first_conn,
+        first_transform_mode,
+        &mut second_conn,
+        second_transform_mode,
         input_dir,
         &node_secret,
         max_files,
     )?;
 
-    normalize::run_normalize(&coarsened_conn)?;
-    normalize::run_normalize(&exact_conn)?;
-    materialize::run_materialize_as_of(&coarsened_conn, as_of_date)?;
-    materialize::run_materialize_as_of(&exact_conn, as_of_date)?;
+    normalize::run_normalize(&first_conn)?;
+    normalize::run_normalize(&second_conn)?;
+    materialize::run_materialize_as_of(&first_conn, as_of_date)?;
+    materialize::run_materialize_as_of(&second_conn, as_of_date)?;
 
     Ok(())
 }

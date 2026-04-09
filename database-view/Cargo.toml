@@ -8,6 +8,7 @@ anyhow.workspace = true
 axum = "0.7.9"
 chrono.workspace = true
 clap.workspace = true
+cli-render = { path = "../cli-render" }
 duckdb.workspace = true
 serde.workspace = true
 serde_urlencoded = "0.7.1"

@@ -29,7 +29,7 @@ rand = "0.8.5"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 sha2 = "0.10.9"
-tokio = { version = "1.48.0", features = ["fs", "macros", "rt-multi-thread", "sync"] }
+tokio = { version = "1.48.0", features = ["fs", "macros", "rt-multi-thread", "signal", "sync"] }
 tonic = { version = "0.12.3", features = ["transport", "tls"] }
 tonic-build = "0.12.3"
 walkdir = "2.5.0"

@@ -12,7 +12,9 @@ use refinery_node::federation::smpc::{
 use refinery_protocol::grpc::{
     ParticipantManifestEntry, RunFederationRoundRequest, SealedSharePacket, SubmitJobRequest,
 };
-use refinery_protocol::{QueryTemplate, SMPC_AGGREGATE_SHARE_ROUND_NAME, SMPC_PROTOCOL_NAME, SMPC_PROTOCOL_VERSION};
+use refinery_protocol::{
+    QueryTemplate, SMPC_AGGREGATE_SHARE_ROUND_NAME, SMPC_PROTOCOL_NAME, SMPC_PROTOCOL_VERSION,
+};
 
 #[test]
 fn round_execution_rejects_unaccepted_jobs() {
@@ -75,7 +77,10 @@ fn round_execution_rejects_missing_capability() {
     .expect("round execution should return a response");
 
     assert!(!response.accepted);
-    assert_eq!(response.reason, "SMPC capability is not configured on this node");
+    assert_eq!(
+        response.reason,
+        "SMPC capability is not configured on this node"
+    );
 }
 
 #[test]

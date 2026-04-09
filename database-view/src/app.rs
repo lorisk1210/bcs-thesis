@@ -7,7 +7,13 @@ use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::response::Html;
 use axum::routing::get;
+use cli_render::{
+    DatabaseViewStartedData, OutputMode, overwrite_service_render, render_database_view_started,
+    render_database_view_stopped,
+};
 use serde::Deserialize;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::db;
 use crate::error::{ViewerError, ViewerResult};
@@ -29,7 +35,8 @@ struct TableQuery {
     page: Option<usize>,
 }
 
-pub async fn serve(bind: SocketAddr, data_dir: PathBuf) -> Result<()> {
+pub async fn serve(mode: OutputMode, bind: SocketAddr, data_dir: PathBuf) -> Result<()> {
+    let data_dir_display = data_dir.display().to_string();
     let state = AppState { data_dir };
     let app = Router::new()
         .route("/", get(index))
@@ -39,12 +46,55 @@ pub async fn serve(bind: SocketAddr, data_dir: PathBuf) -> Result<()> {
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind(bind).await?;
-    println!(
-        "Database viewer running at http://{}",
-        listener.local_addr()?
+    let bind_addr = listener.local_addr()?.to_string();
+    let started_output = render_database_view_started(
+        mode,
+        &DatabaseViewStartedData {
+            bind_addr: bind_addr.clone(),
+            data_dir: data_dir_display,
+            browser_url: format!("http://{bind_addr}/"),
+        },
     );
-    axum::serve(listener, app).await?;
+    print!("{started_output}");
+    let stopped_by_signal = Arc::new(AtomicBool::new(false));
+    let shutdown_seen = Arc::clone(&stopped_by_signal);
+    axum::serve(listener, app)
+        .with_graceful_shutdown(async move {
+            shutdown_signal().await;
+            shutdown_seen.store(true, Ordering::SeqCst);
+        })
+        .await?;
+    if stopped_by_signal.load(Ordering::SeqCst) {
+        let stopped_output = render_database_view_stopped(mode, &bind_addr);
+        if mode == OutputMode::Pretty {
+            print!(
+                "{}",
+                overwrite_service_render(&started_output, &stopped_output)
+            );
+        } else {
+            print!("{stopped_output}");
+        }
+    }
     Ok(())
+}
+
+async fn shutdown_signal() {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{SignalKind, signal};
+
+        let mut terminate =
+            signal(SignalKind::terminate()).expect("failed to install SIGTERM handler");
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => {}
+            _ = terminate.recv() => {}
+        }
+    }
+
+    #[cfg(not(unix))]
+    {
+        let _ = tokio::signal::ctrl_c().await;
+    }
 }
 
 async fn index(State(state): State<AppState>) -> ViewerResult<Html<String>> {

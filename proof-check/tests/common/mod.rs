@@ -9,9 +9,8 @@ use anyhow::Result;
 use duckdb::Connection;
 use proof_check::{
     AnalysisStatus, ComparisonReport, ComparisonSection, PayloadComparisonSection,
-    PreparedBaselineReport, RequestMetadata, SectionStatus,
-    TemplateMetricsSection, ValidationSections, build_release_vs_exact_raw_section,
-    build_template_metrics_section,
+    PreparedBaselineReport, RequestMetadata, SectionStatus, TemplateMetricsSection,
+    ValidationSections, build_release_vs_exact_raw_section, build_template_metrics_section,
 };
 use refinery_protocol::{QueryResult, QueryTemplate, ReleaseMode};
 use serde_json::json;
@@ -244,7 +243,10 @@ fn table_snapshot(conn: &Connection, table: &str) -> Result<Vec<Vec<Option<Strin
         .map(|column| format!("CAST({} AS VARCHAR)", quote_ident(column)))
         .collect::<Vec<_>>()
         .join(", ");
-    let sql = format!("SELECT {select_list} FROM {} ORDER BY ALL", quote_ident(table));
+    let sql = format!(
+        "SELECT {select_list} FROM {} ORDER BY ALL",
+        quote_ident(table)
+    );
     let mut stmt = conn.prepare(&sql)?;
     let mut rows = stmt.query([])?;
     let mut snapshot = Vec::new();

@@ -246,13 +246,18 @@ impl<'conn> MultiFreshWriter<'conn> {
         })
     }
 
-    fn dual(coarsened_conn: &'conn Connection, exact_conn: &'conn Connection) -> Result<Self> {
-        prepare_fresh_ingest_schema(coarsened_conn)?;
-        prepare_fresh_ingest_schema(exact_conn)?;
+    fn dual_with_modes(
+        first_conn: &'conn Connection,
+        first_mode: TransformMode,
+        second_conn: &'conn Connection,
+        second_mode: TransformMode,
+    ) -> Result<Self> {
+        prepare_fresh_ingest_schema(first_conn)?;
+        prepare_fresh_ingest_schema(second_conn)?;
         Ok(Self {
             sinks: vec![
-                FreshBronzeSink::new(coarsened_conn, TransformMode::Coarsened)?,
-                FreshBronzeSink::new(exact_conn, TransformMode::Exact)?,
+                FreshBronzeSink::new(first_conn, first_mode)?,
+                FreshBronzeSink::new(second_conn, second_mode)?,
             ],
         })
     }
@@ -288,9 +293,11 @@ impl RecordWriter for MultiFreshWriter<'_> {
     }
 }
 
-pub fn run_dual_ingest(
-    coarsened_conn: &mut Connection,
-    exact_conn: &mut Connection,
+pub fn run_dual_ingest_with_modes(
+    first_conn: &mut Connection,
+    first_mode: TransformMode,
+    second_conn: &mut Connection,
+    second_mode: TransformMode,
     input_dir: &Path,
     node_secret: &str,
     max_files: Option<usize>,
@@ -298,13 +305,14 @@ pub fn run_dual_ingest(
     let files = super::shared::discover_input_files(input_dir, max_files)?;
     let mut pseudonymizer = Pseudonymizer::new(node_secret);
     let report = {
-        let mut writer = MultiFreshWriter::dual(&*coarsened_conn, &*exact_conn)?;
+        let mut writer =
+            MultiFreshWriter::dual_with_modes(&*first_conn, first_mode, &*second_conn, second_mode)?;
         let report = process_files_with_writer(&files, &mut pseudonymizer, &mut writer)?;
         writer.flush()?;
         report
     };
-    finalize_fresh_ingest(coarsened_conn)?;
-    finalize_fresh_ingest(exact_conn)?;
+    finalize_fresh_ingest(first_conn)?;
+    finalize_fresh_ingest(second_conn)?;
     Ok(report)
 }
 

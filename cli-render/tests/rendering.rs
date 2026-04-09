@@ -155,6 +155,54 @@ fn plain_orchestrator_status() {
 }
 
 #[test]
+fn plain_node_server_started() {
+    let out = render_node_server_started(
+        OutputMode::Plain,
+        &NodeServerStartedData {
+            node_id: "node-a".to_string(),
+            bind_addr: "127.0.0.1:50051".to_string(),
+            database: "/tmp/node.duckdb".to_string(),
+            input_dir: "/tmp/input".to_string(),
+            tls_enabled: true,
+        },
+    );
+    assert!(out.contains("status: active"));
+    assert!(out.contains("node_id: node-a"));
+    assert!(out.contains("bind_addr: 127.0.0.1:50051"));
+    assert!(out.contains("tls: enabled"));
+}
+
+#[test]
+fn plain_database_view_started() {
+    let out = render_database_view_started(
+        OutputMode::Plain,
+        &DatabaseViewStartedData {
+            bind_addr: "127.0.0.1:8080".to_string(),
+            data_dir: "data".to_string(),
+            browser_url: "http://127.0.0.1:8080/".to_string(),
+        },
+    );
+    assert!(out.contains("status: active"));
+    assert!(out.contains("bind_addr: 127.0.0.1:8080"));
+    assert!(out.contains("data_dir: data"));
+    assert!(out.contains("open: http://127.0.0.1:8080/"));
+}
+
+#[test]
+fn plain_node_server_stopped() {
+    let out = render_node_server_stopped(OutputMode::Plain, "node-a", "127.0.0.1:50051");
+    assert!(out.contains("status: offline"));
+    assert!(out.contains("node_id: node-a"));
+}
+
+#[test]
+fn plain_database_view_stopped() {
+    let out = render_database_view_stopped(OutputMode::Plain, "127.0.0.1:8080");
+    assert!(out.contains("status: offline"));
+    assert!(out.contains("bind_addr: 127.0.0.1:8080"));
+}
+
+#[test]
 fn plain_partition() {
     let data = PartitionData {
         source_dir: "/data/input".to_string(),

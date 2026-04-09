@@ -5,6 +5,7 @@ mod mode;
 mod node;
 mod orchestrator;
 mod organize;
+mod service;
 
 pub use check::{
     CheckAggregateMetricData, CheckAggregateUtilityData, CheckBatchQueryData, CheckBatchReportData,
@@ -32,6 +33,11 @@ pub use organize::{
     render_organize_query_created, render_organize_query_prompt_intro,
     render_organize_query_prompt_label, render_organize_query_selector,
     render_organize_query_templates, render_partition,
+};
+pub use service::{
+    DatabaseViewStartedData, NodeServerStartedData, overwrite_service_render,
+    render_database_view_started, render_database_view_stopped, render_node_server_started,
+    render_node_server_stopped,
 };
 
 use common::{badge, title};

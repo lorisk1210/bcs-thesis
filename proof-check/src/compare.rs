@@ -2,6 +2,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use anyhow::{Result, anyhow};
 use chrono::{NaiveDate, Utc};
+use refinery_node::config::load_ingest_transform_mode;
 use refinery_orchestrator::config::{GlobalPrivacyConfig, load_privacy_config};
 use refinery_orchestrator::dp_release::{
     GlobalReleaseResult, release_result, release_result_with_seed,
@@ -29,6 +30,7 @@ pub const LIVE_POST_RELEASE_LABEL: &str = "live_smpc_post_release";
 pub const EXACT_POST_RELEASE_LABEL: &str = "exact_raw_post_release";
 
 pub async fn run_compare(request: CompareRequest) -> Result<ComparisonReport> {
+    let ingest_transform_mode = load_ingest_transform_mode()?;
     let privacy_config = if request.mode.requires_live_nodes() {
         Some(load_privacy_config()?)
     } else {
@@ -92,7 +94,7 @@ pub async fn run_compare(request: CompareRequest) -> Result<ComparisonReport> {
             &request.params,
             request.clip,
             request.as_of_date,
-            refinery_node::ingest::TransformMode::Coarsened,
+            ingest_transform_mode,
         )?
     };
 

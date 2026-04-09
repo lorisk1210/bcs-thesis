@@ -23,17 +23,19 @@ fn release_vs_exact_raw_compares_released_payload_to_exact_raw_result() {
         sensitivity: 1.0,
     };
 
-    let section = build_release_vs_exact_raw_section(
-        Some(&live_release),
-        Some(&exact_baseline),
-        None,
-        &[],
-    )
-    .expect("release-vs-raw section should build");
+    let section =
+        build_release_vs_exact_raw_section(Some(&live_release), Some(&exact_baseline), None, &[])
+            .expect("release-vs-raw section should build");
 
     assert_eq!(section.status, AnalysisStatus::Available);
-    assert_eq!(section.compared_left_label.as_deref(), Some("released_result"));
-    assert_eq!(section.compared_right_label.as_deref(), Some("exact_raw_result"));
+    assert_eq!(
+        section.compared_left_label.as_deref(),
+        Some("released_result")
+    );
+    assert_eq!(
+        section.compared_right_label.as_deref(),
+        Some("exact_raw_result")
+    );
     assert!(section.diffs.iter().any(|diff| diff.path == "$.count"));
 }
 
@@ -72,8 +74,14 @@ fn template_metrics_for_comparative_effectiveness_include_primary_and_context_me
             released_result: report.release_vs_exact_raw.compared_left_payload.clone(),
         }),
         Some(&QueryResult {
-            template_name: QueryTemplate::ComparativeEffectivenessDelta.as_str().to_string(),
-            raw_result: report.release_vs_exact_raw.compared_right_payload.clone().expect("raw payload"),
+            template_name: QueryTemplate::ComparativeEffectivenessDelta
+                .as_str()
+                .to_string(),
+            raw_result: report
+                .release_vs_exact_raw
+                .compared_right_payload
+                .clone()
+                .expect("raw payload"),
             cohort_size: 351,
             sensitivity: 0.8547008547008547,
         }),
@@ -86,7 +94,12 @@ fn template_metrics_for_comparative_effectiveness_include_primary_and_context_me
     let primary = section.primary_metric.expect("primary metric should exist");
     assert_eq!(primary.name, "delta_percent");
     assert!(primary.relative_gap.is_none());
-    assert!(section.context_metrics.iter().any(|metric| metric.name == "delta"));
+    assert!(
+        section
+            .context_metrics
+            .iter()
+            .any(|metric| metric.name == "delta")
+    );
     assert!(
         section
             .context_metrics

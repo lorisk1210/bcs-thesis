@@ -1,8 +1,10 @@
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::process;
 
 use anyhow::Result;
 use clap::Parser;
+use cli_render::{render_error, resolve_output_mode};
 
 #[derive(Debug, Parser)]
 #[command(name = "database-view")]
@@ -16,7 +18,19 @@ struct Cli {
 }
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() {
+    let mode = resolve_output_mode();
+    if let Err(err) = run().await {
+        eprint!(
+            "{}",
+            render_error(mode, "database-view", &format!("{err:#}"))
+        );
+        process::exit(1);
+    }
+}
+
+async fn run() -> Result<()> {
     let cli = Cli::parse();
-    database_view::serve(cli.bind, cli.data_dir).await
+    let mode = resolve_output_mode();
+    database_view::serve(mode, cli.bind, cli.data_dir).await
 }

@@ -6,9 +6,7 @@ use crate::batch_models::{
     UtilityVerdictStatus,
 };
 
-pub fn build_aggregate_utility_summary(
-    queries: &[BatchQueryReport],
-) -> AggregateUtilitySummary {
+pub fn build_aggregate_utility_summary(queries: &[BatchQueryReport]) -> AggregateUtilitySummary {
     let mut preserved = 0;
     let mut borderline = 0;
     let mut not_preserved = 0;

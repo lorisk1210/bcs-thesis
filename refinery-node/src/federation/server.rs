@@ -2,8 +2,13 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use anyhow::{Context, Result};
+use cli_render::{
+    NodeServerStartedData, OutputMode, overwrite_service_render, render_node_server_started,
+    render_node_server_stopped,
+};
 use refinery_protocol::QueryTemplate;
 use refinery_protocol::grpc::node_service_server::{NodeService, NodeServiceServer};
 use refinery_protocol::grpc::{
@@ -47,11 +52,12 @@ struct NodeGrpcService {
     state: NodeState,
 }
 
-pub async fn serve(config: NodeServerConfig) -> Result<()> {
+pub async fn serve(config: NodeServerConfig, mode: OutputMode) -> Result<()> {
     let addr: SocketAddr = config
         .bind_addr
         .parse()
         .with_context(|| format!("invalid bind address {}", config.bind_addr))?;
+    let node_id = config.node_id.clone();
     let smpc_capability = smpc::load_smpc_capability()?;
 
     let service = NodeGrpcService {
@@ -62,17 +68,66 @@ pub async fn serve(config: NodeServerConfig) -> Result<()> {
         },
     };
 
+    let tls = load_tls_config(&service.state.config.tls).await?;
     let mut builder = Server::builder();
-    if let Some(tls) = load_tls_config(&service.state.config.tls).await? {
+    if let Some(tls) = tls {
         builder = builder.tls_config(tls)?;
     }
 
+    let started_output = render_node_server_started(
+        mode,
+        &NodeServerStartedData {
+            node_id: service.state.config.node_id.clone(),
+            bind_addr: addr.to_string(),
+            database: service.state.config.db_path.display().to_string(),
+            input_dir: service.state.config.input_dir.display().to_string(),
+            tls_enabled: service.state.config.tls.cert_path.is_some(),
+        },
+    );
+    print!("{started_output}");
+    let stopped_by_signal = Arc::new(AtomicBool::new(false));
+    let shutdown_seen = Arc::clone(&stopped_by_signal);
+
     builder
         .add_service(NodeServiceServer::new(service))
-        .serve(addr)
+        .serve_with_shutdown(addr, async move {
+            shutdown_signal().await;
+            shutdown_seen.store(true, Ordering::SeqCst);
+        })
         .await?;
 
+    if stopped_by_signal.load(Ordering::SeqCst) {
+        let stopped_output = render_node_server_stopped(mode, &node_id, &addr.to_string());
+        if mode == OutputMode::Pretty {
+            print!(
+                "{}",
+                overwrite_service_render(&started_output, &stopped_output)
+            );
+        } else {
+            print!("{stopped_output}");
+        }
+    }
+
     Ok(())
+}
+
+async fn shutdown_signal() {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{SignalKind, signal};
+
+        let mut terminate =
+            signal(SignalKind::terminate()).expect("failed to install SIGTERM handler");
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => {}
+            _ = terminate.recv() => {}
+        }
+    }
+
+    #[cfg(not(unix))]
+    {
+        let _ = tokio::signal::ctrl_c().await;
+    }
 }
 
 async fn load_tls_config(config: &TlsConfig) -> Result<Option<ServerTlsConfig>> {
