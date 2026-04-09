@@ -86,6 +86,8 @@ pub fn make_available_report(
         raw_result: exact_result,
         cohort_size: 100,
         sensitivity: 1.0,
+        dp_release_stats: None,
+        clip_bounds: None,
     };
     let base_section = ComparisonSection {
         status: SectionStatus::Match,

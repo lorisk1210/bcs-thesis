@@ -158,7 +158,10 @@ async fn raw_compare_uses_exact_baseline_when_coarsening_is_disabled() -> Result
         mode: CompareMode::CoarseningDistortion,
         template: QueryTemplate::CohortFeasibilityCount,
         params: json!({"min_age": 18}),
-        clip: ClipBounds { min: 0.0, max: 300.0 },
+        clip: ClipBounds {
+            min: 0.0,
+            max: 300.0,
+        },
         node_endpoints: Vec::new(),
         prepared_dir: None,
         raw_nodes,
@@ -171,7 +174,10 @@ async fn raw_compare_uses_exact_baseline_when_coarsening_is_disabled() -> Result
     })
     .await?;
 
-    assert_eq!(report.validation.coarsening_distortion.status, SectionStatus::Match);
+    assert_eq!(
+        report.validation.coarsening_distortion.status,
+        SectionStatus::Match
+    );
     assert!(report.validation.coarsening_distortion.diffs.is_empty());
 
     Ok(())
@@ -187,6 +193,8 @@ fn sample_query_result(
         raw_result,
         cohort_size,
         sensitivity,
+        dp_release_stats: None,
+        clip_bounds: None,
     }
 }
 

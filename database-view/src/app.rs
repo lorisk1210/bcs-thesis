@@ -1,3 +1,4 @@
+use std::io::{self, Write};
 use std::net::SocketAddr;
 use std::path::PathBuf;
 
@@ -47,15 +48,17 @@ pub async fn serve(mode: OutputMode, bind: SocketAddr, data_dir: PathBuf) -> Res
 
     let listener = tokio::net::TcpListener::bind(bind).await?;
     let bind_addr = listener.local_addr()?.to_string();
-    let started_output = render_database_view_started(
-        mode,
-        &DatabaseViewStartedData {
-            bind_addr: bind_addr.clone(),
-            data_dir: data_dir_display,
-            browser_url: format!("http://{bind_addr}/"),
-        },
-    );
-    print!("{started_output}");
+    let render_data = DatabaseViewStartedData {
+        bind_addr: bind_addr.clone(),
+        data_dir: data_dir_display,
+        browser_url: format!("http://{bind_addr}/"),
+    };
+    let started_output = render_database_view_started(mode, &render_data);
+    {
+        let mut stdout = io::stdout();
+        write!(stdout, "{started_output}")?;
+        stdout.flush()?;
+    }
     let stopped_by_signal = Arc::new(AtomicBool::new(false));
     let shutdown_seen = Arc::clone(&stopped_by_signal);
     axum::serve(listener, app)
@@ -65,15 +68,18 @@ pub async fn serve(mode: OutputMode, bind: SocketAddr, data_dir: PathBuf) -> Res
         })
         .await?;
     if stopped_by_signal.load(Ordering::SeqCst) {
-        let stopped_output = render_database_view_stopped(mode, &bind_addr);
+        let stopped_output = render_database_view_stopped(mode, &render_data);
+        let mut stdout = io::stdout();
         if mode == OutputMode::Pretty {
-            print!(
+            write!(
+                stdout,
                 "{}",
                 overwrite_service_render(&started_output, &stopped_output)
-            );
+            )?;
         } else {
-            print!("{stopped_output}");
+            write!(stdout, "{stopped_output}")?;
         }
+        stdout.flush()?;
     }
     Ok(())
 }

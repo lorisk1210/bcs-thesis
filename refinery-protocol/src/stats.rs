@@ -178,6 +178,8 @@ pub fn render_query_result(aggregated: &LocalStatistics, clip: ClipBounds) -> Re
         raw_result,
         cohort_size: aggregated.cohort_size,
         sensitivity: sensitivity_for(aggregated, clip),
+        dp_release_stats: Some(stats),
+        clip_bounds: Some(clip),
     })
 }
 

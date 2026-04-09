@@ -14,6 +14,8 @@ fn raw_mode_releases_exact_payload_without_spending_budget() {
         raw_result: json!({"count": 20}),
         cohort_size: 20,
         sensitivity: 1.0,
+        dp_release_stats: None,
+        clip_bounds: None,
     };
     let release = enforce_and_release(
         &mut conn,

@@ -74,6 +74,37 @@ fn dose_response_utility_detects_order_flip() -> Result<()> {
 }
 
 #[test]
+fn subgroup_utility_allows_released_means_without_counts() -> Result<()> {
+    let report = make_available_report(
+        QueryTemplate::SubgroupEffectEstimate,
+        json!({
+            "groups": [
+                {"subgroup": "female", "mean_outcome": 2.1},
+                {"subgroup": "male", "mean_outcome": 1.9}
+            ]
+        }),
+        json!({
+            "groups": [
+                {"subgroup": "female", "n": 50.0, "mean_outcome": 2.0},
+                {"subgroup": "male", "n": 50.0, "mean_outcome": 2.0}
+            ]
+        }),
+        json!({"subgroup": "gender"}),
+        0.0,
+        10.0,
+    )?;
+
+    let verdict = evaluate_utility(QueryTemplate::SubgroupEffectEstimate, &report, None)?;
+    assert!(
+        verdict
+            .check_results
+            .iter()
+            .all(|check| check.name != "per_group_share_gap")
+    );
+    Ok(())
+}
+
+#[test]
 fn feasibility_payload_prevalence_is_evaluable_without_external_denominators() -> Result<()> {
     let report = make_available_report(
         QueryTemplate::CohortFeasibilityCount,

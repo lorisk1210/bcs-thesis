@@ -1,4 +1,6 @@
-use refinery_protocol::{QueryResult, ReleaseMode, release_query_result};
+use refinery_protocol::{
+    ClipBounds, QueryResult, QueryTemplate, ReleaseMode, release_query_result,
+};
 use serde_json::json;
 
 #[test]
@@ -26,6 +28,8 @@ fn raw_release_returns_exact_payload() {
         raw_result: json!({"count": 12, "population_in_scope": 30, "prevalence": 0.4}),
         cohort_size: 12,
         sensitivity: 1.0,
+        dp_release_stats: None,
+        clip_bounds: None,
     };
 
     let released = release_query_result(&query_result, 1.0, ReleaseMode::Raw, None)
@@ -40,6 +44,8 @@ fn seeded_release_is_deterministic() {
         raw_result: json!({"count": 12, "delta": 0.5}),
         cohort_size: 12,
         sensitivity: 1.0,
+        dp_release_stats: None,
+        clip_bounds: None,
     };
 
     let first = release_query_result(&query_result, 1.0, ReleaseMode::Seeded, Some(7))
@@ -56,6 +62,8 @@ fn seeded_release_requires_seed() {
         raw_result: json!({"count": 12, "population_in_scope": 30, "prevalence": 0.4}),
         cohort_size: 12,
         sensitivity: 1.0,
+        dp_release_stats: None,
+        clip_bounds: None,
     };
 
     let error = release_query_result(&query_result, 1.0, ReleaseMode::Seeded, None)
@@ -74,6 +82,8 @@ fn feasibility_release_derives_prevalence_from_noised_counts() {
         raw_result: json!({"count": 12, "population_in_scope": 30, "prevalence": 0.4}),
         cohort_size: 12,
         sensitivity: 1.0,
+        dp_release_stats: None,
+        clip_bounds: None,
     };
 
     let released = release_query_result(&query_result, 1.0, ReleaseMode::Seeded, Some(7))
@@ -91,5 +101,48 @@ fn feasibility_release_derives_prevalence_from_noised_counts() {
     assert!(count <= population + 1e-12);
     if population > f64::EPSILON {
         assert!((prevalence - (count / population)).abs() < 1e-12);
+    }
+}
+
+#[test]
+fn subgroup_release_derives_means_from_hidden_noisy_stats() {
+    let query_result = QueryResult {
+        template_name: QueryTemplate::SubgroupEffectEstimate.as_str().to_string(),
+        raw_result: json!({
+            "groups": [
+                {"subgroup": "female", "n": 12, "mean_outcome": 0.2},
+                {"subgroup": "male", "n": 9, "mean_outcome": 0.3}
+            ]
+        }),
+        cohort_size: 21,
+        sensitivity: 1.0 / 21.0,
+        dp_release_stats: Some(json!({
+            "groups": [
+                {"subgroup": "female", "n": 12, "outcome_sum": 2.4},
+                {"subgroup": "male", "n": 9, "outcome_sum": 2.7}
+            ]
+        })),
+        clip_bounds: Some(ClipBounds { min: 0.0, max: 1.0 }),
+    };
+
+    let released = release_query_result(&query_result, 1.0, ReleaseMode::Seeded, Some(7))
+        .expect("seeded release should work");
+    let groups = released["groups"]
+        .as_array()
+        .expect("groups should be an array");
+
+    assert_eq!(groups.len(), 2);
+    for group in groups {
+        assert!(group.get("n").is_none());
+        assert!(group.get("outcome_sum").is_none());
+        let mean = group
+            .get("mean_outcome")
+            .expect("mean_outcome should exist");
+        assert!(
+            mean.is_null()
+                || mean
+                    .as_f64()
+                    .is_some_and(|value| (0.0..=1.0).contains(&value))
+        );
     }
 }

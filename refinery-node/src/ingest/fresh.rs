@@ -305,8 +305,12 @@ pub fn run_dual_ingest_with_modes(
     let files = super::shared::discover_input_files(input_dir, max_files)?;
     let mut pseudonymizer = Pseudonymizer::new(node_secret);
     let report = {
-        let mut writer =
-            MultiFreshWriter::dual_with_modes(&*first_conn, first_mode, &*second_conn, second_mode)?;
+        let mut writer = MultiFreshWriter::dual_with_modes(
+            &*first_conn,
+            first_mode,
+            &*second_conn,
+            second_mode,
+        )?;
         let report = process_files_with_writer(&files, &mut pseudonymizer, &mut writer)?;
         writer.flush()?;
         report

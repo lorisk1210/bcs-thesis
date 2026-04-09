@@ -14,6 +14,8 @@ fn seeded_release_is_deterministic() {
         }),
         cohort_size: 20,
         sensitivity: 1.0,
+        dp_release_stats: None,
+        clip_bounds: None,
     };
     let config = GlobalPrivacyConfig {
         epsilon: 1.0,
@@ -44,6 +46,8 @@ fn raw_release_returns_exact_payload() {
         }),
         cohort_size: 20,
         sensitivity: 1.0,
+        dp_release_stats: None,
+        clip_bounds: None,
     };
     let config = GlobalPrivacyConfig {
         epsilon: 1.0,
