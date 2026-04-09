@@ -23,7 +23,7 @@ pub(crate) const BG_DARK_GRAY: &str = "\x1b[100m";
 const DEFAULT_FRAME_WIDTH: usize = 100;
 const MIN_FRAME_WIDTH: usize = 32;
 
-pub(crate) fn display_len_ignore_ansi(s: &str) -> usize {
+pub fn display_len_ignore_ansi(s: &str) -> usize {
     let mut count = 0;
     let mut it = s.chars().peekable();
     while let Some(c) = it.next() {
@@ -49,7 +49,7 @@ fn terminal_columns() -> usize {
         .unwrap_or(DEFAULT_FRAME_WIDTH)
 }
 
-pub(crate) fn wrap_lines_for_frame(lines: &[&str], max_width: usize) -> Vec<String> {
+pub fn wrap_lines_for_frame(lines: &[&str], max_width: usize) -> Vec<String> {
     let mut wrapped = Vec::new();
     for line in lines {
         if line.contains("__SEPARATOR__") {
@@ -118,7 +118,7 @@ fn ensure_nonempty_visible_split(line: &str, split_byte: usize) -> usize {
     split_byte_at_visible_width(line, 1)
 }
 
-pub(crate) fn wrap_ansi_line(line: &str, max_width: usize) -> Vec<String> {
+pub fn wrap_ansi_line(line: &str, max_width: usize) -> Vec<String> {
     if max_width == 0 {
         return vec![String::new()];
     }

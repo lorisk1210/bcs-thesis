@@ -6,9 +6,6 @@ mod node;
 mod orchestrator;
 mod organize;
 
-#[cfg(test)]
-mod tests;
-
 pub use check::{
     CheckAggregateMetricData, CheckAggregateUtilityData, CheckBatchQueryData, CheckBatchReportData,
     CheckCompareReportData, CheckDiffEntry, CheckMetricData, CheckNodeReport,
@@ -17,6 +14,8 @@ pub use check::{
     CheckUtilityCheckData, CheckUtilityMetricData, CheckUtilityVerdictData,
     render_check_batch_report, render_check_compare_report, render_check_prepare_report,
 };
+pub use common::key_value;
+pub use frame::{display_len_ignore_ansi, wrap_ansi_line, wrap_lines_for_frame};
 pub use mode::{OutputMode, resolve_output_mode, resolve_output_mode_for_tty};
 pub use node::{
     IngestReportData, InspectTableData, NodeQueryRejectedData, NodeQueryReleasedData,
@@ -35,7 +34,7 @@ pub use organize::{
     render_organize_query_templates, render_partition,
 };
 
-use common::{badge, key_value, title};
+use common::{badge, title};
 use frame::{BG_RED, RED, frame_cli_output};
 
 pub fn render_error(mode: OutputMode, command_name: &str, error: &str) -> String {

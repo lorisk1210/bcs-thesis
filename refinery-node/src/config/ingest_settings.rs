@@ -20,7 +20,7 @@ pub fn load_ingest_transform_mode() -> Result<TransformMode> {
     resolve_ingest_transform_mode(raw.as_deref())
 }
 
-fn resolve_ingest_transform_mode(raw: Option<&str>) -> Result<TransformMode> {
+pub fn resolve_ingest_transform_mode(raw: Option<&str>) -> Result<TransformMode> {
     let disable_coarsening = parse_bool_flag(raw, DISABLE_DATA_COARSENING_ENV_NAME)?;
     Ok(if disable_coarsening {
         TransformMode::Exact
@@ -45,64 +45,5 @@ fn parse_bool_flag(raw: Option<&str>, env_name: &str) -> Result<bool> {
         _ => Err(anyhow!(
             "failed to parse {env_name}={raw:?}: expected one of true/false, 1/0, yes/no, or on/off"
         )),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use anyhow::Result;
-
-    use super::resolve_ingest_transform_mode;
-    use crate::ingest::TransformMode;
-
-    #[test]
-    fn defaults_to_coarsened_when_flag_is_missing() -> Result<()> {
-        assert_eq!(
-            resolve_ingest_transform_mode(None)?,
-            TransformMode::Coarsened
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn enables_exact_mode_when_flag_is_true() -> Result<()> {
-        for raw in ["true", "1", "yes", "on"] {
-            assert_eq!(
-                resolve_ingest_transform_mode(Some(raw))?,
-                TransformMode::Exact
-            );
-        }
-        Ok(())
-    }
-
-    #[test]
-    fn keeps_coarsened_mode_when_flag_is_false() -> Result<()> {
-        for raw in ["false", "0", "no", "off"] {
-            assert_eq!(
-                resolve_ingest_transform_mode(Some(raw))?,
-                TransformMode::Coarsened
-            );
-        }
-        Ok(())
-    }
-
-    #[test]
-    fn rejects_invalid_flag_values() {
-        let err = resolve_ingest_transform_mode(Some("maybe")).expect_err("invalid flag");
-        assert!(
-            err.to_string()
-                .contains("failed to parse REFINERY_DISABLE_DATA_COARSENING"),
-            "unexpected error: {err:#}"
-        );
-    }
-
-    #[test]
-    fn rejects_empty_flag_values() {
-        let err = resolve_ingest_transform_mode(Some("   ")).expect_err("empty flag");
-        assert!(
-            err.to_string()
-                .contains("REFINERY_DISABLE_DATA_COARSENING is set but empty"),
-            "unexpected error: {err:#}"
-        );
     }
 }

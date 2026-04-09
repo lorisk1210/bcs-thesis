@@ -25,8 +25,8 @@ use crate::{
 };
 
 static CHECKER_JOB_COUNTER: AtomicU64 = AtomicU64::new(0);
-pub(crate) const LIVE_POST_RELEASE_LABEL: &str = "live_smpc_post_release";
-pub(crate) const EXACT_POST_RELEASE_LABEL: &str = "exact_raw_post_release";
+pub const LIVE_POST_RELEASE_LABEL: &str = "live_smpc_post_release";
+pub const EXACT_POST_RELEASE_LABEL: &str = "exact_raw_post_release";
 
 pub async fn run_compare(request: CompareRequest) -> Result<ComparisonReport> {
     let privacy_config = if request.mode.requires_live_nodes() {
@@ -234,7 +234,7 @@ pub async fn run_compare(request: CompareRequest) -> Result<ComparisonReport> {
     })
 }
 
-pub(crate) fn release_result_for_proof_check(
+pub fn release_result_for_proof_check(
     query_result: &QueryResult,
     config: &GlobalPrivacyConfig,
     dp_seed: u64,
@@ -323,7 +323,7 @@ fn build_coarsening_distortion_section(
     })
 }
 
-pub(crate) fn build_final_release_utility_section(
+pub fn build_final_release_utility_section(
     live_release: &GlobalReleaseResult,
     exact_release: &GlobalReleaseResult,
 ) -> Result<ComparisonSection> {
@@ -408,7 +408,7 @@ fn skipped_section(left_label: &str, right_label: &str) -> ComparisonSection {
     }
 }
 
-pub(crate) fn checker_job_id() -> String {
+pub fn checker_job_id() -> String {
     format!(
         "check-{}-{}-{}",
         Utc::now().timestamp_millis(),
@@ -417,7 +417,7 @@ pub(crate) fn checker_job_id() -> String {
     )
 }
 
-pub(crate) fn serialize_payload<T>(payload: &T) -> Result<Value>
+pub fn serialize_payload<T>(payload: &T) -> Result<Value>
 where
     T: Serialize,
 {

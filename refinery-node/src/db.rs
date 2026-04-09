@@ -220,27 +220,3 @@ fn table_has_column(conn: &Connection, table_name: &str, column_name: &str) -> R
     )?;
     Ok(count > 0)
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn init_schema_creates_release_audit_columns() {
-        let conn = Connection::open_in_memory().expect("in-memory duckdb should open");
-        init_schema(&conn).expect("schema should initialize");
-
-        assert!(
-            table_has_column(&conn, "privacy_releases", "release_mode")
-                .expect("column lookup should work")
-        );
-        assert!(
-            table_has_column(&conn, "query_audit", "released_result_json")
-                .expect("column lookup should work")
-        );
-        assert!(
-            table_has_column(&conn, "query_audit", "release_mode")
-                .expect("column lookup should work")
-        );
-    }
-}
