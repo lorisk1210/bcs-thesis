@@ -1,13 +1,51 @@
-use std::path::PathBuf;
+mod common;
 
+use std::path::PathBuf;
+use std::sync::Mutex;
+
+use anyhow::Result;
+use chrono::NaiveDate;
 use proof_check::{
-    DistortionExpectation, EXACT_POST_RELEASE_LABEL, LIVE_POST_RELEASE_LABEL, SectionStatus,
-    build_final_release_utility_section, checker_job_id, classify_distortion_expectation,
-    diff_payloads, release_result_for_proof_check,
+    CompareMode, CompareRequest, DistortionExpectation, EXACT_POST_RELEASE_LABEL,
+    LIVE_POST_RELEASE_LABEL, SectionStatus, build_final_release_utility_section, checker_job_id,
+    classify_distortion_expectation, diff_payloads, release_result_for_proof_check, run_compare,
 };
+use refinery_orchestrator::client::ClientTlsOptions;
 use refinery_orchestrator::config::GlobalPrivacyConfig;
-use refinery_protocol::{QueryResult, QueryTemplate, ReleaseMode};
+use refinery_protocol::{ClipBounds, QueryResult, QueryTemplate, ReleaseMode};
 use serde_json::json;
+
+use crate::common::create_prepare_test_nodes;
+
+static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+struct EnvVarGuard {
+    key: &'static str,
+    previous: Option<String>,
+}
+
+impl EnvVarGuard {
+    fn set(key: &'static str, value: &str) -> Self {
+        let previous = std::env::var(key).ok();
+        unsafe {
+            std::env::set_var(key, value);
+        }
+        Self { key, previous }
+    }
+}
+
+impl Drop for EnvVarGuard {
+    fn drop(&mut self) {
+        match &self.previous {
+            Some(value) => unsafe {
+                std::env::set_var(self.key, value);
+            },
+            None => unsafe {
+                std::env::remove_var(self.key);
+            },
+        }
+    }
+}
 
 #[test]
 fn classifies_expected_distortion_cases() {
@@ -106,6 +144,37 @@ fn checker_job_ids_are_namespaced() {
     assert!(first.starts_with("check-"));
     assert!(second.starts_with("check-"));
     assert_ne!(first, second);
+}
+
+#[tokio::test]
+async fn raw_compare_uses_exact_baseline_when_coarsening_is_disabled() -> Result<()> {
+    let _env_lock = ENV_LOCK.lock().expect("env lock poisoned");
+    let _node_secret = EnvVarGuard::set("REFINERY_NODE_SECRET", "unit-test-secret");
+    let _disable_coarsening = EnvVarGuard::set("REFINERY_DISABLE_DATA_COARSENING", "true");
+    let base_dir = common::unique_test_path("compare-raw-exact");
+    let raw_nodes = create_prepare_test_nodes(&base_dir)?;
+
+    let report = run_compare(CompareRequest {
+        mode: CompareMode::CoarseningDistortion,
+        template: QueryTemplate::CohortFeasibilityCount,
+        params: json!({"min_age": 18}),
+        clip: ClipBounds { min: 0.0, max: 300.0 },
+        node_endpoints: Vec::new(),
+        prepared_dir: None,
+        raw_nodes,
+        as_of_date: NaiveDate::from_ymd_opt(2026, 1, 1).expect("valid date"),
+        dp_seed: 42,
+        tls: ClientTlsOptions {
+            ca_cert_path: None,
+            domain_name: None,
+        },
+    })
+    .await?;
+
+    assert_eq!(report.validation.coarsening_distortion.status, SectionStatus::Match);
+    assert!(report.validation.coarsening_distortion.diffs.is_empty());
+
+    Ok(())
 }
 
 fn sample_query_result(

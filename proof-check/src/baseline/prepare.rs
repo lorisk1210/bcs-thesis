@@ -6,7 +6,7 @@ use std::thread;
 
 use anyhow::{Context, Result, anyhow};
 use chrono::NaiveDate;
-use refinery_node::app;
+use refinery_node::{app, config, ingest::TransformMode};
 
 use super::{
     PreparedDirectoryMetadata, PreparedNodeMetadata, remove_if_exists, safe_node_file_stem,
@@ -15,6 +15,7 @@ use super::{
 use crate::{PrepareReport, PreparedBaselineReport, RawNodeInput};
 
 pub fn prepare_baselines(request: crate::PrepareRequest) -> Result<PrepareReport> {
+    let transform_mode = config::load_ingest_transform_mode()?;
     let mut raw_by_node_id = BTreeMap::new();
     for raw_node in &request.raw_nodes {
         if raw_by_node_id
@@ -54,6 +55,7 @@ pub fn prepare_baselines(request: crate::PrepareRequest) -> Result<PrepareReport
             let tx = tx.clone();
             let prepared_dir = request.prepared_dir.clone();
             let as_of_date = request.as_of_date;
+            let transform_mode = transform_mode;
             scope.spawn(move || {
                 loop {
                     let next_job = {
@@ -63,7 +65,12 @@ pub fn prepare_baselines(request: crate::PrepareRequest) -> Result<PrepareReport
                     let Some((index, raw_node)) = next_job else {
                         break;
                     };
-                    let result = prepare_one_node_baseline(&prepared_dir, &raw_node, as_of_date);
+                    let result = prepare_one_node_baseline(
+                        &prepared_dir,
+                        &raw_node,
+                        as_of_date,
+                        transform_mode,
+                    );
                     if tx.send((index, result)).is_err() {
                         break;
                     }
@@ -119,6 +126,7 @@ fn prepare_one_node_baseline(
     prepared_dir: &Path,
     raw_node: &RawNodeInput,
     as_of_date: NaiveDate,
+    transform_mode: TransformMode,
 ) -> Result<PreparedNodeMetadata> {
     let file_stem = safe_node_file_stem(&raw_node.node_id);
     let coarsened_db_path = prepared_dir
@@ -131,9 +139,12 @@ fn prepare_one_node_baseline(
     remove_if_exists(&coarsened_db_path)?;
     remove_if_exists(&exact_db_path)?;
 
-    app::run_dual_pipeline_with_options(
+    let (coarsened_mode, exact_mode) = prepared_baseline_modes(transform_mode);
+    app::run_dual_pipeline_with_modes(
         &coarsened_db_path,
+        coarsened_mode,
         &exact_db_path,
+        exact_mode,
         &raw_node.input_dir,
         None,
         as_of_date,
@@ -146,6 +157,13 @@ fn prepare_one_node_baseline(
         coarsened_db_path: coarsened_db_path.display().to_string(),
         exact_db_path: exact_db_path.display().to_string(),
     })
+}
+
+fn prepared_baseline_modes(transform_mode: TransformMode) -> (TransformMode, TransformMode) {
+    match transform_mode {
+        TransformMode::Coarsened => (TransformMode::Coarsened, TransformMode::Exact),
+        TransformMode::Exact => (TransformMode::Exact, TransformMode::Exact),
+    }
 }
 
 pub fn parse_raw_node_spec(spec: &str) -> Result<RawNodeInput> {

@@ -50,9 +50,31 @@ pub fn run_dual_ingest(
     node_secret: &str,
     max_files: Option<usize>,
 ) -> Result<IngestReport> {
-    fresh::run_dual_ingest(
+    run_dual_ingest_with_modes(
         coarsened_conn,
+        TransformMode::Coarsened,
         exact_conn,
+        TransformMode::Exact,
+        input_dir,
+        node_secret,
+        max_files,
+    )
+}
+
+pub fn run_dual_ingest_with_modes(
+    first_conn: &mut Connection,
+    first_mode: TransformMode,
+    second_conn: &mut Connection,
+    second_mode: TransformMode,
+    input_dir: &Path,
+    node_secret: &str,
+    max_files: Option<usize>,
+) -> Result<IngestReport> {
+    fresh::run_dual_ingest_with_modes(
+        first_conn,
+        first_mode,
+        second_conn,
+        second_mode,
         input_dir,
         node_secret,
         max_files,
