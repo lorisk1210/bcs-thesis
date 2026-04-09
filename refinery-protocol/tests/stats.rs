@@ -47,6 +47,24 @@ fn subgroup_age_bucket_schema_preserves_bucket_labels() {
 }
 
 #[test]
+fn dose_response_schema_uses_low_medium_high_order() {
+    let schema = schema_for_query(QueryTemplate::DoseResponseTrend, &json!({}))
+        .expect("schema should build");
+    assert_eq!(schema.schema_id, "dose_response_trend:dose_bucket:v1");
+    assert_eq!(
+        schema.slot_labels,
+        vec![
+            "group:low:n",
+            "group:low:outcome_sum",
+            "group:medium:n",
+            "group:medium:outcome_sum",
+            "group:high:n",
+            "group:high:outcome_sum",
+        ]
+    );
+}
+
+#[test]
 fn slot_bytes_round_trip() {
     let slots = vec![1u64, u64::MAX, 44u64];
     let encoded = encode_slot_bytes(&slots);

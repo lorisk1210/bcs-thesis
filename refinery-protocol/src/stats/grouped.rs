@@ -14,7 +14,7 @@ use crate::query::QueryTemplate;
 
 const GROUP_SLOT_STRIDE: usize = 2;
 const GENDER_GROUPS: &[&str] = &["female", "male", "other", "unknown"];
-const DOSE_GROUPS: &[&str] = &["high", "low", "medium"];
+const DOSE_GROUPS: &[&str] = &["low", "medium", "high"];
 
 pub(crate) fn schema_for_query(
     template: QueryTemplate,
