@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::io::{self, Write};
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -57,7 +58,6 @@ pub async fn serve(config: NodeServerConfig, mode: OutputMode) -> Result<()> {
         .bind_addr
         .parse()
         .with_context(|| format!("invalid bind address {}", config.bind_addr))?;
-    let node_id = config.node_id.clone();
     let smpc_capability = smpc::load_smpc_capability()?;
 
     let service = NodeGrpcService {
@@ -74,17 +74,19 @@ pub async fn serve(config: NodeServerConfig, mode: OutputMode) -> Result<()> {
         builder = builder.tls_config(tls)?;
     }
 
-    let started_output = render_node_server_started(
-        mode,
-        &NodeServerStartedData {
-            node_id: service.state.config.node_id.clone(),
-            bind_addr: addr.to_string(),
-            database: service.state.config.db_path.display().to_string(),
-            input_dir: service.state.config.input_dir.display().to_string(),
-            tls_enabled: service.state.config.tls.cert_path.is_some(),
-        },
-    );
-    print!("{started_output}");
+    let render_data = NodeServerStartedData {
+        node_id: service.state.config.node_id.clone(),
+        bind_addr: addr.to_string(),
+        database: service.state.config.db_path.display().to_string(),
+        input_dir: service.state.config.input_dir.display().to_string(),
+        tls_enabled: service.state.config.tls.cert_path.is_some(),
+    };
+    let started_output = render_node_server_started(mode, &render_data);
+    {
+        let mut stdout = io::stdout();
+        write!(stdout, "{started_output}")?;
+        stdout.flush()?;
+    }
     let stopped_by_signal = Arc::new(AtomicBool::new(false));
     let shutdown_seen = Arc::clone(&stopped_by_signal);
 
@@ -97,15 +99,18 @@ pub async fn serve(config: NodeServerConfig, mode: OutputMode) -> Result<()> {
         .await?;
 
     if stopped_by_signal.load(Ordering::SeqCst) {
-        let stopped_output = render_node_server_stopped(mode, &node_id, &addr.to_string());
+        let stopped_output = render_node_server_stopped(mode, &render_data);
+        let mut stdout = io::stdout();
         if mode == OutputMode::Pretty {
-            print!(
+            write!(
+                stdout,
                 "{}",
                 overwrite_service_render(&started_output, &stopped_output)
-            );
+            )?;
         } else {
-            print!("{stopped_output}");
+            write!(stdout, "{stopped_output}")?;
         }
+        stdout.flush()?;
     }
 
     Ok(())
