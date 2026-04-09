@@ -1,9 +1,9 @@
 use std::path::PathBuf;
 
 use proof_check::{
-    DistortionExpectation, LIVE_POST_RELEASE_LABEL, EXACT_POST_RELEASE_LABEL,
-    SectionStatus, build_final_release_utility_section, checker_job_id,
-    classify_distortion_expectation, diff_payloads, release_result_for_proof_check,
+    DistortionExpectation, EXACT_POST_RELEASE_LABEL, LIVE_POST_RELEASE_LABEL, SectionStatus,
+    build_final_release_utility_section, checker_job_id, classify_distortion_expectation,
+    diff_payloads, release_result_for_proof_check,
 };
 use refinery_orchestrator::config::GlobalPrivacyConfig;
 use refinery_protocol::{QueryResult, QueryTemplate, ReleaseMode};
@@ -108,7 +108,11 @@ fn checker_job_ids_are_namespaced() {
     assert_ne!(first, second);
 }
 
-fn sample_query_result(raw_result: serde_json::Value, cohort_size: usize, sensitivity: f64) -> QueryResult {
+fn sample_query_result(
+    raw_result: serde_json::Value,
+    cohort_size: usize,
+    sensitivity: f64,
+) -> QueryResult {
     QueryResult {
         template_name: "test".to_string(),
         raw_result,

@@ -233,9 +233,12 @@ fn canonical_round_trip_supports_all_templates() {
     ];
 
     for (template, params, stats, cohort_size) in cases {
-        let local = LocalStatistics::from_stats_value(template, &params, stats.clone(), cohort_size)
-            .expect("local statistics should encode");
-        let decoded = local.to_stats_value().expect("local statistics should decode");
+        let local =
+            LocalStatistics::from_stats_value(template, &params, stats.clone(), cohort_size)
+                .expect("local statistics should encode");
+        let decoded = local
+            .to_stats_value()
+            .expect("local statistics should decode");
         match template {
             QueryTemplate::SubgroupEffectEstimate | QueryTemplate::DoseResponseTrend => {
                 let mut expected_groups = stats["groups"]

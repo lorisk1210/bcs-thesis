@@ -45,8 +45,16 @@ fn prepare_baselines_is_stable_across_runs() -> Result<()> {
     assert_eq!(first.prepared_dir, second.prepared_dir);
     assert_eq!(first.as_of_date, second.as_of_date);
     assert_eq!(
-        first.nodes.iter().map(|node| &node.node_id).collect::<Vec<_>>(),
-        second.nodes.iter().map(|node| &node.node_id).collect::<Vec<_>>()
+        first
+            .nodes
+            .iter()
+            .map(|node| &node.node_id)
+            .collect::<Vec<_>>(),
+        second
+            .nodes
+            .iter()
+            .map(|node| &node.node_id)
+            .collect::<Vec<_>>()
     );
     assert_eq!(first_metadata, second_metadata);
     assert_eq!(first_snapshots, second_snapshots);

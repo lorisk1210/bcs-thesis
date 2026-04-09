@@ -26,7 +26,8 @@ fn seeded_release_is_deterministic() {
     };
 
     let first = release_result_with_seed(&query_result, &config, 42).expect("seeded release works");
-    let second = release_result_with_seed(&query_result, &config, 42).expect("seeded release works");
+    let second =
+        release_result_with_seed(&query_result, &config, 42).expect("seeded release works");
     assert_eq!(first.released_result, second.released_result);
     assert_eq!(first.reason, second.reason);
     assert_eq!(first.accepted, second.accepted);

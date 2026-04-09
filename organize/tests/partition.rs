@@ -2,8 +2,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use rand::random;
 use organize::partition_input;
+use rand::random;
 
 #[test]
 fn partition_input_creates_stable_node_names() {
@@ -24,7 +24,10 @@ fn partition_input_creates_stable_node_names() {
     node_names.sort();
 
     assert_eq!(summary.files_scanned, 3);
-    assert_eq!(summary.files_per_node.keys().cloned().collect::<Vec<_>>(), node_names);
+    assert_eq!(
+        summary.files_per_node.keys().cloned().collect::<Vec<_>>(),
+        node_names
+    );
     assert_eq!(node_names, vec!["node-a", "node-b", "node-c"]);
 
     fs::remove_dir_all(&input_dir).expect("temporary input directory should be removed");

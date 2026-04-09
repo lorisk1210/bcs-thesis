@@ -3,10 +3,18 @@ use serde_json::json;
 
 #[test]
 fn release_mode_parses_expected_values() {
-    assert_eq!("dp".parse::<ReleaseMode>().expect("dp should parse"), ReleaseMode::Dp);
-    assert_eq!("raw".parse::<ReleaseMode>().expect("raw should parse"), ReleaseMode::Raw);
     assert_eq!(
-        "seeded".parse::<ReleaseMode>().expect("seeded should parse"),
+        "dp".parse::<ReleaseMode>().expect("dp should parse"),
+        ReleaseMode::Dp
+    );
+    assert_eq!(
+        "raw".parse::<ReleaseMode>().expect("raw should parse"),
+        ReleaseMode::Raw
+    );
+    assert_eq!(
+        "seeded"
+            .parse::<ReleaseMode>()
+            .expect("seeded should parse"),
         ReleaseMode::Seeded
     );
 }

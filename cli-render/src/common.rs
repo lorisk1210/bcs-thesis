@@ -57,6 +57,8 @@ pub(crate) fn status_badge(mode: OutputMode, status: &str) -> String {
         "failed" => ("FAILED", RED, BG_RED),
         "released" => ("RELEASED", GREEN, BG_GREEN),
         "rejected" => ("REJECTED", RED, BG_RED),
+        "active" => ("ACTIVE", GREEN, BG_GREEN),
+        "offline" => ("OFFLINE", RED, BG_RED),
         "available" => ("AVAILABLE", GREEN, BG_GREEN),
         "suppressed" => ("SUPPRESSED", YELLOW, BG_YELLOW),
         "match" => ("MATCH", GREEN, BG_GREEN),

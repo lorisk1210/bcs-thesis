@@ -5,10 +5,22 @@ fn open_ledger_creates_release_audit_columns() {
     let path = unique_test_path("ledger.duckdb");
     let conn = refinery_orchestrator::ledger::open_ledger(&path).expect("ledger should open");
 
-    assert!(has_column(&conn, "federated_job_ledger", "released_result_json"));
+    assert!(has_column(
+        &conn,
+        "federated_job_ledger",
+        "released_result_json"
+    ));
     assert!(has_column(&conn, "federated_job_ledger", "release_mode"));
-    assert!(has_column(&conn, "federated_release_ledger", "released_result_json"));
-    assert!(has_column(&conn, "federated_release_ledger", "release_mode"));
+    assert!(has_column(
+        &conn,
+        "federated_release_ledger",
+        "released_result_json"
+    ));
+    assert!(has_column(
+        &conn,
+        "federated_release_ledger",
+        "release_mode"
+    ));
 
     std::fs::remove_file(path).ok();
 }

@@ -6,8 +6,8 @@ use anyhow::Result;
 use common::{feasibility_payload, inconclusive_report, make_available_report, unique_test_path};
 use proof_check::{
     AggregateBatchStatus, AggregateMetricSummary, AggregateUtilitySummary, BatchQueryReport,
-    BatchReport, BatchRequestMetadata, QueryUtilityContext,
-    batch_exit_code, build_aggregate_utility_summary, discover_query_files, evaluate_utility,
+    BatchReport, BatchRequestMetadata, QueryUtilityContext, batch_exit_code,
+    build_aggregate_utility_summary, discover_query_files, evaluate_utility,
 };
 use refinery_protocol::QueryTemplate;
 use serde_json::json;
@@ -120,8 +120,11 @@ fn aggregate_status_can_be_preserved_on_evaluable_queries() -> Result<()> {
         }),
     )?;
     let inconclusive_report = inconclusive_report();
-    let inconclusive_verdict =
-        evaluate_utility(QueryTemplate::CohortFeasibilityCount, &inconclusive_report, None)?;
+    let inconclusive_verdict = evaluate_utility(
+        QueryTemplate::CohortFeasibilityCount,
+        &inconclusive_report,
+        None,
+    )?;
 
     let summary = build_aggregate_utility_summary(&[
         BatchQueryReport {
