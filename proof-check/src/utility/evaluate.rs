@@ -401,8 +401,10 @@ fn evaluate_subgroup_effect(
     acc.context_metric = find_metric_summary(report, "per_group_share");
     acc.thresholds_applied
         .push("Require max per-group mean_outcome relative gap <= 0.10.".to_string());
-    acc.thresholds_applied
-        .push("Require max per-group share absolute gap <= 0.05.".to_string());
+    if acc.context_metric.is_some() {
+        acc.thresholds_applied
+            .push("Require max per-group share absolute gap <= 0.05.".to_string());
+    }
     acc.thresholds_applied.push(format!(
         "Require the same top-risk and bottom-risk subgroup unless exact raw means are tied within {:.6}.",
         0.02 * clip_range
@@ -432,19 +434,21 @@ fn evaluate_subgroup_effect(
             format_optional_number(Some(primary_rel_gap))
         ),
     ));
-    acc.check_results.push(utility_check(
-        "per_group_share_gap",
-        UtilityCheckKind::Soft,
-        if context_abs_gap <= 0.05 + EPSILON {
-            UtilityCheckStatus::Passed
-        } else {
-            UtilityCheckStatus::Failed
-        },
-        format!(
-            "max_absolute_gap={}, allowed=0.050000",
-            format_optional_number(Some(context_abs_gap))
-        ),
-    ));
+    if acc.context_metric.is_some() {
+        acc.check_results.push(utility_check(
+            "per_group_share_gap",
+            UtilityCheckKind::Soft,
+            if context_abs_gap <= 0.05 + EPSILON {
+                UtilityCheckStatus::Passed
+            } else {
+                UtilityCheckStatus::Failed
+            },
+            format!(
+                "max_absolute_gap={}, allowed=0.050000",
+                format_optional_number(Some(context_abs_gap))
+            ),
+        ));
+    }
 
     let raw_means = grouped_metric_map(exact_payload, "subgroup", "mean_outcome")?;
     let released_means = grouped_metric_map(released_payload, "subgroup", "mean_outcome")?;

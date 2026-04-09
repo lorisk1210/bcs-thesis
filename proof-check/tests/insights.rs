@@ -21,6 +21,8 @@ fn release_vs_exact_raw_compares_released_payload_to_exact_raw_result() {
         raw_result: json!({"count": 20}),
         cohort_size: 20,
         sensitivity: 1.0,
+        dp_release_stats: None,
+        clip_bounds: None,
     };
 
     let section =
@@ -84,6 +86,8 @@ fn template_metrics_for_comparative_effectiveness_include_primary_and_context_me
                 .expect("raw payload"),
             cohort_size: 351,
             sensitivity: 0.8547008547008547,
+            dp_release_stats: None,
+            clip_bounds: None,
         }),
         None,
         &[],

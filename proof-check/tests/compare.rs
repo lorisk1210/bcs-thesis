@@ -193,6 +193,8 @@ fn sample_query_result(
         raw_result,
         cohort_size,
         sensitivity,
+        dp_release_stats: None,
+        clip_bounds: None,
     }
 }
 

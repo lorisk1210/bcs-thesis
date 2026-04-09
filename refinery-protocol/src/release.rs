@@ -7,7 +7,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::dp::{apply_noise, count_noised_metrics, sample_laplace};
-use crate::{QueryResult, QueryTemplate};
+use crate::{ClipBounds, QueryResult, QueryTemplate};
+
+const SUBGROUP_SUM_EPSILON_SHARE: f64 = 0.8;
+const SUBGROUP_COUNT_EPSILON_SHARE: f64 = 0.2;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -107,6 +110,9 @@ where
     if query_result.template_name == QueryTemplate::CohortFeasibilityCount.as_str() {
         return release_cohort_feasibility_with_rng(query_result, epsilon, rng);
     }
+    if query_result.template_name == QueryTemplate::SubgroupEffectEstimate.as_str() {
+        return release_subgroup_effect_with_rng(query_result, epsilon, rng);
+    }
 
     let mut released_result = query_result.raw_result.clone();
     let noised_metric_count = count_noised_metrics(&released_result).max(1);
@@ -149,9 +155,70 @@ where
     }))
 }
 
+fn release_subgroup_effect_with_rng<R>(
+    query_result: &QueryResult,
+    epsilon: f64,
+    rng: &mut R,
+) -> Result<Value>
+where
+    R: Rng + ?Sized,
+{
+    let stats = query_result
+        .dp_release_stats
+        .as_ref()
+        .ok_or_else(|| anyhow!("missing internal stats for subgroup_effect_estimate release"))?;
+    let clip = query_result
+        .clip_bounds
+        .ok_or_else(|| anyhow!("missing clip bounds for subgroup_effect_estimate release"))?;
+    let groups = stats
+        .get("groups")
+        .and_then(Value::as_array)
+        .ok_or_else(|| anyhow!("missing groups array in subgroup_effect_estimate stats"))?;
+    let clip_range = (clip.max - clip.min).abs();
+    let sum_scale = if clip_range <= 0.0 {
+        0.0
+    } else {
+        clip_range / (epsilon * SUBGROUP_SUM_EPSILON_SHARE)
+    };
+    let count_scale = 1.0 / (epsilon * SUBGROUP_COUNT_EPSILON_SHARE);
+
+    let mut released_groups = Vec::with_capacity(groups.len());
+    for group in groups {
+        let subgroup = required_string_field(group, "subgroup")?;
+        let exact_n = required_numeric_field(group, "n")?;
+        let exact_sum = required_numeric_field(group, "outcome_sum")?;
+        let noisy_n = (exact_n + sample_laplace(count_scale, rng)).max(0.0);
+        let mean_outcome = if noisy_n <= f64::EPSILON {
+            Value::Null
+        } else {
+            let noisy_sum = exact_sum + sample_laplace(sum_scale, rng);
+            Value::from(clamp_to_bounds(noisy_sum / noisy_n, clip))
+        };
+        released_groups.push(json!({
+            "subgroup": subgroup,
+            "mean_outcome": mean_outcome
+        }));
+    }
+
+    Ok(json!({ "groups": released_groups }))
+}
+
+fn clamp_to_bounds(value: f64, clip: ClipBounds) -> f64 {
+    let lower = clip.min.min(clip.max);
+    let upper = clip.min.max(clip.max);
+    value.clamp(lower, upper)
+}
+
 fn required_numeric_field(payload: &Value, key: &str) -> Result<f64> {
     payload
         .get(key)
         .and_then(Value::as_f64)
         .ok_or_else(|| anyhow!("missing numeric field '{key}'"))
+}
+
+fn required_string_field<'a>(payload: &'a Value, key: &str) -> Result<&'a str> {
+    payload
+        .get(key)
+        .and_then(Value::as_str)
+        .ok_or_else(|| anyhow!("missing string field '{key}'"))
 }

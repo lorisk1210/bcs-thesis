@@ -279,8 +279,6 @@ fn build_template_metrics(
         QueryTemplate::SubgroupEffectEstimate => {
             let released_means = group_metric_map(released, "subgroup", "mean_outcome")?;
             let exact_means = group_metric_map(exact, "subgroup", "mean_outcome")?;
-            let released_counts = group_metric_map(released, "subgroup", "n")?;
-            let exact_counts = group_metric_map(exact, "subgroup", "n")?;
 
             let primary = keyed_metric(
                 "per_group_mean_outcome",
@@ -290,29 +288,42 @@ fn build_template_metrics(
                     "Compare subgroup means first to see whether the within-group outcome pattern survives the release.",
                 ),
             );
-            let context_metrics = vec![
-                keyed_metric(
-                    "per_group_share",
-                    &share_map(&released_counts),
-                    &share_map(&exact_counts),
-                    Some("Group share shows whether the noisy subgroup composition changed."),
-                ),
-                keyed_metric(
-                    "per_group_lift",
-                    &lift_map(&released_counts, &released_means),
-                    &lift_map(&exact_counts, &exact_means),
-                    Some(
-                        "Lift centers each subgroup against the overall cohort in the same result.",
+            if let (Some(released_counts), Some(exact_counts)) = (
+                optional_group_metric_map(released, "subgroup", "n")?,
+                optional_group_metric_map(exact, "subgroup", "n")?,
+            ) {
+                let context_metrics = vec![
+                    keyed_metric(
+                        "per_group_share",
+                        &share_map(&released_counts),
+                        &share_map(&exact_counts),
+                        Some("Group share shows whether the noisy subgroup composition changed."),
                     ),
-                ),
-            ];
-            Ok((
-                primary,
-                context_metrics,
-                vec![
-                    "Interpret subgroup results in two passes: first compare per-group mean_outcome, then compare per-group share or lift to see whether composition changes explain the movement.".to_string(),
-                ],
-            ))
+                    keyed_metric(
+                        "per_group_lift",
+                        &lift_map(&released_counts, &released_means),
+                        &lift_map(&exact_counts, &exact_means),
+                        Some(
+                            "Lift centers each subgroup against the overall cohort in the same result.",
+                        ),
+                    ),
+                ];
+                Ok((
+                    primary,
+                    context_metrics,
+                    vec![
+                        "Interpret subgroup results in two passes: first compare per-group mean_outcome, then compare per-group share or lift to see whether composition changes explain the movement.".to_string(),
+                    ],
+                ))
+            } else {
+                Ok((
+                    primary,
+                    Vec::new(),
+                    vec![
+                        "Interpret subgroup results by comparing per-group mean_outcome. Released subgroup counts are intentionally hidden, so share and lift context metrics are skipped.".to_string(),
+                    ],
+                ))
+            }
         }
         QueryTemplate::DoseResponseTrend => {
             let released_means = group_metric_map(released, "dose_bucket", "mean_outcome")?;
@@ -632,6 +643,31 @@ fn group_metric_map(
     }
 
     Ok(map)
+}
+
+fn optional_group_metric_map(
+    payload: &Value,
+    group_key: &str,
+    metric_key: &str,
+) -> Result<Option<BTreeMap<String, Option<f64>>>> {
+    let groups = payload
+        .get("groups")
+        .and_then(Value::as_array)
+        .ok_or_else(|| anyhow!("missing groups array"))?;
+    let mut map = BTreeMap::new();
+
+    for group in groups {
+        let label = group
+            .get(group_key)
+            .and_then(Value::as_str)
+            .ok_or_else(|| anyhow!("missing group label '{group_key}'"))?;
+        let Some(metric_value) = group.get(metric_key) else {
+            return Ok(None);
+        };
+        map.insert(label.to_string(), value_to_number(metric_value)?);
+    }
+
+    Ok(Some(map))
 }
 
 fn share(left: Option<f64>, right: Option<f64>) -> Option<f64> {

@@ -103,4 +103,8 @@ pub struct QueryResult {
     pub raw_result: Value,
     pub cohort_size: usize,
     pub sensitivity: f64,
+    #[serde(default, skip_serializing, skip_deserializing)]
+    pub dp_release_stats: Option<Value>,
+    #[serde(default, skip_serializing, skip_deserializing)]
+    pub clip_bounds: Option<ClipBounds>,
 }
