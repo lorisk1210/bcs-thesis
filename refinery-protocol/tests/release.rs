@@ -1,5 +1,6 @@
 use refinery_protocol::{
-    ClipBounds, QueryResult, QueryTemplate, ReleaseMode, release_query_result,
+    ClipBounds, QueryResult, QueryTemplate, ReleaseMode, grouped_release_rejection_reason,
+    release_query_result,
 };
 use serde_json::json;
 
@@ -145,4 +146,113 @@ fn subgroup_release_derives_means_from_hidden_noisy_stats() {
                     .is_some_and(|value| (0.0..=1.0).contains(&value))
         );
     }
+}
+
+#[test]
+fn dose_response_release_derives_bounded_means_from_hidden_noisy_stats() {
+    let query_result = QueryResult {
+        template_name: QueryTemplate::DoseResponseTrend.as_str().to_string(),
+        raw_result: json!({
+            "groups": [
+                {"dose_bucket": "low", "n": 3, "mean_outcome": 2.4797979800000003},
+                {"dose_bucket": "medium", "n": 21, "mean_outcome": 1.9582149331904763},
+                {"dose_bucket": "high", "n": 313, "mean_outcome": 2.300877791370607}
+            ]
+        }),
+        cohort_size: 337,
+        sensitivity: 1.0,
+        dp_release_stats: Some(json!({
+            "groups": [
+                {"dose_bucket": "low", "n": 3, "outcome_sum": 7.43939394},
+                {"dose_bucket": "medium", "n": 21, "outcome_sum": 41.122513597},
+                {"dose_bucket": "high", "n": 313, "outcome_sum": 720.1747486990001}
+            ]
+        })),
+        clip_bounds: Some(ClipBounds { min: 0.0, max: 300.0 }),
+    };
+
+    let released = release_query_result(&query_result, 1.0, ReleaseMode::Seeded, Some(7))
+        .expect("seeded release should work");
+    let groups = released["groups"]
+        .as_array()
+        .expect("groups should be an array");
+
+    assert_eq!(groups.len(), 3);
+    for group in groups {
+        assert!(group.get("outcome_sum").is_none());
+        assert!(
+            group.get("n")
+                .and_then(|value| value.as_f64())
+                .is_some_and(|value| value >= 0.0)
+        );
+        assert!(
+            group.get("mean_outcome").is_some_and(|value| {
+                value.is_null()
+                    || value
+                        .as_f64()
+                        .is_some_and(|numeric| (0.0..=300.0).contains(&numeric))
+            })
+        );
+    }
+}
+
+#[test]
+fn grouped_release_rejection_reason_lists_underpowered_subgroups() {
+    let query_result = QueryResult {
+        template_name: QueryTemplate::SubgroupEffectEstimate.as_str().to_string(),
+        raw_result: json!({
+            "groups": [
+                {"subgroup": "female", "n": 12, "mean_outcome": 0.2},
+                {"subgroup": "male", "n": 30, "mean_outcome": 0.3}
+            ]
+        }),
+        cohort_size: 42,
+        sensitivity: 1.0 / 42.0,
+        dp_release_stats: Some(json!({
+            "groups": [
+                {"subgroup": "female", "n": 12, "outcome_sum": 2.4},
+                {"subgroup": "male", "n": 30, "outcome_sum": 9.0}
+            ]
+        })),
+        clip_bounds: Some(ClipBounds { min: 0.0, max: 1.0 }),
+    };
+
+    let reason =
+        grouped_release_rejection_reason(&query_result, 25).expect("reason should compute");
+    let reason = reason.expect("grouped query should be rejected");
+
+    assert!(reason.contains("below minimum 25"));
+    assert!(reason.contains("female=12"));
+}
+
+#[test]
+fn grouped_release_rejection_reason_lists_underpowered_dose_buckets() {
+    let query_result = QueryResult {
+        template_name: QueryTemplate::DoseResponseTrend.as_str().to_string(),
+        raw_result: json!({
+            "groups": [
+                {"dose_bucket": "low", "n": 3, "mean_outcome": 2.4797979800000003},
+                {"dose_bucket": "medium", "n": 21, "mean_outcome": 1.9582149331904763},
+                {"dose_bucket": "high", "n": 313, "mean_outcome": 2.300877791370607}
+            ]
+        }),
+        cohort_size: 337,
+        sensitivity: 1.0,
+        dp_release_stats: Some(json!({
+            "groups": [
+                {"dose_bucket": "low", "n": 3, "outcome_sum": 7.43939394},
+                {"dose_bucket": "medium", "n": 21, "outcome_sum": 41.122513597},
+                {"dose_bucket": "high", "n": 313, "outcome_sum": 720.1747486990001}
+            ]
+        })),
+        clip_bounds: Some(ClipBounds { min: 0.0, max: 300.0 }),
+    };
+
+    let reason =
+        grouped_release_rejection_reason(&query_result, 25).expect("reason should compute");
+    let reason = reason.expect("grouped query should be rejected");
+
+    assert!(reason.contains("below minimum 25"));
+    assert!(reason.contains("low=3"));
+    assert!(reason.contains("medium=21"));
 }

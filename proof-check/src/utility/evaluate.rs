@@ -74,17 +74,9 @@ pub fn evaluate_utility(
         report.release_vs_exact_raw.status,
         report.template_metrics.status,
     ) {
-        (AnalysisStatus::Suppressed, _) | (_, AnalysisStatus::Suppressed) => {
-            return Ok(UtilityVerdictSection {
-                status: UtilityVerdictStatus::Suppressed,
-                primary_metric: None,
-                context_metric: None,
-                thresholds_applied: Vec::new(),
-                check_results: Vec::new(),
-                notes: combined_notes(report),
-            });
-        }
-        (AnalysisStatus::Inconclusive, _)
+        (AnalysisStatus::Suppressed, _)
+        | (_, AnalysisStatus::Suppressed)
+        | (AnalysisStatus::Inconclusive, _)
         | (_, AnalysisStatus::Inconclusive)
         | (AnalysisStatus::Skipped, _)
         | (_, AnalysisStatus::Skipped) => {

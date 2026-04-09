@@ -32,7 +32,7 @@ pub fn build_release_vs_exact_raw_section(
                     live_release.reason
                 ));
                 return Ok(PayloadComparisonSection {
-                    status: AnalysisStatus::Suppressed,
+                    status: AnalysisStatus::Inconclusive,
                     left_label: LIVE_POST_RELEASE_LABEL.to_string(),
                     right_label: "exact_raw_baseline".to_string(),
                     left_payload,
@@ -106,7 +106,7 @@ pub fn build_template_metrics_section(
         (Some(live_release), Some(exact_baseline)) => {
             if !live_release.accepted {
                 return Ok(TemplateMetricsSection {
-                    status: AnalysisStatus::Suppressed,
+                    status: AnalysisStatus::Inconclusive,
                     primary_metric: None,
                     context_metrics: Vec::new(),
                     notes: vec![format!(
