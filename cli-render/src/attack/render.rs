@@ -2,9 +2,25 @@ use std::fmt::Write;
 
 use crate::OutputMode;
 use crate::common::{key_value, section_header, status_badge, title};
-use crate::frame::{BOLD, DARK_GRAY, RESET, frame_cli_output};
+use crate::frame::{
+    BLUE, BOLD, CYAN, DARK_GRAY, DIM, GREEN, MAGENTA, RED, RESET, YELLOW, frame_cli_output,
+};
 
-use super::data::{AttackPlantCanaryData, AttackRunData, AttackSweepData};
+use super::data::{AttackPlantCanaryData, AttackRunData, AttackSweepCellData, AttackSweepData};
+
+// Per-axis ANSI colors for sweep-cell rendering. Keeping the color the same
+// for a given axis across every cell line lets users visually lock onto a
+// single dimension (e.g. "all the blue epsilons") without needing a new
+// section per value. Green/yellow/red are reserved for status badges and
+// group summaries, so we stick to blue/magenta/cyan here.
+const EPSILON_COLOR: &str = BLUE;
+const TARGET_COLOR: &str = MAGENTA;
+const KNOWLEDGE_COLOR: &str = CYAN;
+const BUDGET_COLOR: &str = DARK_GRAY;
+
+fn axis_pair(label: &str, value: &str, color: &str) -> String {
+    format!("{DIM}{label}={RESET}{BOLD}{color}{value}{RESET}")
+}
 
 pub fn render_attack_run_report(mode: OutputMode, data: &AttackRunData) -> String {
     let inner = match mode {
@@ -355,51 +371,127 @@ fn render_attack_sweep_pretty(mode: OutputMode, data: &AttackSweepData) -> Strin
     }
     let _ = writeln!(out);
     let _ = writeln!(out, "{}", section_header(mode, "Sweep Cells"));
-    let _ = writeln!(out);
-    for cell in &data.cells {
-        let cell_badge = if cell.success_rate >= 0.5 {
-            status_badge(mode, "failed")
-        } else if cell.success_rate > 0.0 {
-            status_badge(mode, "borderline")
-        } else {
-            status_badge(mode, "passed")
-        };
-        let eps = cell
-            .epsilon
-            .map(|v| format!("{v:.3}"))
-            .unwrap_or_else(|| "-".to_string());
-        let _ = writeln!(
-            out,
-            "    {BOLD}{attack}{RESET} {DARK_GRAY}/{RESET} {config} eps={eps} target={target} knowledge={knowledge} budget={budget}  {cell_badge}",
-            attack = cell.attack_kind,
-            config = cell.evaluation_config,
-            target = cell.target_type,
-            knowledge = cell.knowledge_level,
-            budget = cell.query_budget,
-        );
-        let median_queries = cell
-            .median_queries_to_success
-            .map(|v| format!("{v:.2}"))
-            .unwrap_or_else(|| "-".to_string());
-        let median_size = cell
-            .median_final_candidate_size
-            .map(|v| format!("{v:.2}"))
-            .unwrap_or_else(|| "-".to_string());
-        let median_post = cell
-            .median_final_posterior
-            .map(|v| format!("{v:.4}"))
-            .unwrap_or_else(|| "-".to_string());
-        let _ = writeln!(
-            out,
-            "      {DARK_GRAY}•{RESET} repetitions={reps} successes={succ} rate={rate:.4}",
-            reps = cell.repetitions,
-            succ = cell.success_count,
-            rate = cell.success_rate,
-        );
-        let _ = writeln!(
-            out,
-            "      {DARK_GRAY}•{RESET} median_queries_to_success={median_queries}  median_final_size={median_size}  median_posterior={median_post}",
-        );
+
+    for group in group_sweep_cells(&data.cells) {
+        render_sweep_group_pretty(&mut out, mode, &group);
     }
     out
+}
+
+struct SweepCellGroup<'a> {
+    attack: &'a str,
+    config: &'a str,
+    cells: Vec<&'a AttackSweepCellData>,
+}
+
+// Group cells by (attack, config) while preserving the order in which each
+// pair first appears. `data.cells` is already sorted by attack -> config ->
+// epsilon -> target -> knowledge -> budget (see summarize() in sweep.rs), so
+// this just chunks the flat list into contiguous (attack, config) sections.
+fn group_sweep_cells(cells: &[AttackSweepCellData]) -> Vec<SweepCellGroup<'_>> {
+    let mut groups: Vec<SweepCellGroup<'_>> = Vec::new();
+    for cell in cells {
+        let attack = cell.attack_kind.as_str();
+        let config = cell.evaluation_config.as_str();
+        match groups.last_mut() {
+            Some(g) if g.attack == attack && g.config == config => g.cells.push(cell),
+            _ => groups.push(SweepCellGroup {
+                attack,
+                config,
+                cells: vec![cell],
+            }),
+        }
+    }
+    groups
+}
+
+fn classify_cell(cell: &AttackSweepCellData) -> &'static str {
+    if cell.success_rate >= 0.5 {
+        "failed"
+    } else if cell.success_rate > 0.0 {
+        "borderline"
+    } else {
+        "passed"
+    }
+}
+
+fn render_sweep_group_pretty(out: &mut String, mode: OutputMode, group: &SweepCellGroup<'_>) {
+    let total = group.cells.len();
+    let failed = group
+        .cells
+        .iter()
+        .filter(|c| classify_cell(c) == "failed")
+        .count();
+    let borderline = group
+        .cells
+        .iter()
+        .filter(|c| classify_cell(c) == "borderline")
+        .count();
+    let passed = total - failed - borderline;
+
+    let group_status = if failed > 0 {
+        "failed"
+    } else if borderline > 0 {
+        "borderline"
+    } else {
+        "passed"
+    };
+    let group_badge = status_badge(mode, group_status);
+
+    let _ = writeln!(out);
+    let _ = writeln!(
+        out,
+        "  {BOLD}{CYAN}{attack}{RESET} {DARK_GRAY}/{RESET} {BOLD}{MAGENTA}{config}{RESET}  {group_badge}",
+        attack = group.attack,
+        config = group.config,
+    );
+    let _ = writeln!(
+        out,
+        "    {DARK_GRAY}▸{RESET} {DIM}{total} cells:{RESET} {GREEN}{passed} passed{RESET}{DARK_GRAY},{RESET} {YELLOW}{borderline} borderline{RESET}{DARK_GRAY},{RESET} {RED}{failed} failed{RESET}",
+    );
+
+    for cell in &group.cells {
+        render_sweep_cell_pretty(out, mode, cell);
+    }
+}
+
+fn render_sweep_cell_pretty(out: &mut String, mode: OutputMode, cell: &AttackSweepCellData) {
+    let cell_badge = status_badge(mode, classify_cell(cell));
+    let eps = cell
+        .epsilon
+        .map(|v| format!("{v:.3}"))
+        .unwrap_or_else(|| "-".to_string());
+    let median_queries = cell
+        .median_queries_to_success
+        .map(|v| format!("{v:.2}"))
+        .unwrap_or_else(|| "-".to_string());
+    let median_size = cell
+        .median_final_candidate_size
+        .map(|v| format!("{v:.2}"))
+        .unwrap_or_else(|| "-".to_string());
+    let median_post = cell
+        .median_final_posterior
+        .map(|v| format!("{v:.4}"))
+        .unwrap_or_else(|| "-".to_string());
+
+    let eps_pair = axis_pair("eps", &eps, EPSILON_COLOR);
+    let target_pair = axis_pair("target", &cell.target_type, TARGET_COLOR);
+    let knowledge_pair = axis_pair("knowledge", &cell.knowledge_level, KNOWLEDGE_COLOR);
+    let budget_pair = axis_pair("budget", &cell.query_budget.to_string(), BUDGET_COLOR);
+
+    let _ = writeln!(
+        out,
+        "      {DARK_GRAY}•{RESET} {eps_pair}  {target_pair}  {knowledge_pair}  {budget_pair}  {cell_badge}",
+    );
+    let _ = writeln!(
+        out,
+        "          {DARK_GRAY}◦{RESET} {DIM}repetitions={reps} successes={succ} rate={rate:.4}{RESET}",
+        reps = cell.repetitions,
+        succ = cell.success_count,
+        rate = cell.success_rate,
+    );
+    let _ = writeln!(
+        out,
+        "          {DARK_GRAY}◦{RESET} {DIM}median_queries_to_success={median_queries}  median_final_size={median_size}  median_posterior={median_post}{RESET}",
+    );
 }
