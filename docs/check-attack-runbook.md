@@ -151,7 +151,7 @@ cargo run -p check-attack --release -- sweep \
   --epsilons 0.5,2.5 \
   --target-types random,rare \
   --knowledge-levels medium,strong \
-  --query-budgets 8,20 \
+  --query-budgets 50 \
   --repetitions 3 \
   --min-cohort 25 \
   --dp-seed 42 \
@@ -169,9 +169,9 @@ cargo run -p check-attack --release -- sweep \
   --configs raw-exact,raw-coarsened,dp-exact,dp-coarsened \
   --epsilons 0.5,2.5 \
   --target-types random,rare,canary \
-  --knowledge-levels weak,medium,strong \
-  --query-budgets 8,20,50 \
-  --repetitions 30 \
+  --knowledge-levels medium,strong \
+  --query-budgets 50 \
+  --repetitions 10 \
   --min-cohort 25 \
   --output-dir reports/check-attack-full \
   --node node-a=input/nodes/node-a \
@@ -191,23 +191,24 @@ repetition.
 With the full command above, raw configs use one effective epsilon value and DP
 configs use `0.5` and `2.5`. The resulting matrix is:
 
-- raw configs: `2 configs * 1 epsilon * 4 attacks * 3 targets * 3 knowledge levels * 3 budgets * 30 repetitions = 6,480 runs`
-- DP configs: `2 configs * 2 epsilons * 4 attacks * 3 targets * 3 knowledge levels * 3 budgets * 30 repetitions = 12,960 runs`
-- total: `19,440 attack runs`
+- raw configs: `2 configs * 1 epsilon * 4 attacks * 3 targets * 2 knowledge levels * 1 budget * 10 repetitions = 480 runs`
+- DP configs: `2 configs * 2 epsilons * 4 attacks * 3 targets * 2 knowledge levels * 1 budget * 10 repetitions = 960 runs`
+- total: `1,440 attack runs`
 
 Each attack run may submit multiple federated queries internally. With query
-budgets `8,20,50`, the upper bound is high, but actual usage is lower because
-some attacks stop early. Attribute inference is usually the dominant runtime
-cost because it may test many candidate codes.
+budget `50`, the upper bound is high, but actual usage is lower because some
+attacks stop early. Attribute inference is usually the dominant runtime cost
+because it may test many candidate codes.
 
 If one standalone `check-attack run` takes about `70s`, do not multiply that by
 the full run count directly. A standalone run includes in-memory node database
 preparation, while `sweep` prepares exact/coarsened environments once and reuses
-them. On a MacBook Pro, a practical expectation for the full command is roughly:
+them. For this reduced `1,440`-run matrix, a practical MacBook Pro expectation
+is roughly:
 
-- best case: `3-6 hours`
-- realistic: `6-18 hours`
-- slow case: `18-36+ hours`
+- best case: `20-45 minutes`
+- realistic: `45 minutes-2 hours`
+- slow case: `2-4+ hours`
 
 Run the small sanity sweep first and extrapolate from its wall-clock time before
 starting the full sweep.
@@ -285,21 +286,17 @@ appear as sweep metadata.
 - selects a planted synthetic rare patient
 - useful as a controlled stress test
 
-`--knowledge weak`
-
-- age bucket and gender
-
 `--knowledge medium`
 
-- weak knowledge plus one known condition or medication
+- age bucket, gender, plus one known condition or medication
 
 `--knowledge strong`
 
 - stronger combination of known conditions and medications
 
-Higher knowledge should generally increase attack success. If it does not, check
-whether the selected target has too few known facts or whether coarsening/min
-cohort suppression removes the signal.
+The recommended thesis sweep skips `weak`. If attacks fail with `medium` and
+`strong` knowledge, the weaker attacker is less interesting because it has less
+information to build discriminating queries from.
 
 ## Interpreting a Single Run
 
@@ -332,7 +329,7 @@ Important columns:
 - `config`: defense configuration
 - `epsilon`: DP epsilon, empty for raw configs
 - `target_type`: random, rare, or canary
-- `knowledge_level`: weak, medium, or strong
+- `knowledge_level`: medium or strong in the recommended thesis sweep
 - `query_budget`: maximum number of allowed observations
 - `repetitions`: number of repeated runs in the cell
 - `success_count`: number of successful runs
