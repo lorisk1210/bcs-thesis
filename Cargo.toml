@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "check-attack",
     "check-value",
     "cli-render",
     "refinery-node",

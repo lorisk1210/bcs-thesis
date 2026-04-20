@@ -158,8 +158,12 @@ pub fn enforce_and_release(
         });
     }
 
-    let released_result =
-        release_query_result(query_result, config.epsilon, config.release_mode, config.dp_seed)?;
+    let released_result = release_query_result(
+        query_result,
+        config.epsilon,
+        config.release_mode,
+        config.dp_seed,
+    )?;
     let recorded_epsilon = config.recorded_epsilon();
 
     tx.execute(

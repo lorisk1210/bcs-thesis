@@ -6,12 +6,12 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::Result;
-use duckdb::Connection;
 use check_value::{
     AnalysisStatus, ComparisonReport, ComparisonSection, PayloadComparisonSection,
     PreparedBaselineReport, RequestMetadata, SectionStatus, TemplateMetricsSection,
     ValidationSections, build_release_vs_exact_raw_section, build_template_metrics_section,
 };
+use duckdb::Connection;
 use refinery_protocol::{QueryResult, QueryTemplate, ReleaseMode};
 use serde_json::json;
 

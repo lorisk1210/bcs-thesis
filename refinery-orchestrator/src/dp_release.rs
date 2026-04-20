@@ -73,7 +73,8 @@ fn release_result_for_mode(
         });
     }
 
-    let released_result = release_query_result(query_result, config.epsilon, release_mode, dp_seed)?;
+    let released_result =
+        release_query_result(query_result, config.epsilon, release_mode, dp_seed)?;
 
     Ok(GlobalReleaseResult {
         accepted: true,

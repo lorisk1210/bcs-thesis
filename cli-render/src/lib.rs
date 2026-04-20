@@ -1,3 +1,4 @@
+mod attack;
 mod check;
 mod common;
 mod frame;
@@ -7,6 +8,10 @@ mod orchestrator;
 mod organize;
 mod service;
 
+pub use attack::{
+    AttackPlantCanaryData, AttackRunData, AttackSweepCellData, AttackSweepData, AttackSweepRunData,
+    render_attack_plant_canary, render_attack_run_report, render_attack_sweep_report,
+};
 pub use check::{
     CheckAggregateMetricData, CheckAggregateUtilityData, CheckBatchQueryData, CheckBatchReportData,
     CheckCompareReportData, CheckDiffEntry, CheckMetricData, CheckNodeReport,

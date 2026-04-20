@@ -83,7 +83,10 @@ fn grouped_release_is_rejected_without_spending_budget_when_any_group_is_underpo
                 {"dose_bucket": "high", "n": 313, "outcome_sum": 719.9}
             ]
         })),
-        clip_bounds: Some(ClipBounds { min: 0.0, max: 300.0 }),
+        clip_bounds: Some(ClipBounds {
+            min: 0.0,
+            max: 300.0,
+        }),
     };
     let release = enforce_and_release(
         &mut conn,

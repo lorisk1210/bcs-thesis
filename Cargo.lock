@@ -531,6 +531,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "check-attack"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "clap",
+ "cli-render",
+ "duckdb",
+ "rand 0.8.5",
+ "refinery-node",
+ "refinery-orchestrator",
+ "refinery-protocol",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "check-value"
 version = "0.1.0"
 dependencies = [

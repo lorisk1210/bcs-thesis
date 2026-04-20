@@ -4,12 +4,12 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 use anyhow::Result;
-use chrono::NaiveDate;
 use check_value::{
     CompareMode, CompareRequest, DistortionExpectation, EXACT_POST_RELEASE_LABEL,
     LIVE_POST_RELEASE_LABEL, SectionStatus, build_final_release_utility_section, checker_job_id,
     classify_distortion_expectation, diff_payloads, release_result_for_check_value, run_compare,
 };
+use chrono::NaiveDate;
 use refinery_orchestrator::client::ClientTlsOptions;
 use refinery_orchestrator::config::GlobalPrivacyConfig;
 use refinery_protocol::{ClipBounds, QueryResult, QueryTemplate, ReleaseMode};

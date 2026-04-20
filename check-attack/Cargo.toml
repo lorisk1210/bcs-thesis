@@ -1,0 +1,17 @@
+[package]
+name = "check-attack"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+chrono.workspace = true
+clap.workspace = true
+duckdb.workspace = true
+rand.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+cli-render = { path = "../cli-render" }
+refinery-node = { path = "../refinery-node" }
+refinery-orchestrator = { path = "../refinery-orchestrator" }
+refinery-protocol = { path = "../refinery-protocol" }
