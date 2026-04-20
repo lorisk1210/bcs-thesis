@@ -3,9 +3,35 @@ use std::env;
 
 use cli_render::*;
 
+fn without_no_color_and_ci<F, R>(f: F) -> R
+where
+    F: FnOnce() -> R,
+{
+    let prev_no_color = env::var_os("NO_COLOR");
+    let prev_ci = env::var_os("CI");
+    unsafe {
+        env::remove_var("NO_COLOR");
+        env::remove_var("CI");
+    }
+    let out = f();
+    unsafe {
+        match prev_no_color {
+            Some(v) => env::set_var("NO_COLOR", v),
+            None => env::remove_var("NO_COLOR"),
+        }
+        match prev_ci {
+            Some(v) => env::set_var("CI", v),
+            None => env::remove_var("CI"),
+        }
+    }
+    out
+}
+
 #[test]
 fn resolve_mode_defaults_to_pretty() {
-    assert_eq!(resolve_output_mode_for_tty(None, true), OutputMode::Pretty);
+    without_no_color_and_ci(|| {
+        assert_eq!(resolve_output_mode_for_tty(None, true), OutputMode::Pretty);
+    });
 }
 
 #[test]
@@ -14,14 +40,57 @@ fn resolve_mode_plain_from_env() {
         resolve_output_mode_for_tty(Some("plain"), true),
         OutputMode::Plain
     );
+    assert_eq!(
+        resolve_output_mode_for_tty(Some("  plain  "), true),
+        OutputMode::Plain
+    );
+    assert_eq!(
+        resolve_output_mode_for_tty(Some("PLAIN"), true),
+        OutputMode::Plain
+    );
+}
+
+#[test]
+fn resolve_mode_no_color_forces_plain() {
+    let prev = env::var("NO_COLOR").ok();
+    unsafe {
+        env::set_var("NO_COLOR", "1");
+    }
+    assert_eq!(
+        resolve_output_mode_for_tty(Some("pretty"), true),
+        OutputMode::Plain
+    );
+    unsafe {
+        match prev {
+            Some(v) => env::set_var("NO_COLOR", v),
+            None => env::remove_var("NO_COLOR"),
+        }
+    }
+}
+
+#[test]
+fn resolve_mode_ci_forces_plain() {
+    let prev = env::var("CI").ok();
+    unsafe {
+        env::set_var("CI", "true");
+    }
+    assert_eq!(resolve_output_mode_for_tty(None, true), OutputMode::Plain);
+    unsafe {
+        match prev {
+            Some(v) => env::set_var("CI", v),
+            None => env::remove_var("CI"),
+        }
+    }
 }
 
 #[test]
 fn resolve_mode_ignores_unknown_values() {
-    assert_eq!(
-        resolve_output_mode_for_tty(Some("fancy"), true),
-        OutputMode::Pretty
-    );
+    without_no_color_and_ci(|| {
+        assert_eq!(
+            resolve_output_mode_for_tty(Some("fancy"), true),
+            OutputMode::Pretty
+        );
+    });
 }
 
 #[test]

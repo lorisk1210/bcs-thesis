@@ -23,7 +23,7 @@ pub use models::{
     KnowledgeLevel, RunRequest, SweepCellSummary, SweepMetadata, SweepReport, SweepRequest,
     TargetType,
 };
-pub use sweep::{run_sweep, write_sweep_csv};
+pub use sweep::{resolve_sweep_output_mode, run_sweep, write_sweep_csv};
 pub use targets::{Target, TargetPickerOptions, pick_target};
 
 use anyhow::{Context, Result, anyhow};

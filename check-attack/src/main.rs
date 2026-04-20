@@ -15,8 +15,8 @@ use cli_render::{
 use check_attack::{
     AttackEnvironment, AttackKind, AttackRunReport, CanaryPlan, EvaluationConfig, KnowledgeLevel,
     REQUIRED_PARTICIPATING_NODES, RunRequest, SweepReport, SweepRequest, TargetPickerOptions,
-    TargetType, parse_node_inputs, pick_target, plant_canary, privacy_config_for, run_attack,
-    run_sweep, write_sweep_csv,
+    TargetType, parse_node_inputs, pick_target, plant_canary, privacy_config_for,
+    resolve_sweep_output_mode, run_attack, run_sweep, write_sweep_csv,
 };
 use refinery_protocol::ClipBounds;
 
@@ -362,7 +362,7 @@ fn handle_sweep(
 
     match format {
         OutputFormat::Text => {
-            let mode = resolve_output_mode();
+            let mode = resolve_sweep_output_mode(&output_dir);
             let data = sweep_data_from_report(&report, csv_path.as_deref(), json_path.as_deref());
             print!("{}", render_attack_sweep_report(mode, &data));
         }

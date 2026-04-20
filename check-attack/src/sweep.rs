@@ -11,6 +11,7 @@ use std::thread;
 
 use anyhow::{Context, Result, anyhow};
 use chrono::Utc;
+use cli_render::{OutputMode, resolve_output_mode};
 use indicatif::{ProgressBar, ProgressStyle};
 use rayon::prelude::*;
 use refinery_orchestrator::config::GlobalPrivacyConfig;
@@ -24,6 +25,21 @@ use crate::models::{
     SweepCellSummary, SweepMetadata, SweepReport, SweepRequest, TargetType,
 };
 use crate::targets::{TargetPickerOptions, pick_target};
+
+/// Text/progress styling for `check-attack sweep`. Uses plain output when
+/// `--output-dir` is set (artifacts on disk) unless `REFINERY_CLI_OUTPUT=pretty`
+/// forces decorated output. Otherwise uses the same rules as
+/// `cli_render::resolve_output_mode` (TTY, `NO_COLOR`, `CI`, etc.).
+pub fn resolve_sweep_output_mode(output_dir: &Option<PathBuf>) -> OutputMode {
+    let explicit = std::env::var("REFINERY_CLI_OUTPUT").ok();
+    let explicit = explicit.as_deref().map(str::trim);
+    match explicit {
+        Some(s) if s.eq_ignore_ascii_case("plain") => OutputMode::Plain,
+        Some(s) if s.eq_ignore_ascii_case("pretty") => OutputMode::Pretty,
+        _ if output_dir.is_some() => OutputMode::Plain,
+        _ => resolve_output_mode(),
+    }
+}
 
 pub fn run_sweep(request: SweepRequest) -> Result<SweepReport> {
     let default_epsilon = request.epsilons.first().copied().unwrap_or(1.0);
@@ -113,7 +129,8 @@ pub fn run_sweep(request: SweepRequest) -> Result<SweepReport> {
 
     let cells = flatten_cells(&request, default_epsilon);
     let total_cells = cells.len();
-    let progress = make_progress_bar(total_cells);
+    let sweep_mode = resolve_sweep_output_mode(&request.output_dir);
+    let progress = make_progress_bar(total_cells, sweep_mode);
 
     let results: Vec<Result<(usize, AttackRunReport)>> = pool.install(|| {
         cells
@@ -383,10 +400,11 @@ fn build_rayon_pool() -> Result<rayon::ThreadPool> {
         .context("failed to build sweep rayon thread pool")
 }
 
-fn make_progress_bar(total: usize) -> Option<ProgressBar> {
+fn make_progress_bar(total: usize, sweep_mode: OutputMode) -> Option<ProgressBar> {
     // Only render when stderr is an interactive terminal; keeps tests and
-    // stderr-piped invocations quiet.
-    if total == 0 || !std::io::stderr().is_terminal() {
+    // stderr-piped invocations quiet. Omit the bar when sweep uses plain text
+    // (see [`resolve_sweep_output_mode`]).
+    if total == 0 || !std::io::stderr().is_terminal() || sweep_mode == OutputMode::Plain {
         return None;
     }
     let pb = ProgressBar::new(total as u64);
