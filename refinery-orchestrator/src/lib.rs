@@ -1,5 +1,6 @@
 // Shared orchestrator modules exposed to other workspace crates.
 
+pub mod admission;
 pub mod config;
 pub mod dp_release;
 pub mod federation;

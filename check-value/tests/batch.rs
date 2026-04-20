@@ -3,12 +3,12 @@ mod common;
 use std::fs;
 
 use anyhow::Result;
-use common::{feasibility_payload, inconclusive_report, make_available_report, unique_test_path};
-use proof_value::{
+use check_value::{
     AggregateBatchStatus, AggregateMetricSummary, AggregateUtilitySummary, BatchQueryReport,
     BatchReport, BatchRequestMetadata, QueryUtilityContext, batch_exit_code,
     build_aggregate_utility_summary, discover_query_files, evaluate_utility,
 };
+use common::{feasibility_payload, inconclusive_report, make_available_report, unique_test_path};
 use refinery_protocol::QueryTemplate;
 use serde_json::json;
 

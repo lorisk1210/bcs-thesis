@@ -4,12 +4,12 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 use anyhow::Result;
-use chrono::NaiveDate;
-use proof_value::{
+use check_value::{
     CompareMode, CompareRequest, DistortionExpectation, EXACT_POST_RELEASE_LABEL,
     LIVE_POST_RELEASE_LABEL, SectionStatus, build_final_release_utility_section, checker_job_id,
-    classify_distortion_expectation, diff_payloads, release_result_for_proof_value, run_compare,
+    classify_distortion_expectation, diff_payloads, release_result_for_check_value, run_compare,
 };
+use chrono::NaiveDate;
 use refinery_orchestrator::client::ClientTlsOptions;
 use refinery_orchestrator::config::GlobalPrivacyConfig;
 use refinery_protocol::{ClipBounds, QueryResult, QueryTemplate, ReleaseMode};
@@ -98,9 +98,9 @@ fn final_release_utility_matches_for_identical_inputs() {
     let config = sample_privacy_config(ReleaseMode::Dp);
 
     let live_release =
-        release_result_for_proof_value(&result, &config, 42).expect("release should work");
+        release_result_for_check_value(&result, &config, 42).expect("release should work");
     let exact_release =
-        release_result_for_proof_value(&result, &config, 42).expect("release should work");
+        release_result_for_check_value(&result, &config, 42).expect("release should work");
     let section = build_final_release_utility_section(&live_release, &exact_release)
         .expect("utility section should build");
     assert_eq!(section.status, SectionStatus::Match);
@@ -116,9 +116,9 @@ fn final_release_utility_detects_distortion() {
     let config = sample_privacy_config(ReleaseMode::Dp);
 
     let live_release =
-        release_result_for_proof_value(&live_result, &config, 42).expect("release should work");
+        release_result_for_check_value(&live_result, &config, 42).expect("release should work");
     let exact_release =
-        release_result_for_proof_value(&exact_result, &config, 42).expect("release should work");
+        release_result_for_check_value(&exact_result, &config, 42).expect("release should work");
     let section = build_final_release_utility_section(&live_release, &exact_release)
         .expect("utility section should build");
     assert_eq!(section.status, SectionStatus::Mismatch);
@@ -126,12 +126,12 @@ fn final_release_utility_detects_distortion() {
 }
 
 #[test]
-fn proof_value_release_honors_raw_mode() {
+fn check_value_release_honors_raw_mode() {
     let result = sample_query_result(json!({"count": 20}), 20, 1.0);
     let config = sample_privacy_config(ReleaseMode::Raw);
 
     let release =
-        release_result_for_proof_value(&result, &config, 42).expect("release should work");
+        release_result_for_check_value(&result, &config, 42).expect("release should work");
     assert!(release.accepted);
     assert_eq!(release.release_mode, ReleaseMode::Raw);
     assert_eq!(release.released_result, Some(result.raw_result));

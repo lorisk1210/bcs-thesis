@@ -168,7 +168,10 @@ fn dose_response_release_derives_bounded_means_from_hidden_noisy_stats() {
                 {"dose_bucket": "high", "n": 313, "outcome_sum": 720.1747486990001}
             ]
         })),
-        clip_bounds: Some(ClipBounds { min: 0.0, max: 300.0 }),
+        clip_bounds: Some(ClipBounds {
+            min: 0.0,
+            max: 300.0,
+        }),
     };
 
     let released = release_query_result(&query_result, 1.0, ReleaseMode::Seeded, Some(7))
@@ -181,18 +184,17 @@ fn dose_response_release_derives_bounded_means_from_hidden_noisy_stats() {
     for group in groups {
         assert!(group.get("outcome_sum").is_none());
         assert!(
-            group.get("n")
+            group
+                .get("n")
                 .and_then(|value| value.as_f64())
                 .is_some_and(|value| value >= 0.0)
         );
-        assert!(
-            group.get("mean_outcome").is_some_and(|value| {
-                value.is_null()
-                    || value
-                        .as_f64()
-                        .is_some_and(|numeric| (0.0..=300.0).contains(&numeric))
-            })
-        );
+        assert!(group.get("mean_outcome").is_some_and(|value| {
+            value.is_null()
+                || value
+                    .as_f64()
+                    .is_some_and(|numeric| (0.0..=300.0).contains(&numeric))
+        }));
     }
 }
 
@@ -245,7 +247,10 @@ fn grouped_release_rejection_reason_lists_underpowered_dose_buckets() {
                 {"dose_bucket": "high", "n": 313, "outcome_sum": 720.1747486990001}
             ]
         })),
-        clip_bounds: Some(ClipBounds { min: 0.0, max: 300.0 }),
+        clip_bounds: Some(ClipBounds {
+            min: 0.0,
+            max: 300.0,
+        }),
     };
 
     let reason =

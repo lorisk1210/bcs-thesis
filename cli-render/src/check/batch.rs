@@ -44,7 +44,7 @@ pub fn render_check_batch_report(mode: OutputMode, r: &CheckBatchReportData) -> 
         }
         out
     } else {
-        let t = title(mode, "proof-value batch");
+        let t = title(mode, "check-value batch");
         let mut out = format!("{t}\n\n");
         let _ = writeln!(out, "{}", key_value(mode, "template", &r.template));
         let _ = writeln!(out, "{}", key_value(mode, "mode", &r.mode));

@@ -1,4 +1,4 @@
-use proof_value::{
+use check_value::{
     AnalysisStatus, ComparisonReport, ComparisonSection, PayloadComparisonSection, RequestMetadata,
     SectionStatus, TemplateMetricsSection, ValidationSections, checker_job_id, exit_code,
     render_text_report, serialize_payload,

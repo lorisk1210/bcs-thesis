@@ -1,9 +1,9 @@
 mod common;
 
-use common::make_available_report;
-use proof_value::{
+use check_value::{
     AnalysisStatus, build_release_vs_exact_raw_section, build_template_metrics_section,
 };
+use common::make_available_report;
 use refinery_orchestrator::dp_release::GlobalReleaseResult;
 use refinery_protocol::{QueryResult, QueryTemplate, ReleaseMode};
 use serde_json::json;

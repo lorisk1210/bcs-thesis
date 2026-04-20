@@ -13,6 +13,7 @@ use cli_render::{
     render_orchestrator_query_rejected, render_orchestrator_query_released,
     render_orchestrator_status, resolve_output_mode,
 };
+use refinery_orchestrator::admission::{GENERIC_POLICY_DENIAL_REASON, evaluate_query_admission};
 use refinery_orchestrator::client::{ClientTlsOptions, capabilities, health_check};
 use refinery_orchestrator::config::{load_dotenv, load_privacy_config};
 use refinery_orchestrator::db::{open_ledger, record_job_finished, record_job_started};
@@ -112,6 +113,29 @@ async fn run() -> Result<()> {
 
             let ledger = open_ledger(&privacy_config.ledger_db_path)?;
             record_job_started(&ledger, &job, None, privacy_config.release_mode)?;
+
+            if evaluate_query_admission(job.template, &job.params).is_denied() {
+                record_job_finished(
+                    &ledger,
+                    &job.job_id,
+                    "rejected",
+                    0,
+                    GENERIC_POLICY_DENIAL_REASON,
+                    None,
+                    None,
+                )?;
+                print!(
+                    "{}",
+                    render_orchestrator_query_rejected(
+                        mode,
+                        &OrchestratorQueryRejectedData {
+                            job_id: job.job_id,
+                            reason: GENERIC_POLICY_DENIAL_REASON.to_string(),
+                        },
+                    )
+                );
+                return Ok(());
+            }
 
             let run_output = match run_job(&job, &tls, privacy_config.min_participating_nodes).await
             {

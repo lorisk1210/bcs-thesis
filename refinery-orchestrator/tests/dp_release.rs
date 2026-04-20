@@ -85,7 +85,10 @@ fn grouped_release_rejects_when_any_bucket_is_under_minimum() {
                 {"dose_bucket": "high", "n": 313, "outcome_sum": 719.9}
             ]
         })),
-        clip_bounds: Some(ClipBounds { min: 0.0, max: 300.0 }),
+        clip_bounds: Some(ClipBounds {
+            min: 0.0,
+            max: 300.0,
+        }),
     };
     let config = GlobalPrivacyConfig {
         epsilon: 1.0,

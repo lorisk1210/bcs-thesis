@@ -101,15 +101,14 @@ pub fn grouped_release_rejection_reason(
     query_result: &QueryResult,
     min_cohort: usize,
 ) -> Result<Option<String>> {
-    let (group_key, group_kind) = if query_result.template_name
-        == QueryTemplate::SubgroupEffectEstimate.as_str()
-    {
-        ("subgroup", "subgroups")
-    } else if query_result.template_name == QueryTemplate::DoseResponseTrend.as_str() {
-        ("dose_bucket", "dose buckets")
-    } else {
-        return Ok(None);
-    };
+    let (group_key, group_kind) =
+        if query_result.template_name == QueryTemplate::SubgroupEffectEstimate.as_str() {
+            ("subgroup", "subgroups")
+        } else if query_result.template_name == QueryTemplate::DoseResponseTrend.as_str() {
+            ("dose_bucket", "dose buckets")
+        } else {
+            return Ok(None);
+        };
 
     let grouped_stats = query_result
         .dp_release_stats

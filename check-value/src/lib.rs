@@ -21,7 +21,7 @@ pub use batch_report::batch_exit_code;
 pub use compare::{
     EXACT_POST_RELEASE_LABEL, LIVE_POST_RELEASE_LABEL, build_final_release_utility_section,
     checker_job_id, classify_distortion_expectation, default_as_of_date,
-    release_result_for_proof_value, run_compare, serialize_payload,
+    release_result_for_check_value, run_compare, serialize_payload,
 };
 pub use diff::diff_payloads;
 pub use insights::{build_release_vs_exact_raw_section, build_template_metrics_section};

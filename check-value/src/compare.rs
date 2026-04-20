@@ -137,7 +137,7 @@ pub async fn run_compare(request: CompareRequest) -> Result<ComparisonReport> {
         live_result
             .as_ref()
             .zip(privacy_config.as_ref())
-            .map(|(result, config)| release_result_for_proof_value(result, config, request.dp_seed))
+            .map(|(result, config)| release_result_for_check_value(result, config, request.dp_seed))
             .transpose()?
     } else {
         None
@@ -147,7 +147,7 @@ pub async fn run_compare(request: CompareRequest) -> Result<ComparisonReport> {
         exact_baseline
             .as_ref()
             .zip(privacy_config.as_ref())
-            .map(|(result, config)| release_result_for_proof_value(result, config, request.dp_seed))
+            .map(|(result, config)| release_result_for_check_value(result, config, request.dp_seed))
             .transpose()?
     } else {
         None
@@ -236,7 +236,7 @@ pub async fn run_compare(request: CompareRequest) -> Result<ComparisonReport> {
     })
 }
 
-pub fn release_result_for_proof_value(
+pub fn release_result_for_check_value(
     query_result: &QueryResult,
     config: &GlobalPrivacyConfig,
     dp_seed: u64,
