@@ -25,7 +25,7 @@ pub fn render_check_prepare_report(mode: OutputMode, r: &CheckPrepareReportData)
         }
         out
     } else {
-        let t = title(mode, "proof-value prepare");
+        let t = title(mode, "check-value prepare");
         let mut out = format!("{t}\n\n");
         let _ = writeln!(out, "{}", key_value(mode, "prepared_dir", &r.prepared_dir));
         let _ = writeln!(out, "{}", key_value(mode, "as_of_date", &r.as_of_date));
@@ -85,7 +85,7 @@ pub fn render_check_compare_report(mode: OutputMode, r: &CheckCompareReportData)
         out.push_str(&render_template_metrics_plain(&r.template_metrics));
         out
     } else {
-        let t = title(mode, "proof-value compare");
+        let t = title(mode, "check-value compare");
         let mut out = format!("{t}\n\n");
         let _ = writeln!(out, "{}", key_value(mode, "template", &r.template));
         let _ = writeln!(out, "{}", key_value(mode, "mode", &r.mode));

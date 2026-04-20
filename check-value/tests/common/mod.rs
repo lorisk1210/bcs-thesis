@@ -7,7 +7,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::Result;
 use duckdb::Connection;
-use proof_value::{
+use check_value::{
     AnalysisStatus, ComparisonReport, ComparisonSection, PayloadComparisonSection,
     PreparedBaselineReport, RequestMetadata, SectionStatus, TemplateMetricsSection,
     ValidationSections, build_release_vs_exact_raw_section, build_template_metrics_section,
@@ -21,12 +21,12 @@ pub fn unique_test_path(prefix: &str) -> PathBuf {
         .expect("system time after epoch")
         .as_nanos();
     std::env::temp_dir().join(format!(
-        "refinery-proof-value-{prefix}-{}-{nonce}",
+        "refinery-check-value-{prefix}-{}-{nonce}",
         std::process::id()
     ))
 }
 
-pub fn create_prepare_test_nodes(base_dir: &Path) -> Result<Vec<proof_value::RawNodeInput>> {
+pub fn create_prepare_test_nodes(base_dir: &Path) -> Result<Vec<check_value::RawNodeInput>> {
     let node_a = base_dir.join("node-a");
     let node_b = base_dir.join("node-b");
     fs::create_dir_all(&node_a)?;
@@ -36,11 +36,11 @@ pub fn create_prepare_test_nodes(base_dir: &Path) -> Result<Vec<proof_value::Raw
     write_node_fixture(&node_b, "patient-b", "condition-b", "SG")?;
 
     Ok(vec![
-        proof_value::RawNodeInput {
+        check_value::RawNodeInput {
             node_id: "node-a".to_string(),
             input_dir: node_a,
         },
-        proof_value::RawNodeInput {
+        check_value::RawNodeInput {
             node_id: "node-b".to_string(),
             input_dir: node_b,
         },

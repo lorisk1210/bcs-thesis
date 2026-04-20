@@ -1,6 +1,6 @@
 [workspace]
 members = [
-    "proof-value",
+    "check-value",
     "cli-render",
     "refinery-node",
     "organize",

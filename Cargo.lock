@@ -531,6 +531,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "check-value"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "clap",
+ "cli-render",
+ "duckdb",
+ "refinery-node",
+ "refinery-orchestrator",
+ "refinery-protocol",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "chrono"
 version = "0.4.44"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1911,23 +1928,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8fd00f0bb2e90d81d1044c2b32617f68fcb9fa3bb7640c23e9c748e53fb30934"
 dependencies = [
  "unicode-ident",
-]
-
-[[package]]
-name = "proof-value"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "chrono",
- "clap",
- "cli-render",
- "duckdb",
- "refinery-node",
- "refinery-orchestrator",
- "refinery-protocol",
- "serde",
- "serde_json",
- "tokio",
 ]
 
 [[package]]
