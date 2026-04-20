@@ -263,6 +263,14 @@ fn render_attack_sweep_plain(data: &AttackSweepData) -> String {
     if let Some(json) = &data.json_path {
         let _ = writeln!(out, "json_path: {json}");
     }
+    let _ = writeln!(out, "overview_by_config:");
+    for cfg in &data.configs {
+        let (passed, borderline, failed, total) = count_cells_for_config(data, cfg);
+        let _ = writeln!(
+            out,
+            "  {cfg}: {total} cells: {passed} passed, {borderline} borderline, {failed} failed",
+        );
+    }
     out.push_str("---\n");
     out.push_str("cells:\n");
     for cell in &data.cells {
@@ -381,6 +389,19 @@ fn render_attack_sweep_pretty(mode: OutputMode, data: &AttackSweepData) -> Strin
         let _ = writeln!(out, "{}", key_value(mode, "json_path", json));
     }
     let _ = writeln!(out);
+    let _ = writeln!(
+        out,
+        "{}",
+        section_header(mode, "Overview (by evaluation config)")
+    );
+    for cfg in &data.configs {
+        let (passed, borderline, failed, total) = count_cells_for_config(data, cfg);
+        let _ = writeln!(
+            out,
+            "    {DARK_GRAY}•{RESET} {BOLD}{MAGENTA}{cfg}{RESET}  {DIM}{total} cells:{RESET} {GREEN}{passed} passed{RESET}{DARK_GRAY},{RESET} {YELLOW}{borderline} borderline{RESET}{DARK_GRAY},{RESET} {RED}{failed} failed{RESET}",
+        );
+    }
+    let _ = writeln!(out);
     let _ = writeln!(out, "{}", section_header(mode, "Sweep Cells"));
 
     for group in group_sweep_cells(&data.cells) {
@@ -424,6 +445,25 @@ fn classify_cell(cell: &AttackSweepCellData) -> &'static str {
     } else {
         "passed"
     }
+}
+
+fn count_cells_for_config(data: &AttackSweepData, cfg: &str) -> (usize, usize, usize, usize) {
+    let mut passed = 0usize;
+    let mut borderline = 0usize;
+    let mut failed = 0usize;
+    for cell in &data.cells {
+        if cell.evaluation_config != cfg {
+            continue;
+        }
+        match classify_cell(cell) {
+            "passed" => passed += 1,
+            "borderline" => borderline += 1,
+            "failed" => failed += 1,
+            _ => {}
+        }
+    }
+    let total = passed + borderline + failed;
+    (passed, borderline, failed, total)
 }
 
 fn render_sweep_group_pretty(out: &mut String, mode: OutputMode, group: &SweepCellGroup<'_>) {
