@@ -9,6 +9,7 @@ use chrono::NaiveDate;
 use dashmap::DashMap;
 use duckdb::Connection;
 use refinery_node::{app, db, ingest::TransformMode, materialize, normalize, query};
+use refinery_orchestrator::admission::{evaluate_query_admission, string_array_field};
 use refinery_orchestrator::config::GlobalPrivacyConfig;
 use refinery_orchestrator::dp_release::release_result;
 use refinery_protocol::{
@@ -187,6 +188,8 @@ pub struct AttackEnvironment {
     // computed they are valid for the entire environment lifetime.
     condition_universe: OnceLock<Vec<String>>,
     medication_universe: OnceLock<Vec<String>>,
+    condition_frequency: OnceLock<BTreeMap<String, usize>>,
+    medication_frequency: OnceLock<BTreeMap<String, usize>>,
     // Pre-release aggregate results keyed by (template, canonical params,
     // clip). The pre-release `QueryResult` is a deterministic function of
     // these inputs plus the read-only node state, so it's safe to cache for
@@ -243,6 +246,8 @@ impl AttackEnvironment {
             target_cache: OnceLock::new(),
             condition_universe: OnceLock::new(),
             medication_universe: OnceLock::new(),
+            condition_frequency: OnceLock::new(),
+            medication_frequency: OnceLock::new(),
             aggregate_cache: DashMap::new(),
         })
     }
@@ -304,6 +309,9 @@ impl AttackEnvironment {
         params: &Value,
         privacy: &GlobalPrivacyConfig,
     ) -> Result<AttackObservation> {
+        if self.pre_admission_blocks(template, params, privacy)? {
+            return Ok(AttackObservation::blocked());
+        }
         let aggregated = self.cached_aggregate(template, params)?;
         let release = release_result(aggregated.as_ref(), privacy)?;
         Ok(observation_from_release(&release))
@@ -364,6 +372,20 @@ impl AttackEnvironment {
         Ok(cached.clone())
     }
 
+    pub fn public_condition_frequencies(&self) -> Result<BTreeMap<String, usize>> {
+        let cached = init_once_lock(&self.condition_frequency, || {
+            public_code_frequencies(&self.nodes, "condition_fact", "condition_code")
+        })?;
+        Ok(cached.clone())
+    }
+
+    pub fn public_medication_frequencies(&self) -> Result<BTreeMap<String, usize>> {
+        let cached = init_once_lock(&self.medication_frequency, || {
+            public_code_frequencies(&self.nodes, "medication_fact", "medication_code")
+        })?;
+        Ok(cached.clone())
+    }
+
     // Memoized target candidate list used by the target picker. The first
     // caller pays the ingest-scan cost; later callers (every sweep cell)
     // reuse the cached Vec.
@@ -379,6 +401,67 @@ impl AttackEnvironment {
     // The current sweep driver never calls this.
     pub fn reset_target_cache(&mut self) {
         self.target_cache = OnceLock::new();
+    }
+
+    fn pre_admission_blocks(
+        &self,
+        template: QueryTemplate,
+        params: &Value,
+        privacy: &GlobalPrivacyConfig,
+    ) -> Result<bool> {
+        // Keep raw-exact as the positive-control configuration. The guarded
+        // behavior represents the defended query surface.
+        if matches!(self.evaluation_config, EvaluationConfig::RawExact) {
+            return Ok(false);
+        }
+        if template != QueryTemplate::CohortFeasibilityCount {
+            return Ok(false);
+        }
+        let Some(map) = params.as_object() else {
+            return Ok(false);
+        };
+
+        let condition_codes = string_array_field(map.get("condition_codes"));
+        let medication_codes = string_array_field(map.get("medication_codes"));
+        let clinical_code_count = condition_codes.len() + medication_codes.len();
+        if clinical_code_count == 0 {
+            return Ok(false);
+        }
+
+        let rare_code_probe = self.any_public_code_below_min(
+            &condition_codes,
+            &medication_codes,
+            privacy.min_cohort,
+        )?;
+
+        Ok(rare_code_probe || evaluate_query_admission(template, params).is_denied())
+    }
+
+    fn any_public_code_below_min(
+        &self,
+        condition_codes: &[String],
+        medication_codes: &[String],
+        min_cohort: usize,
+    ) -> Result<bool> {
+        if !condition_codes.is_empty() {
+            let frequencies = self.public_condition_frequencies()?;
+            if condition_codes
+                .iter()
+                .any(|code| frequencies.get(code).copied().unwrap_or(0) < min_cohort)
+            {
+                return Ok(true);
+            }
+        }
+        if !medication_codes.is_empty() {
+            let frequencies = self.public_medication_frequencies()?;
+            if medication_codes
+                .iter()
+                .any(|code| frequencies.get(code).copied().unwrap_or(0) < min_cohort)
+            {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 }
 
@@ -594,6 +677,39 @@ fn public_codes(nodes: &[NodeDb], table_name: &str, code_column: &str) -> Result
         }
     }
     Ok(codes.into_iter().collect())
+}
+
+fn public_code_frequencies(
+    nodes: &[NodeDb],
+    table_name: &str,
+    code_column: &str,
+) -> Result<BTreeMap<String, usize>> {
+    let allowed = matches!(
+        (table_name, code_column),
+        ("condition_fact", "condition_code") | ("medication_fact", "medication_code")
+    );
+    if !allowed {
+        return Err(anyhow!("unsupported public code frequency target"));
+    }
+
+    let mut frequencies = BTreeMap::new();
+    let sql = format!(
+        "SELECT {code_column}, COUNT(DISTINCT patient_pseudo_id) \
+         FROM {table_name} \
+         WHERE {code_column} IS NOT NULL \
+         GROUP BY {code_column}"
+    );
+    for node in nodes {
+        let conn = node.acquire();
+        let mut stmt = conn.prepare(&sql)?;
+        let mut rows = stmt.query([])?;
+        while let Some(row) = rows.next()? {
+            let code: String = row.get(0)?;
+            let count: i64 = row.get(1)?;
+            *frequencies.entry(code).or_default() += count.max(0) as usize;
+        }
+    }
+    Ok(frequencies)
 }
 
 fn observation_from_release(

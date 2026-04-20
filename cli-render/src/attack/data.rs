@@ -14,6 +14,8 @@ pub struct AttackRunData {
     pub query_budget: usize,
     pub queries_used: usize,
     pub suppressed_queries: usize,
+    pub blocked_queries: usize,
+    pub outcome: String,
     pub success: bool,
     pub initial_candidate_set_size: Option<usize>,
     pub final_candidate_set_size: Option<usize>,
@@ -31,6 +33,9 @@ pub struct AttackSweepCellData {
     pub query_budget: usize,
     pub repetitions: usize,
     pub success_count: usize,
+    pub blocked_count: usize,
+    pub not_observable_count: usize,
+    pub inconclusive_count: usize,
     pub success_rate: f64,
     pub median_queries_to_success: Option<f64>,
     pub median_final_candidate_size: Option<f64>,
@@ -46,6 +51,7 @@ pub struct AttackSweepRunData {
     pub query_budget: usize,
     pub queries_used: usize,
     pub final_candidate_set_size: Option<usize>,
+    pub outcome: String,
     pub success: bool,
 }
 

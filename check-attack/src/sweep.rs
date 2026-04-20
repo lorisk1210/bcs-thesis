@@ -20,8 +20,8 @@ use serde_json::json;
 use crate::attacks::run_attack_with_privacy;
 use crate::driver::{AttackEnvironment, EnvironmentTuning};
 use crate::models::{
-    AttackKind, AttackRunReport, EvaluationConfig, KnowledgeLevel, RunRequest, SweepCellSummary,
-    SweepMetadata, SweepReport, SweepRequest, TargetType,
+    AttackKind, AttackOutcome, AttackRunReport, EvaluationConfig, KnowledgeLevel, RunRequest,
+    SweepCellSummary, SweepMetadata, SweepReport, SweepRequest, TargetType,
 };
 use crate::targets::{TargetPickerOptions, pick_target};
 
@@ -410,7 +410,22 @@ struct CellKey {
 
 fn summarize(key: CellKey, reports: Vec<&AttackRunReport>) -> SweepCellSummary {
     let repetitions = reports.len();
-    let success_count = reports.iter().filter(|r| r.success).count();
+    let success_count = reports
+        .iter()
+        .filter(|r| r.outcome == AttackOutcome::AttackSuccess)
+        .count();
+    let blocked_count = reports
+        .iter()
+        .filter(|r| r.outcome == AttackOutcome::BlockedNoSignal)
+        .count();
+    let not_observable_count = reports
+        .iter()
+        .filter(|r| r.outcome == AttackOutcome::NotObservable)
+        .count();
+    let inconclusive_count = reports
+        .iter()
+        .filter(|r| r.outcome == AttackOutcome::Inconclusive)
+        .count();
     let success_rate = if repetitions == 0 {
         0.0
     } else {
@@ -418,7 +433,7 @@ fn summarize(key: CellKey, reports: Vec<&AttackRunReport>) -> SweepCellSummary {
     };
     let queries_to_success: Vec<f64> = reports
         .iter()
-        .filter(|r| r.success)
+        .filter(|r| r.outcome == AttackOutcome::AttackSuccess)
         .map(|r| r.queries_used as f64)
         .collect();
     let final_sizes: Vec<f64> = reports
@@ -436,6 +451,9 @@ fn summarize(key: CellKey, reports: Vec<&AttackRunReport>) -> SweepCellSummary {
         query_budget: key.query_budget,
         repetitions,
         success_count,
+        blocked_count,
+        not_observable_count,
+        inconclusive_count,
         success_rate,
         median_queries_to_success: median(&queries_to_success),
         median_final_candidate_size: median(&final_sizes),
@@ -472,11 +490,11 @@ fn f64_from_bits(bits: u64) -> f64 {
 pub fn write_sweep_csv(report: &SweepReport, path: &PathBuf) -> Result<()> {
     let mut out = String::new();
     out.push_str(
-        "attack,config,epsilon,target_type,knowledge_level,query_budget,repetitions,success_count,success_rate,median_queries_to_success,median_final_candidate_size,median_final_posterior\n",
+        "attack,config,epsilon,target_type,knowledge_level,query_budget,repetitions,success_count,blocked_count,not_observable_count,inconclusive_count,success_rate,median_queries_to_success,median_final_candidate_size,median_final_posterior\n",
     );
     for cell in &report.cells {
         out.push_str(&format!(
-            "{attack},{config},{eps},{target},{knowledge},{budget},{rep},{sc},{sr:.4},{mqts},{mfcs},{mfp}\n",
+            "{attack},{config},{eps},{target},{knowledge},{budget},{rep},{sc},{bc},{noc},{ic},{sr:.4},{mqts},{mfcs},{mfp}\n",
             attack = cell.attack_kind,
             config = cell.evaluation_config,
             eps = cell
@@ -488,6 +506,9 @@ pub fn write_sweep_csv(report: &SweepReport, path: &PathBuf) -> Result<()> {
             budget = cell.query_budget,
             rep = cell.repetitions,
             sc = cell.success_count,
+            bc = cell.blocked_count,
+            noc = cell.not_observable_count,
+            ic = cell.inconclusive_count,
             sr = cell.success_rate,
             mqts = cell
                 .median_queries_to_success

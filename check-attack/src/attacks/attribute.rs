@@ -48,9 +48,7 @@ pub fn run(
     report.target_id = Some(target.patient_pseudo_id.clone());
 
     let Some((attribute_kind, truth)) = pick_hidden_attribute_truth(target, knowledge) else {
-        report
-            .notes
-            .push("attribute-inference skipped: target has no hidden attribute".into());
+        report.mark_inconclusive("attribute-inference skipped: target has no hidden attribute");
         return Ok(report);
     };
     let candidates = public_attribute_candidates(ctx.env(), attribute_kind, knowledge)
@@ -58,9 +56,9 @@ pub fn run(
             format!("failed to build public candidate universe for {attribute_kind}")
         })?;
     if candidates.is_empty() || truth.is_none() {
-        report
-            .notes
-            .push("attribute-inference skipped: no candidate values available for target".into());
+        report.mark_inconclusive(
+            "attribute-inference skipped: no candidate values available for target",
+        );
         return Ok(report);
     }
     let truth = truth.unwrap();
@@ -84,6 +82,10 @@ pub fn run(
         let observation = ctx.submit(QueryTemplate::CohortFeasibilityCount, &params)?;
         candidate_set.record_query();
         queries += 1;
+        if observation.blocked {
+            candidate_set.update_blocked();
+            continue;
+        }
         if observation.suppressed {
             candidate_set.update_suppressed(request.min_cohort);
             observed_counts.insert(code.clone(), 0.0);
@@ -124,9 +126,10 @@ pub fn run(
 
     report.queries_used = queries;
     report.suppressed_queries = candidate_set.suppressed_queries;
+    report.blocked_queries = candidate_set.blocked_queries;
     report.final_candidate_set_size = Some(candidate_set.posterior_attribute.len());
     report.final_posterior = best_posterior;
-    report.success = success;
+    report.finish_observable(success);
     report.notes = candidate_set.history;
     if let Some(code) = predicted_code {
         report.notes.push(format!(

@@ -98,6 +98,8 @@ fn render_attack_run_plain(data: &AttackRunData) -> String {
     let _ = writeln!(out, "query_budget: {}", data.query_budget);
     let _ = writeln!(out, "queries_used: {}", data.queries_used);
     let _ = writeln!(out, "suppressed_queries: {}", data.suppressed_queries);
+    let _ = writeln!(out, "blocked_queries: {}", data.blocked_queries);
+    let _ = writeln!(out, "outcome: {}", data.outcome);
     let _ = writeln!(out, "success: {}", if data.success { "yes" } else { "no" });
     if let Some(size) = data.initial_candidate_set_size {
         let _ = writeln!(out, "initial_candidate_set_size: {size}");
@@ -183,6 +185,12 @@ fn render_attack_run_pretty(mode: OutputMode, data: &AttackRunData) -> String {
     let _ = writeln!(
         out,
         "{}",
+        key_value(mode, "blocked_queries", &data.blocked_queries.to_string())
+    );
+    let _ = writeln!(out, "{}", key_value(mode, "outcome", &data.outcome));
+    let _ = writeln!(
+        out,
+        "{}",
         key_value(mode, "success", if data.success { "yes" } else { "no" })
     );
     if let Some(size) = data.initial_candidate_set_size {
@@ -260,7 +268,7 @@ fn render_attack_sweep_plain(data: &AttackSweepData) -> String {
     for cell in &data.cells {
         let _ = writeln!(
             out,
-            "  - attack={a} config={c} epsilon={e} target={t} knowledge={k} budget={b} reps={r} successes={s} rate={sr:.4} median_queries={mq} median_final_size={ms} median_posterior={mp}",
+            "  - attack={a} config={c} epsilon={e} target={t} knowledge={k} budget={b} reps={r} successes={s} blocked={blocked} not_observable={not_observable} inconclusive={inconclusive} rate={sr:.4} median_queries={mq} median_final_size={ms} median_posterior={mp}",
             a = cell.attack_kind,
             c = cell.evaluation_config,
             e = cell
@@ -272,6 +280,9 @@ fn render_attack_sweep_plain(data: &AttackSweepData) -> String {
             b = cell.query_budget,
             r = cell.repetitions,
             s = cell.success_count,
+            blocked = cell.blocked_count,
+            not_observable = cell.not_observable_count,
+            inconclusive = cell.inconclusive_count,
             sr = cell.success_rate,
             mq = cell
                 .median_queries_to_success
@@ -485,9 +496,12 @@ fn render_sweep_cell_pretty(out: &mut String, mode: OutputMode, cell: &AttackSwe
     );
     let _ = writeln!(
         out,
-        "          {DARK_GRAY}◦{RESET} {DIM}repetitions={reps} successes={succ} rate={rate:.4}{RESET}",
+        "          {DARK_GRAY}◦{RESET} {DIM}repetitions={reps} successes={succ} blocked={blocked} not_observable={not_observable} inconclusive={inconclusive} rate={rate:.4}{RESET}",
         reps = cell.repetitions,
         succ = cell.success_count,
+        blocked = cell.blocked_count,
+        not_observable = cell.not_observable_count,
+        inconclusive = cell.inconclusive_count,
         rate = cell.success_rate,
     );
     let _ = writeln!(

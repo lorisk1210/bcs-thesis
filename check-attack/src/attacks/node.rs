@@ -55,6 +55,8 @@ pub fn run(
         candidate_set.update_suppressed(request.min_cohort);
         candidate_set
             .note("federated rare-pattern query suppressed; no source-node signal is observable");
+    } else if observation.blocked {
+        candidate_set.update_blocked();
     } else if let Some(count) = observation
         .released_result
         .as_ref()
@@ -81,13 +83,13 @@ pub fn run(
 
     report.queries_used = candidate_set.queries_used;
     report.suppressed_queries = candidate_set.suppressed_queries;
+    report.blocked_queries = candidate_set.blocked_queries;
     report.final_candidate_set_size = None;
     report.final_posterior = Some(candidate_set.posterior_in_federation);
     report.node_guess_accuracy = None;
-    report.success = false;
     report.notes = candidate_set.history;
-    report.notes.push(
-        "exact source-node re-identification is not attempted because the query-only interface exposes no per-node observation".to_string(),
+    report.mark_not_observable(
+        "exact source-node re-identification is not attempted because the query-only interface exposes no per-node observation",
     );
 
     Ok(report)

@@ -71,10 +71,24 @@ pub fn run(
 
     report.queries_used = queries;
     report.suppressed_queries = candidate_set.suppressed_queries;
+    report.blocked_queries = candidate_set.blocked_queries;
     report.final_candidate_set_size = Some(candidate_set.size);
     report.final_posterior = Some(candidate_set.posterior_in_federation);
-    report.success = candidate_set.size <= SINGLING_OUT_MAX_CANDIDATES;
+    let exact_singleton = candidate_set.size <= SINGLING_OUT_MAX_CANDIDATES;
+    let below_min_signal =
+        candidate_set.suppressed_queries > 0 || candidate_set.size < request.min_cohort;
+    report.finish_observable(exact_singleton || below_min_signal);
     report.notes = candidate_set.history;
+    if exact_singleton {
+        report
+            .notes
+            .push("singling-success: exact singleton candidate set".into());
+    } else if below_min_signal {
+        report.notes.push(format!(
+            "singling-success: candidate set is below min_cohort {}",
+            request.min_cohort
+        ));
+    }
 
     Ok(report)
 }

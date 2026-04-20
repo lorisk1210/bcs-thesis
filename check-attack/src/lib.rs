@@ -19,8 +19,9 @@ pub use driver::{
 };
 pub use knowledge::{TargetKnowledge, derive_knowledge};
 pub use models::{
-    AttackKind, AttackObservation, AttackRunReport, EvaluationConfig, KnowledgeLevel, RunRequest,
-    SweepCellSummary, SweepMetadata, SweepReport, SweepRequest, TargetType,
+    AttackKind, AttackObservation, AttackOutcome, AttackRunReport, EvaluationConfig,
+    KnowledgeLevel, RunRequest, SweepCellSummary, SweepMetadata, SweepReport, SweepRequest,
+    TargetType,
 };
 pub use sweep::{run_sweep, write_sweep_csv};
 pub use targets::{Target, TargetPickerOptions, pick_target};

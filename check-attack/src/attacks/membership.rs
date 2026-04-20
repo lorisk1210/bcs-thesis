@@ -71,23 +71,28 @@ pub fn run(
             .released_result
             .as_ref()
             .and_then(CandidateSet::count_from_value)
+            .filter(|_| is_target_specific_probe(&params))
+            .filter(|count| *count <= request.min_cohort as f64)
         {
             let noised_metrics = 2;
             let scale = approximate_count_scale(request.epsilon, noised_metrics);
             candidate_set.update_dp_posterior(count, 1.0, 0.0, scale, 0.5);
+        } else if request.evaluation_config.uses_dp() && is_target_specific_probe(&params) {
+            candidate_set.note("dp-posterior skipped: accepted cohort is not below threshold");
         }
         queries_used += 1;
     }
 
     report.queries_used = queries_used;
     report.suppressed_queries = candidate_set.suppressed_queries;
+    report.blocked_queries = candidate_set.blocked_queries;
     report.final_candidate_set_size = Some(candidate_set.size);
     report.final_posterior = Some(candidate_set.posterior_in_federation);
 
     let min_cohort_threshold = request.min_cohort.saturating_sub(1).max(1);
     let narrow_success = candidate_set.size <= min_cohort_threshold;
     let posterior_success = candidate_set.posterior_in_federation >= MEMBERSHIP_POSTERIOR_THRESHOLD;
-    report.success = narrow_success || posterior_success;
+    report.finish_observable(narrow_success || posterior_success);
     report.notes = candidate_set.history;
     if narrow_success {
         report.notes.push(format!(
@@ -103,6 +108,17 @@ pub fn run(
     }
 
     Ok(report)
+}
+
+fn is_target_specific_probe(params: &Value) -> bool {
+    params
+        .get("condition_codes")
+        .and_then(Value::as_array)
+        .is_some_and(|codes| !codes.is_empty())
+        || params
+            .get("medication_codes")
+            .and_then(Value::as_array)
+            .is_some_and(|codes| !codes.is_empty())
 }
 
 fn uses_dp_epsilon(request: &RunRequest) -> Option<f64> {

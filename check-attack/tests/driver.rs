@@ -13,8 +13,9 @@ use serde_json::json;
 
 use check_attack::driver::EnvironmentTuning;
 use check_attack::{
-    AttackEnvironment, AttackKind, EvaluationConfig, KnowledgeLevel, RunRequest, SweepRequest,
-    TargetPickerOptions, TargetType, pick_target, privacy_config_for, run_attack, run_sweep,
+    AttackEnvironment, AttackKind, AttackOutcome, EvaluationConfig, KnowledgeLevel, RunRequest,
+    SweepRequest, TargetPickerOptions, TargetType, pick_target, privacy_config_for, run_attack,
+    run_sweep,
 };
 use check_attack::{CanaryPlan, plant_canary};
 
@@ -116,6 +117,46 @@ fn observation_strips_cohort_size_and_reason() -> Result<()> {
     // The adversary must never see release internals like reason/release_mode.
     assert!(payload.get("reason").is_none());
     assert!(payload.get("release_mode").is_none());
+    Ok(())
+}
+
+#[test]
+fn defended_target_like_probe_is_blocked_before_min_cohort_suppression() -> Result<()> {
+    let (_dir, inputs) = build_fixture()?;
+    let env = env_for(EvaluationConfig::DpCoarsened, &inputs, 1.0)?;
+
+    let observation = env.submit(
+        QueryTemplate::CohortFeasibilityCount,
+        &json!({
+            "gender": "male",
+            "condition_codes": ["44054006"]
+        }),
+    )?;
+
+    assert!(!observation.accepted);
+    assert!(observation.blocked);
+    assert!(!observation.suppressed);
+    assert!(observation.released_result.is_none());
+    Ok(())
+}
+
+#[test]
+fn raw_exact_keeps_min_cohort_suppression_as_positive_control() -> Result<()> {
+    let (_dir, inputs) = build_fixture()?;
+    let env = env_for(EvaluationConfig::RawExact, &inputs, 1.0)?;
+
+    let observation = env.submit(
+        QueryTemplate::CohortFeasibilityCount,
+        &json!({
+            "gender": "male",
+            "condition_codes": ["44054006"]
+        }),
+    )?;
+
+    assert!(!observation.accepted);
+    assert!(!observation.blocked);
+    assert!(observation.suppressed);
+    assert!(observation.released_result.is_none());
     Ok(())
 }
 
@@ -240,6 +281,7 @@ fn node_attack_does_not_guess_source_node_from_federated_outputs() -> Result<()>
     let report = run_attack(&env, &target, &knowledge, &request)?;
     assert!(report.queries_used > 0);
     assert!(!report.success);
+    assert_eq!(report.outcome, AttackOutcome::NotObservable);
     assert!(report.node_guess_accuracy.is_none());
     Ok(())
 }

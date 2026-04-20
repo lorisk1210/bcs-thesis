@@ -16,6 +16,7 @@ pub struct CandidateSet {
     pub posterior_attribute: BTreeMap<String, f64>,
     pub queries_used: usize,
     pub suppressed_queries: usize,
+    pub blocked_queries: usize,
     pub history: Vec<String>,
 }
 
@@ -28,6 +29,7 @@ impl CandidateSet {
             posterior_attribute: BTreeMap::new(),
             queries_used: 0,
             suppressed_queries: 0,
+            blocked_queries: 0,
             history: Vec::new(),
         }
     }
@@ -78,6 +80,14 @@ impl CandidateSet {
         self.note(format!(
             "suppressed: candidate size capped at {cap} (< min_cohort {min_cohort})"
         ));
+    }
+
+    // A pre-admission policy block is intentionally not data-dependent. It
+    // should consume the attacker's query budget, but it must not narrow the
+    // candidate set.
+    pub fn update_blocked(&mut self) {
+        self.blocked_queries += 1;
+        self.note("blocked: pre-admission policy denied query without cohort-size signal");
     }
 
     // DP-aware posterior update using the public Laplace noise model. We
@@ -158,6 +168,10 @@ impl CandidateSet {
         counts_are_exact: bool,
     ) {
         self.record_query();
+        if observation.blocked {
+            self.update_blocked();
+            return;
+        }
         if observation.suppressed {
             self.update_suppressed(min_cohort);
             return;

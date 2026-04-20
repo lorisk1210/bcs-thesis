@@ -181,6 +181,7 @@ impl fmt::Display for EvaluationConfig {
 pub struct AttackObservation {
     pub accepted: bool,
     pub suppressed: bool,
+    pub blocked: bool,
     pub released_result: Option<Value>,
 }
 
@@ -189,6 +190,7 @@ impl AttackObservation {
         Self {
             accepted: true,
             suppressed: false,
+            blocked: false,
             released_result: Some(released_result),
         }
     }
@@ -197,8 +199,46 @@ impl AttackObservation {
         Self {
             accepted: false,
             suppressed: true,
+            blocked: false,
             released_result: None,
         }
+    }
+
+    pub fn blocked() -> Self {
+        Self {
+            accepted: false,
+            suppressed: false,
+            blocked: true,
+            released_result: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AttackOutcome {
+    AttackSuccess,
+    BlockedNoSignal,
+    NoSignal,
+    NotObservable,
+    Inconclusive,
+}
+
+impl AttackOutcome {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            AttackOutcome::AttackSuccess => "attack_success",
+            AttackOutcome::BlockedNoSignal => "blocked_no_signal",
+            AttackOutcome::NoSignal => "no_signal",
+            AttackOutcome::NotObservable => "not_observable",
+            AttackOutcome::Inconclusive => "inconclusive",
+        }
+    }
+}
+
+impl fmt::Display for AttackOutcome {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
     }
 }
 
@@ -216,6 +256,8 @@ pub struct AttackRunReport {
     pub query_budget: usize,
     pub queries_used: usize,
     pub suppressed_queries: usize,
+    pub blocked_queries: usize,
+    pub outcome: AttackOutcome,
     pub success: bool,
     pub initial_candidate_set_size: Option<usize>,
     pub final_candidate_set_size: Option<usize>,
@@ -247,6 +289,8 @@ impl AttackRunReport {
             query_budget,
             queries_used: 0,
             suppressed_queries: 0,
+            blocked_queries: 0,
+            outcome: AttackOutcome::NoSignal,
             success: false,
             initial_candidate_set_size: None,
             final_candidate_set_size: None,
@@ -254,6 +298,29 @@ impl AttackRunReport {
             node_guess_accuracy: None,
             notes: Vec::new(),
         }
+    }
+
+    pub fn finish_observable(&mut self, success: bool) {
+        self.success = success;
+        self.outcome = if success {
+            AttackOutcome::AttackSuccess
+        } else if self.blocked_queries > 0 {
+            AttackOutcome::BlockedNoSignal
+        } else {
+            AttackOutcome::NoSignal
+        };
+    }
+
+    pub fn mark_inconclusive(&mut self, reason: impl Into<String>) {
+        self.success = false;
+        self.outcome = AttackOutcome::Inconclusive;
+        self.notes.push(reason.into());
+    }
+
+    pub fn mark_not_observable(&mut self, reason: impl Into<String>) {
+        self.success = false;
+        self.outcome = AttackOutcome::NotObservable;
+        self.notes.push(reason.into());
     }
 }
 
@@ -283,6 +350,9 @@ pub struct SweepCellSummary {
     pub query_budget: usize,
     pub repetitions: usize,
     pub success_count: usize,
+    pub blocked_count: usize,
+    pub not_observable_count: usize,
+    pub inconclusive_count: usize,
     pub success_rate: f64,
     pub median_queries_to_success: Option<f64>,
     pub median_final_candidate_size: Option<f64>,
