@@ -9,15 +9,14 @@
 use anyhow::Result;
 use refinery_protocol::QueryTemplate;
 
-use super::{MEMBERSHIP_POSTERIOR_THRESHOLD, approximate_count_scale};
+use super::{AttackContext, MEMBERSHIP_POSTERIOR_THRESHOLD, approximate_count_scale};
 use crate::candidate_set::CandidateSet;
-use crate::driver::AttackEnvironment;
 use crate::knowledge::TargetKnowledge;
 use crate::models::{AttackKind, AttackRunReport, RunRequest};
 use crate::targets::Target;
 
 pub fn run(
-    env: &AttackEnvironment,
+    ctx: &AttackContext<'_>,
     target: &Target,
     knowledge: &TargetKnowledge,
     request: &RunRequest,
@@ -46,7 +45,7 @@ pub fn run(
     }
 
     let mut candidate_set = CandidateSet::new(1);
-    let observation = env.submit(
+    let observation = ctx.submit(
         QueryTemplate::CohortFeasibilityCount,
         &knowledge.cohort_params(),
     )?;

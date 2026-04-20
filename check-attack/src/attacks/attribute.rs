@@ -18,7 +18,7 @@ use anyhow::{Context, Result};
 use refinery_protocol::QueryTemplate;
 use serde_json::{Value, json};
 
-use super::approximate_count_scale;
+use super::{AttackContext, approximate_count_scale};
 use crate::candidate_set::CandidateSet;
 use crate::driver::AttackEnvironment;
 use crate::knowledge::TargetKnowledge;
@@ -26,7 +26,7 @@ use crate::models::{AttackKind, AttackRunReport, RunRequest};
 use crate::targets::Target;
 
 pub fn run(
-    env: &AttackEnvironment,
+    ctx: &AttackContext<'_>,
     target: &Target,
     knowledge: &TargetKnowledge,
     request: &RunRequest,
@@ -53,8 +53,8 @@ pub fn run(
             .push("attribute-inference skipped: target has no hidden attribute".into());
         return Ok(report);
     };
-    let candidates =
-        public_attribute_candidates(env, attribute_kind, knowledge).with_context(|| {
+    let candidates = public_attribute_candidates(ctx.env(), attribute_kind, knowledge)
+        .with_context(|| {
             format!("failed to build public candidate universe for {attribute_kind}")
         })?;
     if candidates.is_empty() || truth.is_none() {
@@ -81,7 +81,7 @@ pub fn run(
             break;
         }
         let params = build_attribute_probe(knowledge, attribute_kind, code);
-        let observation = env.submit(QueryTemplate::CohortFeasibilityCount, &params)?;
+        let observation = ctx.submit(QueryTemplate::CohortFeasibilityCount, &params)?;
         candidate_set.record_query();
         queries += 1;
         if observation.suppressed {

@@ -1,10 +1,10 @@
 use std::collections::BTreeMap;
 
 use anyhow::{Context, Result, anyhow};
-use rand::{SeedableRng, rngs::StdRng, seq::SliceRandom};
+use rand::{Rng, SeedableRng, rngs::StdRng, seq::SliceRandom};
 use serde::{Deserialize, Serialize};
 
-use crate::driver::AttackEnvironment;
+use crate::driver::{AttackEnvironment, NodeDb};
 use crate::knowledge::{TargetKnowledge, derive_knowledge};
 use crate::models::{KnowledgeLevel, TargetType};
 
@@ -57,7 +57,7 @@ pub fn pick_target(
     target_type: TargetType,
     options: TargetPickerOptions,
 ) -> Result<Target> {
-    let candidates = collect_candidates(env)?;
+    let candidates = env.target_candidates()?;
     if candidates.is_empty() {
         return Err(anyhow!(
             "no candidate patients available in prepared fixture dbs"
@@ -67,33 +67,33 @@ pub fn pick_target(
     let mut rng = StdRng::seed_from_u64(options.seed);
     match target_type {
         TargetType::Random => {
-            let mut shuffled = candidates;
-            shuffled.shuffle(&mut rng);
-            shuffled
-                .into_iter()
-                .next()
-                .ok_or_else(|| anyhow!("empty candidate list"))
+            // O(1) single-index pick — shuffling the whole index list only to
+            // take `.first()` was the prior implementation and pure waste at
+            // sweep scale.
+            let idx = rng.gen_range(0..candidates.len());
+            Ok(candidates[idx].clone())
         }
         TargetType::Rare => pick_rare(candidates, options.rare_threshold, &mut rng),
         TargetType::Canary => pick_canary(candidates, &mut rng),
     }
 }
 
-fn pick_rare(candidates: Vec<Target>, rare_threshold: usize, rng: &mut StdRng) -> Result<Target> {
+fn pick_rare(candidates: &[Target], rare_threshold: usize, rng: &mut StdRng) -> Result<Target> {
     let mut frequency: BTreeMap<String, usize> = BTreeMap::new();
-    for c in &candidates {
+    for c in candidates {
         let signature = rare_signature(c);
         *frequency.entry(signature).or_default() += 1;
     }
 
     let mut rare: Vec<Target> = candidates
-        .into_iter()
-        .filter_map(|mut c| {
-            let signature = rare_signature(&c);
+        .iter()
+        .filter_map(|c| {
+            let signature = rare_signature(c);
             let count = *frequency.get(&signature).unwrap_or(&0);
             if count > 0 && count <= rare_threshold {
-                c.combo_frequency = Some(count);
-                Some(c)
+                let mut clone = c.clone();
+                clone.combo_frequency = Some(count);
+                Some(clone)
             } else {
                 None
             }
@@ -108,15 +108,16 @@ fn pick_rare(candidates: Vec<Target>, rare_threshold: usize, rng: &mut StdRng) -
     Ok(rare.into_iter().next().unwrap())
 }
 
-fn pick_canary(candidates: Vec<Target>, rng: &mut StdRng) -> Result<Target> {
+fn pick_canary(candidates: &[Target], rng: &mut StdRng) -> Result<Target> {
     let mut canaries: Vec<Target> = candidates
-        .into_iter()
+        .iter()
         .filter(|c| {
             c.patient_pseudo_id
                 .to_ascii_lowercase()
                 .contains("check-attack-canary")
                 || c.condition_codes.iter().any(|c| c == "900000000")
         })
+        .cloned()
         .collect();
     if canaries.is_empty() {
         return Err(anyhow!(
@@ -132,7 +133,7 @@ fn pick_canary(candidates: Vec<Target>, rng: &mut StdRng) -> Result<Target> {
 fn rare_signature(target: &Target) -> String {
     let bucket = target
         .age_years
-        .map(|a| crate::knowledge::TargetKnowledge::age_bucket_for_age(a))
+        .map(crate::knowledge::TargetKnowledge::age_bucket_for_age)
         .unwrap_or("unknown");
     let gender = target.gender.clone().unwrap_or_else(|| "unknown".into());
     let condition = target
@@ -148,35 +149,34 @@ fn rare_signature(target: &Target) -> String {
     format!("{bucket}|{gender}|{condition}|{medication}")
 }
 
-fn collect_candidates(env: &AttackEnvironment) -> Result<Vec<Target>> {
+// Entry point invoked by `AttackEnvironment::target_candidates` on the first
+// call. We scan every node once and memoize the resulting Vec; subsequent
+// callers reuse it for the lifetime of the environment.
+pub(crate) fn scan_all_candidates(env: &AttackEnvironment) -> Result<Vec<Target>> {
     let mut candidates = Vec::new();
-    for (node_index, node) in env.debug_nodes().iter().enumerate() {
-        for target in scan_node_patients(env, node_index, &node.node_id).with_context(|| {
+    for node in env.debug_nodes() {
+        let batch = scan_node_patients(node).with_context(|| {
             format!(
                 "failed to scan node {} for candidate target patients",
                 node.node_id
             )
-        })? {
-            candidates.push(target);
-        }
+        })?;
+        candidates.extend(batch);
     }
     Ok(candidates)
 }
 
-fn scan_node_patients(
-    env: &AttackEnvironment,
-    node_index: usize,
-    node_id: &str,
-) -> Result<Vec<Target>> {
+// Bulk-query scan: one SELECT for patients, one for conditions, one for
+// medications. Group rows by patient id in Rust and stitch the result
+// together. This replaces the old N+1 pattern (one SELECT per patient for
+// each of conditions and medications) that dominated the first-cache-miss
+// cost of target selection.
+fn scan_node_patients(node: &NodeDb) -> Result<Vec<Target>> {
     // Target selection is evaluator-only and is permitted to read the
     // prepared DuckDB directly. Attack modules cannot access this path.
-    let nodes = env.debug_nodes();
-    let node = nodes
-        .get(node_index)
-        .ok_or_else(|| anyhow!("node index out of range while scanning targets"))?;
-    let conn = &node.connection;
+    let conn = node.acquire();
 
-    let mut statement = conn.prepare(
+    let mut patient_stmt = conn.prepare(
         r#"
         SELECT
             p.patient_pseudo_id,
@@ -186,51 +186,85 @@ fn scan_node_patients(
         ORDER BY p.patient_pseudo_id
         "#,
     )?;
-    let mut rows = statement.query([])?;
+    let mut patient_rows = patient_stmt.query([])?;
 
-    let mut out = Vec::new();
-    while let Some(row) = rows.next()? {
+    #[derive(Default)]
+    struct PatientRow {
+        age_years: Option<i64>,
+        gender: Option<String>,
+    }
+    let mut patient_index: BTreeMap<String, PatientRow> = BTreeMap::new();
+    while let Some(row) = patient_rows.next()? {
         let patient_pseudo_id: String = row.get(0)?;
         let age_years: Option<i64> = row.get(1)?;
         let gender: Option<String> = row.get(2)?;
+        patient_index.insert(patient_pseudo_id, PatientRow { age_years, gender });
+    }
 
-        let conditions = fetch_codes(
-            conn,
-            "SELECT condition_code FROM condition_fact WHERE patient_pseudo_id = ?1 AND condition_code IS NOT NULL ORDER BY condition_code LIMIT 5",
-            &patient_pseudo_id,
-        )?;
-        let medications = fetch_codes(
-            conn,
-            "SELECT medication_code FROM medication_fact WHERE patient_pseudo_id = ?1 AND medication_code IS NOT NULL ORDER BY medication_code LIMIT 5",
-            &patient_pseudo_id,
-        )?;
+    let conditions = bulk_codes_by_patient(
+        &conn,
+        r#"
+        SELECT patient_pseudo_id, condition_code
+        FROM condition_fact
+        WHERE condition_code IS NOT NULL
+        ORDER BY patient_pseudo_id, condition_code
+        "#,
+        MAX_CODES_PER_PATIENT,
+    )?;
+    let medications = bulk_codes_by_patient(
+        &conn,
+        r#"
+        SELECT patient_pseudo_id, medication_code
+        FROM medication_fact
+        WHERE medication_code IS NOT NULL
+        ORDER BY patient_pseudo_id, medication_code
+        "#,
+        MAX_CODES_PER_PATIENT,
+    )?;
 
+    let mut out = Vec::with_capacity(patient_index.len());
+    for (patient_pseudo_id, row) in patient_index {
+        let condition_codes = conditions
+            .get(&patient_pseudo_id)
+            .cloned()
+            .unwrap_or_default();
+        let medication_codes = medications
+            .get(&patient_pseudo_id)
+            .cloned()
+            .unwrap_or_default();
         out.push(Target {
             target_type: TargetType::Random,
             patient_pseudo_id,
-            age_years,
-            gender,
-            condition_codes: conditions,
-            medication_codes: medications,
+            age_years: row.age_years,
+            gender: row.gender,
+            condition_codes,
+            medication_codes,
             combo_frequency: None,
-            source_node: Some(node_id.to_string()),
+            source_node: Some(node.node_id.clone()),
         });
     }
-
     Ok(out)
 }
 
-fn fetch_codes(
+// Preserves the historical LIMIT 5 per patient behaviour of the N+1
+// implementation, but without paying the per-patient round trip cost.
+const MAX_CODES_PER_PATIENT: usize = 5;
+
+fn bulk_codes_by_patient(
     conn: &duckdb::Connection,
     sql: &str,
-    patient_pseudo_id: &str,
-) -> Result<Vec<String>> {
+    per_patient_limit: usize,
+) -> Result<BTreeMap<String, Vec<String>>> {
     let mut stmt = conn.prepare(sql)?;
-    let mut rows = stmt.query([patient_pseudo_id])?;
-    let mut out = Vec::new();
+    let mut rows = stmt.query([])?;
+    let mut out: BTreeMap<String, Vec<String>> = BTreeMap::new();
     while let Some(row) = rows.next()? {
-        let code: String = row.get(0)?;
-        out.push(code);
+        let patient_pseudo_id: String = row.get(0)?;
+        let code: String = row.get(1)?;
+        let bucket = out.entry(patient_pseudo_id).or_default();
+        if bucket.len() < per_patient_limit {
+            bucket.push(code);
+        }
     }
     Ok(out)
 }

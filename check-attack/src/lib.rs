@@ -10,12 +10,12 @@ pub mod models;
 pub mod sweep;
 pub mod targets;
 
-pub use attacks::run_attack;
+pub use attacks::{AttackContext, run_attack};
 pub use canary::{CANARY_CONDITION_CODE, CANARY_CONDITION_DISPLAY, CanaryPlan, plant_canary};
 pub use candidate_set::{CandidateSet, laplace_pdf};
 pub use driver::{
-    AttackEnvironment, NodeDb, REQUIRED_PARTICIPATING_NODES, node_inputs_from_pairs,
-    privacy_config_for,
+    AttackEnvironment, EnvironmentTuning, NodeDb, REQUIRED_PARTICIPATING_NODES,
+    node_inputs_from_pairs, privacy_config_for,
 };
 pub use knowledge::{TargetKnowledge, derive_knowledge};
 pub use models::{

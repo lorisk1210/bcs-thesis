@@ -11,9 +11,10 @@ use anyhow::Result;
 use refinery_protocol::{ClipBounds, QueryTemplate};
 use serde_json::json;
 
+use check_attack::driver::EnvironmentTuning;
 use check_attack::{
-    AttackEnvironment, AttackKind, EvaluationConfig, KnowledgeLevel, RunRequest,
-    TargetPickerOptions, TargetType, pick_target, privacy_config_for, run_attack,
+    AttackEnvironment, AttackKind, EvaluationConfig, KnowledgeLevel, RunRequest, SweepRequest,
+    TargetPickerOptions, TargetType, pick_target, privacy_config_for, run_attack, run_sweep,
 };
 use check_attack::{CanaryPlan, plant_canary};
 
@@ -115,6 +116,70 @@ fn observation_strips_cohort_size_and_reason() -> Result<()> {
     // The adversary must never see release internals like reason/release_mode.
     assert!(payload.get("reason").is_none());
     assert!(payload.get("release_mode").is_none());
+    Ok(())
+}
+
+#[test]
+fn tuned_connection_pool_reads_shared_in_memory_state() -> Result<()> {
+    let (_dir, inputs) = build_fixture()?;
+    let privacy = privacy_config_for(EvaluationConfig::RawExact, 1.0, 1, Some(1));
+    let env = AttackEnvironment::build_with_tuning(
+        EvaluationConfig::RawExact,
+        privacy,
+        clip(),
+        &inputs,
+        common::default_as_of(),
+        EnvironmentTuning {
+            connections_per_node: 2,
+            threads_per_connection: 1,
+        },
+    )?;
+
+    let first = env.submit(QueryTemplate::CohortFeasibilityCount, &json!({}))?;
+    let second = env.submit(
+        QueryTemplate::CohortFeasibilityCount,
+        &json!({ "gender": "male" }),
+    )?;
+
+    assert!(first.accepted);
+    assert!(second.accepted);
+    let second_count = second
+        .released_result
+        .as_ref()
+        .and_then(|v| v.get("count"))
+        .and_then(|v| v.as_f64())
+        .unwrap_or_default();
+    assert!(
+        second_count > 0.0,
+        "cloned DuckDB connections should see the ingested in-memory state"
+    );
+    Ok(())
+}
+
+#[test]
+fn small_sweep_runs_through_parallel_driver_path() -> Result<()> {
+    let (_dir, inputs) = build_fixture()?;
+    let report = run_sweep(SweepRequest {
+        attacks: vec![AttackKind::Node],
+        configs: vec![EvaluationConfig::RawExact],
+        epsilons: vec![1.0],
+        target_types: vec![TargetType::Random],
+        knowledge_levels: vec![KnowledgeLevel::Weak],
+        query_budgets: vec![1],
+        min_cohort: 1,
+        repetitions: 2,
+        input_dirs: inputs,
+        canary_node_id: None,
+        as_of_date: common::default_as_of(),
+        dp_seed: Some(1),
+        clip_min: 0.0,
+        clip_max: 300.0,
+        output_dir: None,
+    })?;
+
+    assert_eq!(report.runs.len(), 2);
+    assert_eq!(report.cells.len(), 1);
+    assert!(report.runs.iter().all(|run| run.queries_used == 1));
     Ok(())
 }
 

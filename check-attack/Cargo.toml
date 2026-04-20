@@ -7,8 +7,11 @@ edition.workspace = true
 anyhow.workspace = true
 chrono.workspace = true
 clap.workspace = true
+dashmap.workspace = true
 duckdb.workspace = true
+indicatif.workspace = true
 rand.workspace = true
+rayon.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 cli-render = { path = "../cli-render" }

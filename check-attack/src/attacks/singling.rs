@@ -7,15 +7,14 @@ use anyhow::Result;
 use refinery_protocol::QueryTemplate;
 use serde_json::{Value, json};
 
-use super::SINGLING_OUT_MAX_CANDIDATES;
+use super::{AttackContext, SINGLING_OUT_MAX_CANDIDATES};
 use crate::candidate_set::CandidateSet;
-use crate::driver::AttackEnvironment;
 use crate::knowledge::TargetKnowledge;
 use crate::models::{AttackKind, AttackRunReport, RunRequest};
 use crate::targets::Target;
 
 pub fn run(
-    env: &AttackEnvironment,
+    ctx: &AttackContext<'_>,
     target: &Target,
     knowledge: &TargetKnowledge,
     request: &RunRequest,
@@ -37,7 +36,7 @@ pub fn run(
     report.target_id = Some(target.patient_pseudo_id.clone());
 
     let counts_are_exact = !request.evaluation_config.uses_dp();
-    let population_obs = env.submit(QueryTemplate::CohortFeasibilityCount, &json!({}))?;
+    let population_obs = ctx.submit(QueryTemplate::CohortFeasibilityCount, &json!({}))?;
     let population = population_from_observation(&population_obs).unwrap_or(1_000);
     let mut candidate_set = CandidateSet::new(population);
     candidate_set.apply_observation(
@@ -57,7 +56,7 @@ pub fn run(
             break;
         }
         let previous_size = candidate_set.size;
-        let observation = env.submit(QueryTemplate::CohortFeasibilityCount, &params)?;
+        let observation = ctx.submit(QueryTemplate::CohortFeasibilityCount, &params)?;
         candidate_set.apply_observation(
             &observation,
             previous_size,
