@@ -1,40 +1,28 @@
-# Three-Node SMPC Runbook
+# Three-Node Runbook
 
-This runbook starts from the normal repository checkout and includes the missing setup steps that the shorter examples assume already happened.
+This walkthrough sets up a three-node SMPC federation on a single machine, from a fresh checkout to a working federated query and value comparison. Each section builds on the previous one, so work through them in order on the first run. Once the databases are built you can skip straight to the startup steps for subsequent runs.
 
-It covers:
-
-- building the workspace
-- confirming the shared `.env` settings
-- generating the split node datasets with `organize`
-- rebuilding all three node databases
-- optionally rebuilding `check-value` prepared baselines
-- starting three local node servers with different SMPC private keys
-- running orchestrator status and a federated query
-- running the full `check-value` comparison
-
-## 1. Build the workspace
-
-Run this once before the first full test:
+## 1. Build
 
 ```bash
 cargo build --release
 ```
 
-If you only want to build the binaries used below:
+To build only the binaries you need for this runbook:
 
 ```bash
-cargo build -p refinery-node --release
-cargo build -p organize --release
-cargo build -p refinery-orchestrator --release
-cargo build -p check-value --release
+cargo build -p refinery-node -p organize -p refinery-orchestrator -p check-value --release
 ```
 
-## 2. Confirm the shared environment
+## 2. Environment
 
-The repository reads `.env` from the project root for both `refinery-node` and `refinery-orchestrator`.
+All binaries read settings from `.env` in the project root. Start from the example:
 
-Make sure `.env` contains the shared settings you want to use, for example:
+```bash
+cp .env.example .env
+```
+
+For a local three-node test, the relevant settings are:
 
 ```dotenv
 REFINERY_NODE_SECRET=secret-key
@@ -43,116 +31,67 @@ REFINERY_MIN_COHORT=25
 REFINERY_TOTAL_BUDGET=10.0
 REFINERY_MIN_PARTICIPATING_NODES=3
 REFINERY_ORCHESTRATOR_DB=data/orchestrator.duckdb
-# optional: set to true to disable ingest-time coarsening for local comparisons
-# REFINERY_DISABLE_DATA_COARSENING=true
 ```
 
-Important:
+Do not set `REFINERY_SMPC_PRIVATE_KEY_HEX` in `.env` when running multiple nodes on one machine. Each node needs a different key and you will override it per process at startup.
 
-- do not use one shared `REFINERY_SMPC_PRIVATE_KEY_HEX` in `.env` when running multiple nodes on one machine
-- each node must get its own `REFINERY_SMPC_PRIVATE_KEY_HEX` override at process start
+The three example keys from `.env.example` work well for local testing:
 
-## 3. Use the three SMPC example keys from `.env.example`
-
-Use one 32-byte hex key per node (same examples as in `.env.example`):
-
-```bash
-# node-a
-af717e5dc57e048a45d733447b3c78383594c86bb4f42ece4926c781a93eeaa6
-# node-b
-eaaf1b46b4a42c495b198ad4ee6b0890fd618ac4b05c04956cb393686a239b58
-# node-c
-df6a8fbb6e9630f4df5ec9c92a11daec093f35bb4385b7eb26f123a39ea0c906
+```
+node-a: af717e5dc57e048a45d733447b3c78383594c86bb4f42ece4926c781a93eeaa6
+node-b: eaaf1b46b4a42c495b198ad4ee6b0890fd618ac4b05c04956cb393686a239b58
+node-c: df6a8fbb6e9630f4df5ec9c92a11daec093f35bb4385b7eb26f123a39ea0c906
 ```
 
-## 4. Recreate the split node datasets
+## 3. Partition the input data
 
-The multi-node flow needs:
-
-- `input/nodes/node-a`
-- `input/nodes/node-b`
-- `input/nodes/node-c`
-
-Generate them from the top-level `input/*.json` files:
+The node setup expects each node to have its own subdirectory under `input/nodes/`. The `organize partition` command splits your flat `input/` directory into exactly that structure. Your FHIR JSON bundle files should be placed directly in `input/` before running this.
 
 ```bash
 cargo run -p organize --release -- partition --nodes 3
 ```
 
-This recreates `input/nodes/` from scratch.
+This creates `input/nodes/node-a`, `input/nodes/node-b`, and `input/nodes/node-c`, distributing files roughly evenly. If you want to start fresh on a subsequent run, just run the command again — it recreates the directories from scratch.
 
-## 5. Optional cleanup of generated databases
+## 4. Build the node databases
 
-If you want a fully fresh rerun, remove previously generated local databases first:
-
-```bash
-rm -f data/node-a.duckdb data/node-b.duckdb data/node-c.duckdb data/orchestrator.duckdb
-rm -rf data/check-baselines
-```
-
-## 6. Rebuild the three node databases
-
-After splitting the raw data, build one DuckDB database per node with `run-pipeline`.
-
-Run these three commands in order:
+Each node gets its own DuckDB database. Build them in sequence:
 
 ```bash
 cargo run -p refinery-node --release -- run-pipeline \
   --db data/node-a.duckdb \
   --input-dir input/nodes/node-a
-```
 
-```bash
 cargo run -p refinery-node --release -- run-pipeline \
   --db data/node-b.duckdb \
   --input-dir input/nodes/node-b
-```
 
-```bash
 cargo run -p refinery-node --release -- run-pipeline \
   --db data/node-c.duckdb \
   --input-dir input/nodes/node-c
 ```
 
-At the end of this step, you should have:
+To wipe and rebuild from scratch:
 
-- `data/node-a.duckdb`
-- `data/node-b.duckdb`
-- `data/node-c.duckdb`
+```bash
+rm -f data/node-a.duckdb data/node-b.duckdb data/node-c.duckdb data/orchestrator.duckdb
+```
 
-## 7. Optional: inspect codes before running queries
+## 5. Inspect the databases (optional)
 
-This can help confirm the generated node databases look reasonable and helps with parameter selection:
+Before running queries it is useful to check what codes landed in each database. This helps with choosing realistic parameter values.
 
 ```bash
 cargo run -p refinery-node --release -- inspect --db data/node-a.duckdb --top 10
 ```
 
-```bash
-cargo run -p refinery-node --release -- inspect --db data/node-b.duckdb --top 10
-```
+The output lists the ten most frequent codes in the condition, medication, and observation fact tables.
 
-```bash
-cargo run -p refinery-node --release -- inspect --db data/node-c.duckdb --top 10
-```
+## 6. Start the three nodes
 
-## 8. Rebuild prepared checker baselines
+Open three separate terminals. Each node must be started with its own SMPC private key.
 
-Run this if you want a fresh `check-value` prepared baseline directory:
-
-```bash
-cargo run -p check-value --release -- prepare \
-  --prepared-dir data/check-baselines \
-  --raw-node node-a=input/nodes/node-a \
-  --raw-node node-b=input/nodes/node-b \
-  --raw-node node-c=input/nodes/node-c
-```
-
-## 9. Start the three nodes
-
-Start each node in its own terminal.
-
-### Terminal 1: node-a
+**Terminal 1 — node-a:**
 
 ```bash
 env REFINERY_SMPC_PRIVATE_KEY_HEX="af717e5dc57e048a45d733447b3c78383594c86bb4f42ece4926c781a93eeaa6" \
@@ -163,7 +102,7 @@ cargo run -p refinery-node --release -- serve \
   --node-id node-a
 ```
 
-### Terminal 2: node-b
+**Terminal 2 — node-b:**
 
 ```bash
 env REFINERY_SMPC_PRIVATE_KEY_HEX="eaaf1b46b4a42c495b198ad4ee6b0890fd618ac4b05c04956cb393686a239b58" \
@@ -174,7 +113,7 @@ cargo run -p refinery-node --release -- serve \
   --node-id node-b
 ```
 
-### Terminal 3: node-c
+**Terminal 3 — node-c:**
 
 ```bash
 env REFINERY_SMPC_PRIVATE_KEY_HEX="df6a8fbb6e9630f4df5ec9c92a11daec093f35bb4385b7eb26f123a39ea0c906" \
@@ -185,9 +124,9 @@ cargo run -p refinery-node --release -- serve \
   --node-id node-c
 ```
 
-## 10. Optional sanity check
+## 7. Verify the nodes are up
 
-This confirms that all three nodes are reachable and advertise SMPC capability metadata:
+In a fourth terminal, check that all three nodes are reachable and advertising SMPC capability:
 
 ```bash
 cargo run -p refinery-orchestrator --release -- status \
@@ -196,15 +135,11 @@ cargo run -p refinery-orchestrator --release -- status \
   --node http://127.0.0.1:50053
 ```
 
-What to look for:
+Each node should show a different `node_id` and a different `smpc_key_fingerprint`. If two fingerprints match, two nodes are sharing the same private key, which will break the SMPC step.
 
-- each node should report a different `node_id`
-- `supported_smpc_protocols` should be non-empty
-- each node should show a different `smpc_key_fingerprint`
+## 8. Run a federated query
 
-If two nodes show the same fingerprint, they are using the same private key.
-
-## 11. Run a federated example query
+With all three nodes running, submit a query through the orchestrator:
 
 ```bash
 cargo run -p refinery-orchestrator --release -- query \
@@ -215,9 +150,43 @@ cargo run -p refinery-orchestrator --release -- query \
   --params-file examples/queries/cohort_feasibility_count/01_all_patients.json
 ```
 
-## 12. Run the full `check-value` comparison
+The orchestrator dispatches the query to each node, aggregates the partial results over SMPC, applies the DP release gate, and prints the result. If the combined cohort is below `REFINERY_MIN_COHORT`, the result is suppressed and you will see a rejection reason instead.
 
-If you ran `prepare`, use the prepared baseline directory:
+All available query parameter examples are in `examples/queries/<template>/`.
+
+## 9. Generate a new query parameter file (optional)
+
+To create a parameter file for a different template:
+
+```bash
+cargo run -p organize --release -- query new --template comparative-effectiveness-delta
+```
+
+This writes a skeleton JSON file with placeholder values into `examples/queries/comparative_effectiveness_delta/`. Edit the placeholders with codes from your dataset (use `inspect` to find them) and pass it to the orchestrator with `--params-file`.
+
+To see all available templates:
+
+```bash
+cargo run -p organize --release -- query list-templates
+```
+
+## 10. Prepare baselines for check-value
+
+`check-value` needs access to the raw data to compute baselines. The `prepare` command builds and caches these ahead of time so comparisons are fast.
+
+```bash
+cargo run -p check-value --release -- prepare \
+  --prepared-dir data/check-baselines \
+  --raw-node node-a=input/nodes/node-a \
+  --raw-node node-b=input/nodes/node-b \
+  --raw-node node-c=input/nodes/node-c
+```
+
+You only need to re-run `prepare` if the input data changes.
+
+## 11. Run a value comparison
+
+With the nodes still running and baselines prepared, compare the live federated result against the raw-data baseline:
 
 ```bash
 cargo run -p check-value --release -- compare \
@@ -231,7 +200,11 @@ cargo run -p check-value --release -- compare \
   --dp-seed 42
 ```
 
-If you did not run `prepare`, compare directly against the raw split folders:
+`--mode full` runs all three comparison checks: SMPC parity (does the SMPC result match an exact aggregate?), coarsening distortion (how much does ingest-time coarsening shift the result?), and final release utility (does the DP-released result preserve the analytic conclusion?).
+
+Use `--dp-seed` to make the DP noise deterministic, which is useful when comparing runs. For a production-like evaluation, omit it.
+
+If you did not run `prepare`, you can pass the raw node paths directly instead:
 
 ```bash
 cargo run -p check-value --release -- compare \
@@ -247,12 +220,30 @@ cargo run -p check-value --release -- compare \
   --dp-seed 42
 ```
 
-## Notes
+## 12. Run comparisons for all templates
 
-- `check-value --mode full` runs:
-  - `smpc_parity`
-  - `coarsening_distortion`
-  - `final_release_utility`
-- the checker reads privacy settings from the same environment configuration as the orchestrator
-- each node must use a different `REFINERY_SMPC_PRIVATE_KEY_HEX`
-- `input` must contain the canonical source JSON files directly at its top level before running `organize partition`
+There is a parameter file for each template under `examples/queries/`. Swap the `--template` and `--params-file` arguments to compare any of them. For example:
+
+```bash
+cargo run -p check-value --release -- compare \
+  --template comparative-effectiveness-delta \
+  --params-file examples/queries/comparative_effectiveness_delta/01_bp_adults_308136_vs_106892.json \
+  --node http://127.0.0.1:50051 \
+  --node http://127.0.0.1:50052 \
+  --node http://127.0.0.1:50053 \
+  --prepared-dir data/check-baselines \
+  --mode full \
+  --dp-seed 42
+```
+
+To run all parameter files for a template at once, use `check-value batch --queries-dir examples/queries/<template>`.
+
+## 13. Browse the databases (optional)
+
+To inspect the DuckDB files through a browser interface:
+
+```bash
+cargo run -p database-view --release
+```
+
+This starts a read-only web server at `http://127.0.0.1:8080` by default.
